@@ -482,11 +482,14 @@ export class Workbench {
   switchReaderPane(fromSourceId: SourceId, toSourceId: SourceId): void {
     const idx = this.openSourceIds.indexOf(fromSourceId);
     if (idx < 0) return;
-    if (this.openSourceIds.includes(toSourceId) && this.openSourceIds[idx] !== toSourceId) {
-      // Avoid duplicating a paper into two panes: just replace in place.
-    }
+    if (toSourceId === fromSourceId) return;
     const next = this.openSourceIds.slice();
     next[idx] = toSourceId;
+    // Avoid duplicating one paper into two panes: if the target was already
+    // open in a different pane, drop that other occurrence so the swap replaces
+    // in place rather than showing the same source twice.
+    const dupAt = next.indexOf(toSourceId);
+    if (dupAt !== idx && dupAt !== -1) next.splice(dupAt, 1);
     this.openSourceIds = next;
     // Carry the old pane's width weight onto the new source slot so the layout
     // configuration is preserved across the swap (R19).
