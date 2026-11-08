@@ -42,6 +42,7 @@ import type {
   RelationshipId,
   RevisionId,
   SourceId,
+  SubjectAssociationId,
   TentativeAssociationId,
 } from "./ids";
 
@@ -121,6 +122,12 @@ export interface Source {
   readonly versionHash: SourceVersionHash;
   readonly pageCount: number;
   readonly importedAt: Timestamp;
+  /**
+   * Optional free-form library category used only to ORGANIZE the source list
+   * (spec section 5). It is a label on the source, never a Category record and
+   * never a Page — importing or categorizing a source creates no graph content.
+   */
+  readonly category: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -167,6 +174,34 @@ export interface EvidenceInstance {
   readonly destinationPageId: PageId;
   /** Snapshot of the quoted text at insertion time. */
   readonly quotedText: string;
+  readonly createdAt: Timestamp;
+}
+
+// ---------------------------------------------------------------------------
+// Subject association (spec section 6 table, 4.2) — reader-side tentative link
+// ---------------------------------------------------------------------------
+
+/**
+ * A SubjectAssociation is a TENTATIVE, reader-declared link from a source
+ * Annotation to a destination subject Page (spec section 6 "Associate with
+ * subject..."). It is DOTTED: it records intent without composing the page.
+ *
+ * It is deliberately distinct from an EvidenceInstance. An EvidenceInstance is
+ * provenance-bearing (a real quote inserted into the page) and makes the pair
+ * "cited" (solid). A SubjectAssociation carries no provenance and only makes a
+ * pair "tentative" (dotted) when no evidence exists for that same pair.
+ *
+ * The citation status for an (annotation, destinationPage) pair is DERIVED from
+ * the live sets of EvidenceInstances + SubjectAssociations (see citation.ts);
+ * it is never a stored boolean. Removing one quote must not demote a pair that
+ * still has another citing quote. An annotation may be tentatively associated
+ * with a second subject while the first stays solid — each pair is independent.
+ */
+export interface SubjectAssociation {
+  readonly id: SubjectAssociationId;
+  readonly annotationId: AnnotationId;
+  /** The subject page this annotation is tentatively associated with. */
+  readonly destinationPageId: PageId;
   readonly createdAt: Timestamp;
 }
 
@@ -292,6 +327,7 @@ export interface BrainData {
   readonly sources: readonly Source[];
   readonly annotations: readonly Annotation[];
   readonly evidenceInstances: readonly EvidenceInstance[];
+  readonly subjectAssociations: readonly SubjectAssociation[];
   readonly pages: readonly Page[];
   readonly categories: readonly Category[];
   readonly relationships: readonly Relationship[];

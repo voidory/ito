@@ -13,3 +13,4 @@ export const SCHEMA_VERSION = 1 as const;
 export * from "./ids";
 export * from "./types";
 export * from "./citation";
+export * from "./brain";
