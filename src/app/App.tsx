@@ -124,6 +124,7 @@ export function App(): JSX.Element {
           <Reader
             wb={wb}
             openSourceIds={state.openSourceIds}
+            openSubjectPageId={state.openSubjectPageId}
             suppressMotion={state.suppressMotion}
             highlightsTabOpen={state.highlightsTabOpen}
             onToggleTab={onToggleTab}

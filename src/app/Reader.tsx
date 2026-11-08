@@ -4,10 +4,11 @@ import {
   loadDocument,
   renderHighlightOverlay,
   renderPage,
+  resolveAnchor,
   type RenderedPage,
 } from "../pdf";
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import type { AnnotationId, PageId, SourceId, TextAnchor } from "../model";
+import type { AnchorResolution, AnnotationId, PageId, SourceId, TextAnchor } from "../model";
 import {
   HIGHLIGHT_COLORS,
   type AnnotationStyle,
@@ -15,6 +16,17 @@ import {
   type HighlightColor,
   type Workbench,
 } from "./workbench";
+import { SubjectEditor } from "./SubjectEditor";
+
+/** A pending source-return request (spec section 8.2, A17). */
+interface ReturnTarget {
+  readonly sourceId: SourceId;
+  readonly anchor: TextAnchor | null;
+  readonly pageIndex: number;
+  readonly resolution: AnchorResolution;
+  /** Monotonic nonce so repeat returns to the same quote re-trigger the scroll. */
+  readonly nonce: number;
+}
 
 /**
  * The reading workbench (spec section 6). Renders one or more open documents
@@ -27,6 +39,7 @@ import {
 export function Reader({
   wb,
   openSourceIds,
+  openSubjectPageId,
   suppressMotion,
   highlightsTabOpen,
   onToggleTab,
@@ -36,6 +49,7 @@ export function Reader({
 }: {
   wb: Workbench;
   openSourceIds: readonly SourceId[];
+  openSubjectPageId: PageId | null;
   suppressMotion: boolean;
   highlightsTabOpen: boolean;
   onToggleTab: (open: boolean) => void;
@@ -44,6 +58,56 @@ export function Reader({
   bump: () => void;
 }): JSX.Element {
   const together = openSourceIds.length > 1;
+  const [returnTarget, setReturnTarget] = useState<ReturnTarget | null>(null);
+  const [returnNotice, setReturnNotice] = useState<string | null>(null);
+  const nonceRef = useRef(0);
+
+  // Source-return (A17): resolve the evidence's live source WITHOUT closing the
+  // subject page. A changed/missing version produces an explicit notice and
+  // never navigates to unrelated content.
+  const followSource = useCallback(
+    (evidenceId: string) => {
+      const resolved = wb.resolveEvidenceSource(evidenceId);
+      if (!resolved) return;
+      nonceRef.current += 1;
+      if (resolved.resolution.kind !== "resolved") {
+        setReturnNotice(
+          resolved.resolution.kind === "mismatched"
+            ? "The source version changed since this quote was captured; the exact passage could not be located."
+            : `The source passage is unavailable: ${resolved.resolution.reason}.`,
+        );
+        setReturnTarget({
+          sourceId: resolved.sourceId,
+          anchor: resolved.anchor,
+          pageIndex: resolved.anchor?.pageIndex ?? resolved.scopeStartPageIndex,
+          resolution: resolved.resolution,
+          nonce: nonceRef.current,
+        });
+        return;
+      }
+      setReturnNotice(null);
+      setReturnTarget({
+        sourceId: resolved.sourceId,
+        anchor: resolved.anchor,
+        pageIndex: resolved.anchor?.pageIndex ?? resolved.scopeStartPageIndex,
+        resolution: resolved.resolution,
+        nonce: nonceRef.current,
+      });
+    },
+    [wb],
+  );
+
+  // Make sure the source the quote points at is actually open; if it is not in
+  // the current workspace, open it alongside (still never replaces the subject).
+  useEffect(() => {
+    if (returnTarget && !openSourceIds.includes(returnTarget.sourceId)) {
+      wb.openSource(returnTarget.sourceId);
+      bump();
+    }
+  }, [returnTarget, openSourceIds, wb, bump]);
+
+  const subjectOpen = openSubjectPageId != null;
+
   return (
     <div data-testid="reader" data-view="reader" style={styles.root}>
       <header style={styles.toolbar}>
@@ -75,9 +139,24 @@ export function Reader({
         </span>
       </header>
 
+      {returnNotice && (
+        <div data-testid="source-return-notice" role="alert" style={styles.returnNotice}>
+          {returnNotice}
+          <button
+            data-testid="dismiss-return-notice"
+            aria-label="Dismiss"
+            onClick={() => setReturnNotice(null)}
+            style={{ marginLeft: "0.5rem" }}
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       <div
         data-testid="reader-body"
         data-tab-open={highlightsTabOpen ? "true" : "false"}
+        data-subject-open={subjectOpen ? "true" : "false"}
         style={styles.body}
       >
         <main
@@ -85,9 +164,10 @@ export function Reader({
           data-together={together ? "true" : "false"}
           style={{
             ...styles.main,
-            // Closed tab = centred + expanded reading column.
-            maxWidth: highlightsTabOpen ? "none" : "60rem",
-            margin: highlightsTabOpen ? "0" : "0 auto",
+            // Closed tab = centred + expanded reading column (only when no
+            // subject page shares the workspace).
+            maxWidth: highlightsTabOpen || subjectOpen ? "none" : "60rem",
+            margin: highlightsTabOpen || subjectOpen ? "0" : "0 auto",
           }}
         >
           {openSourceIds.map((sourceId) => (
@@ -96,10 +176,28 @@ export function Reader({
               wb={wb}
               sourceId={sourceId}
               suppressMotion={suppressMotion}
+              returnTarget={
+                returnTarget && returnTarget.sourceId === sourceId ? returnTarget : null
+              }
               bump={bump}
             />
           ))}
         </main>
+
+        {/* Subject editor sits ALONGSIDE the reader; source-return never
+            closes or replaces it (A17). */}
+        {subjectOpen && (
+          <SubjectEditor
+            wb={wb}
+            pageId={openSubjectPageId!}
+            onFollowSource={followSource}
+            onClose={() => {
+              wb.closeSubjectPage();
+              bump();
+            }}
+            bump={bump}
+          />
+        )}
 
         {/* Closed tab reserves ZERO width: the aside is not rendered at all. */}
         {highlightsTabOpen && (
@@ -128,11 +226,13 @@ function SourcePane({
   wb,
   sourceId,
   suppressMotion,
+  returnTarget,
   bump,
 }: {
   wb: Workbench;
   sourceId: SourceId;
   suppressMotion: boolean;
+  returnTarget: ReturnTarget | null;
   bump: () => void;
 }): JSX.Element {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -191,6 +291,58 @@ function SourcePane({
   useEffect(() => {
     if (ready) redrawOverlays();
   }, [ready, redrawOverlays]);
+
+  // Source-return: scroll this pane to the exact passage and flash a transient
+  // overlay re-derived from the live render (A17, spec section 8.2). For an
+  // unresolved/mismatched return we still scroll to the recorded page but draw
+  // NO fake highlight and leave the explicit notice (shown by the Reader) in
+  // place — never a silent navigation to unrelated content.
+  useEffect(() => {
+    if (!ready || !returnTarget) return;
+    const source = wb.rawData().sources.find((s) => s.id === sourceId);
+    if (!source) return;
+    const page = pagesRef.current.find(
+      (p) => Number(p.container.dataset.pageIndex ?? "-1") === returnTarget.pageIndex,
+    );
+    if (!page) return;
+    page.textLayer.querySelectorAll(".ito-return").forEach((el) => el.remove());
+    page.container.scrollIntoView({
+      behavior: suppressMotion ? "auto" : "smooth",
+      block: "center",
+    });
+    page.container.setAttribute("data-return-target", "true");
+
+    if (returnTarget.resolution.kind === "resolved" && returnTarget.anchor) {
+      const resolved = resolveAnchor({
+        anchor: returnTarget.anchor,
+        currentVersionHash: source.versionHash,
+        pageText: page.pageText,
+        pageBox: page.pageBox(),
+        rangeToClientRects: (s, e) => page.rangeToClientRects(s, e),
+      });
+      page.container.setAttribute("data-return-resolution", resolved.resolution.kind);
+      if (resolved.resolution.kind === "resolved") {
+        for (const r of resolved.rects) {
+          const el = document.createElement("div");
+          el.className = "ito-return";
+          Object.assign(el.style, {
+            position: "absolute",
+            left: `${r.x * 100}%`,
+            top: `${r.y * 100}%`,
+            width: `${r.width * 100}%`,
+            height: `${r.height * 100}%`,
+            background: "rgba(26,86,219,0.25)",
+            outline: "2px solid #1a56db",
+            borderRadius: "3px",
+            pointerEvents: "none",
+          } satisfies Partial<CSSStyleDeclaration>);
+          page.textLayer.appendChild(el);
+        }
+      }
+    } else {
+      page.container.setAttribute("data-return-resolution", returnTarget.resolution.kind);
+    }
+  }, [ready, returnTarget, wb, sourceId, suppressMotion]);
 
   // Capture a text selection inside this pane's text layers → portable anchor.
   const onMouseUp = useCallback(() => {
@@ -508,6 +660,8 @@ function AssociationMenu({
   bump: () => void;
 }): JSX.Element {
   const [picking, setPicking] = useState<null | "associate" | "insert">(null);
+  const [creating, setCreating] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
   const [query, setQuery] = useState("");
   const pages = wb.rawData().pages.filter((p) => p.kind === "subject");
   const matches = pages.filter((p) =>
@@ -520,12 +674,18 @@ function AssociationMenu({
     onClose();
   };
   const doInsert = async (pageId: PageId): Promise<void> => {
-    const view = wb.viewFor(menu.annotationId);
-    const quote =
-      view?.annotation.scope.kind === "text"
-        ? view.annotation.scope.anchor.selectedText
-        : (view?.rangeLabel ?? "range");
-    await wb.insertEvidence(menu.annotationId, pageId, quote);
+    await wb.insertEvidenceIntoPage(menu.annotationId, pageId, { pos: null });
+    // Open the subject for composition so the quote is visible in context.
+    wb.openSubjectPage(pageId);
+    bump();
+    onClose();
+  };
+  // DELIBERATE subject creation from the selected evidence (spec section 4.2).
+  const doCreate = async (): Promise<void> => {
+    const title = newTitle.trim();
+    if (!title) return;
+    const { page } = await wb.createSubjectFromAnnotation(title, menu.annotationId);
+    wb.openSubjectPage(page.id);
     bump();
     onClose();
   };
@@ -537,8 +697,15 @@ function AssociationMenu({
       aria-label="Annotation actions"
       style={{ ...styles.floating, left: menu.x, top: menu.y + window.scrollY }}
     >
-      {!picking && (
+      {!picking && !creating && (
         <>
+          <button
+            data-testid="menu-create-subject"
+            role="menuitem"
+            onClick={() => setCreating(true)}
+          >
+            Create new subject from this…
+          </button>
           <button
             data-testid="menu-associate"
             role="menuitem"
@@ -557,6 +724,24 @@ function AssociationMenu({
             Cancel
           </button>
         </>
+      )}
+      {creating && (
+        <div data-testid="create-subject">
+          <input
+            data-testid="new-subject-title"
+            autoFocus
+            placeholder="New subject title…"
+            value={newTitle}
+            onChange={(e) => setNewTitle(e.target.value)}
+            aria-label="New subject title"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void doCreate();
+            }}
+          />
+          <button data-testid="create-subject-confirm" onClick={() => void doCreate()}>
+            Create and cite
+          </button>
+        </div>
       )}
       {picking && (
         <div data-testid="subject-picker">
@@ -837,5 +1022,12 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#fff",
     borderRadius: "4px",
     padding: "0 0.3rem",
+  },
+  returnNotice: {
+    padding: "0.5rem 1rem",
+    background: "#fff4e5",
+    borderBottom: "1px solid #f0c38a",
+    color: "#7a4b00",
+    fontSize: "0.85rem",
   },
 };

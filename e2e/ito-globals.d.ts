@@ -12,8 +12,23 @@ interface ItoTestApi {
   annotationCount(sourceId?: string): number;
   referenceStatus(annotationId: string, destinationPageId: string): string;
   createSubject(title: string): Promise<string>;
+  openSubject(pageId: string): void;
+  openSubjectId(): string | null;
+  subjectOutline(pageId: string): string[];
+  subjectEvidenceOrder(pageId: string): string[];
+  firstAnnotationId(): string | null;
+  subjectStats(pageId: string): {
+    blockCount: number;
+    paragraphCount: number;
+    headingCount: number;
+    quoteCount: number;
+    sourceCount: number;
+  };
+  pageEvidenceCount(pageId: string): number;
+  evidenceResolution(evidenceId: string): string;
   graphRecordCount(): { pages: number; relationships: number; categories: number };
   forceNextSaveFailures(count: number): void;
+  forceSourceVersionDrift(sourceId: string): Promise<void>;
   counts(): {
     sources: number;
     annotations: number;

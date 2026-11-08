@@ -26,6 +26,7 @@ import {
   newSubjectAssociationId,
   type Annotation,
   type AnnotationId,
+  type AnchorResolution,
   type BrainData,
   type BrainId,
   type Capture,
@@ -41,7 +42,25 @@ import {
   type SubjectReferenceStatus,
   type TextAnchor,
 } from "../model";
+import {
+  appendEvidence,
+  compositionStats,
+  findEvidencePos,
+  hydrateState,
+  insertEvidenceAt,
+  moveBlock,
+  removeEvidenceNode,
+  serializeState,
+  type CompositionStats,
+  type DocumentJson,
+  type EvidenceAttrs,
+} from "../editor";
 import type { StorageAdapter } from "../storage";
+
+/** An empty subject-page composition: one empty paragraph (never null). */
+function emptyDocJson(): DocumentJson {
+  return { type: "doc", content: [{ type: "paragraph" }] };
+}
 
 /** The highlight style an annotation is committed with. */
 export type HighlightStyle = "highlight" | "underline";
@@ -138,6 +157,12 @@ export interface WorkbenchState {
   readonly pages: readonly Page[];
   /** Source ids currently open in the reading workspace (1 = single, 2+ = together). */
   readonly openSourceIds: readonly SourceId[];
+  /**
+   * The subject page currently open for composition, if any. A subject page can
+   * be open ALONGSIDE the reader (source-return never replaces it). null = no
+   * subject page open.
+   */
+  readonly openSubjectPageId: PageId | null;
   /** Whether the highlights tab (sidebar) is open; closed reserves ZERO width. */
   readonly highlightsTabOpen: boolean;
   /** Global suppress-motion setting (in-app, independent of OS media query). */
@@ -171,6 +196,7 @@ export class Workbench {
   private data: BrainData;
   private styles: Map<AnnotationId, AnnotationStyle>;
   private openSourceIds: SourceId[] = [];
+  private openSubjectPageId: PageId | null = null;
   private highlightsTabOpen = false;
   private suppressMotion = false;
   private saveError: SaveError | null = null;
@@ -213,6 +239,7 @@ export class Workbench {
       sources: this.data.sources,
       pages: this.data.pages,
       openSourceIds: [...this.openSourceIds],
+      openSubjectPageId: this.openSubjectPageId,
       highlightsTabOpen: this.highlightsTabOpen,
       suppressMotion: this.suppressMotion,
       saveError: this.saveError,
@@ -314,6 +341,17 @@ export class Workbench {
 
   closeWorkspace(): void {
     this.openSourceIds = [];
+    this.openSubjectPageId = null;
+  }
+
+  /** Open a subject page for composition. Does NOT close any open source. */
+  openSubjectPage(pageId: PageId): void {
+    this.openSubjectPageId = pageId;
+  }
+
+  /** Close the open subject page, leaving any open source reader in place. */
+  closeSubjectPage(): void {
+    this.openSubjectPageId = null;
   }
 
   // -- highlights tab / motion ---------------------------------------------
@@ -330,6 +368,21 @@ export class Workbench {
   /** Test-only: force the next `count` persist() calls to fail (R12 path). */
   forceNextSaveFailures(count: number): void {
     this.failNextSaves = count;
+  }
+
+  /**
+   * Test-only: simulate a source EDITION change by mutating a source's stored
+   * version hash. Existing annotations keep their original anchor hash, so
+   * source-return must then report an explicit `mismatched` state (A17). This
+   * exercises the real resolution path without needing a second fixture build.
+   */
+  async forceSourceVersionDrift(sourceId: SourceId): Promise<void> {
+    const idx = this.data.sources.findIndex((s) => s.id === sourceId);
+    if (idx < 0) return;
+    const sources = this.data.sources.slice();
+    sources[idx] = { ...sources[idx]!, versionHash: `${sources[idx]!.versionHash}-DRIFTED` };
+    this.data = { ...this.data, sources };
+    await this.persist();
   }
 
   // -- annotations ----------------------------------------------------------
@@ -435,9 +488,9 @@ export class Workbench {
   // -- subject pages + association/citation state machine -------------------
 
   /**
-   * Create a subject page. (In FEAT-003 subjects exist only as association
-   * targets; FEAT-004 owns real composition.) Creating a subject is an
-   * explicit user action and is NOT triggered by annotating.
+   * Create a subject page with an EMPTY composition. Creating a subject is an
+   * explicit user action and is NEVER triggered by importing or annotating. A
+   * subject page requires NO notebook/folder/parent (spec section 3).
    */
   async createSubjectPage(title: string): Promise<Page> {
     const now = new Date().toISOString();
@@ -445,13 +498,267 @@ export class Workbench {
       id: newPageId(),
       kind: "subject",
       title,
-      documentJson: { type: "doc", content: [{ type: "paragraph" }] },
+      documentJson: emptyDocJson(),
       createdAt: now,
       updatedAt: now,
     };
     this.data = { ...this.data, pages: [...this.data.pages, page] };
     await this.persist();
     return page;
+  }
+
+  /**
+   * DELIBERATE subject creation from selected source evidence (spec section
+   * 4.2): the user explicitly turns an annotation into a new subject Page whose
+   * composition OPENS with that evidence already cited. This is the only way a
+   * subject is born from reading; nothing auto-creates it.
+   *
+   * The created page's document contains the typed evidence node (so the quote
+   * is really composed in) and a provenance-bearing EvidenceInstance is
+   * recorded, so the (annotation, page) pair derives straight to SOLID — a
+   * direct deliberate citation may go source-local -> solid with no prior
+   * tentative association (R06).
+   */
+  async createSubjectFromAnnotation(
+    title: string,
+    annotationId: AnnotationId,
+    opts: { includeComment?: boolean } = {},
+  ): Promise<{ page: Page; evidence: EvidenceInstance }> {
+    const page = await this.createSubjectPage(title);
+    const evidence = await this.insertEvidenceIntoPage(annotationId, page.id, {
+      pos: null,
+      includeComment: opts.includeComment ?? false,
+    });
+    return { page, evidence };
+  }
+
+  /** The stored ProseMirror document JSON for a subject page (source of truth). */
+  subjectDocJson(pageId: PageId): DocumentJson {
+    const page = this.data.pages.find((p) => p.id === pageId);
+    if (!page) throw new Error("subjectDocJson: unknown page");
+    return (page.documentJson as DocumentJson) ?? emptyDocJson();
+  }
+
+  /**
+   * Persist a subject page's composition from structured document JSON. The
+   * JSON is the durable source of truth (NOT the editor HTML/DOM); it is
+   * re-hydrated + re-serialized here so a malformed doc is rejected and so the
+   * stored value is canonical for byte-equivalent round-trips (R14).
+   */
+  async saveSubjectDoc(pageId: PageId, json: DocumentJson): Promise<void> {
+    const idx = this.data.pages.findIndex((p) => p.id === pageId);
+    if (idx < 0) throw new Error("saveSubjectDoc: unknown page");
+    const canonical = serializeState(hydrateState(json));
+    const prev = this.data.pages[idx]!;
+    const updated: Page = {
+      ...prev,
+      documentJson: canonical,
+      updatedAt: new Date().toISOString(),
+    };
+    const pages = this.data.pages.slice();
+    pages[idx] = updated;
+    this.data = { ...this.data, pages };
+    await this.persist();
+  }
+
+  /**
+   * Build the typed evidence-node attrs for an annotation. The quoted-text
+   * snapshot + portable anchor are captured at insertion time so the quote
+   * renders without resolving the live source, and source-return can re-resolve
+   * on demand. Range annotations carry their pp. label as the snapshot.
+   */
+  private evidenceAttrsFor(
+    annotation: Annotation,
+    evidenceId: EvidenceInstance["id"],
+    mode: "live" | "copy",
+  ): EvidenceAttrs {
+    if (annotation.scope.kind === "text") {
+      return {
+        evidenceId,
+        sourceId: annotation.sourceId,
+        annotationId: annotation.id,
+        quotedText: annotation.scope.anchor.selectedText,
+        anchor: annotation.scope.anchor,
+        mode,
+      };
+    }
+    // Range annotation: synthesize a minimal text anchor so the node's attr
+    // shape is uniform. Source-return for a range navigates to its first page.
+    const a = annotation.scope.anchor;
+    const synthetic: TextAnchor = {
+      docId: a.docId,
+      sourceVersionHash: a.sourceVersionHash,
+      pageIndex: a.startPageIndex,
+      rects: [],
+      selectedText: `pp. ${a.startPageIndex + 1}-${a.endPageIndex + 1}`,
+      prefix: "",
+      suffix: "",
+    };
+    return {
+      evidenceId,
+      sourceId: annotation.sourceId,
+      annotationId: annotation.id,
+      quotedText: synthetic.selectedText,
+      anchor: synthetic,
+      mode,
+    };
+  }
+
+  /**
+   * Insert a provenance-bearing quote for an annotation into a subject page at
+   * an explicit position (DOTTED -> SOLID; or source-local -> SOLID for a
+   * direct citation with no prior association). This does TWO things atomically:
+   *
+   *  1. inserts a typed `evidence` node into the page's ProseMirror document at
+   *     `pos` (or the end when `pos` is null), the composition side; and
+   *  2. records an EvidenceInstance so the (annotation, page) pair derives as
+   *     "cited".
+   *
+   * The source annotation is never moved or deleted (R06). Multiple quotes may
+   * cite one pair; removing one must not demote the pair while another remains.
+   * Optionally the annotation's comment is copied in, CLEARLY marked as copied
+   * and appended after the quote so it never overwrites page writing (4.3).
+   */
+  async insertEvidenceIntoPage(
+    annotationId: AnnotationId,
+    destinationPageId: PageId,
+    opts: { pos?: number | null; includeComment?: boolean; mode?: "live" | "copy" } = {},
+  ): Promise<EvidenceInstance> {
+    const annotation = this.data.annotations.find((a) => a.id === annotationId);
+    if (!annotation) throw new Error("insertEvidenceIntoPage: unknown annotation");
+    const pageIdx = this.data.pages.findIndex((p) => p.id === destinationPageId);
+    if (pageIdx < 0) throw new Error("insertEvidenceIntoPage: unknown page");
+
+    const evidence: EvidenceInstance = {
+      id: newEvidenceInstanceId(),
+      annotationId,
+      destinationPageId,
+      quotedText:
+        annotation.scope.kind === "text"
+          ? annotation.scope.anchor.selectedText
+          : `pp. ${annotation.scope.anchor.startPageIndex + 1}-${
+              annotation.scope.anchor.endPageIndex + 1
+            }`,
+      createdAt: new Date().toISOString(),
+    };
+
+    const attrs = this.evidenceAttrsFor(annotation, evidence.id, opts.mode ?? "live");
+    const page = this.data.pages[pageIdx]!;
+    const state = hydrateState((page.documentJson as DocumentJson) ?? emptyDocJson());
+    const insertOptions = {
+      attrs,
+      copiedComment: opts.includeComment ? annotation.comment : null,
+    };
+    const next =
+      opts.pos == null
+        ? appendEvidence(state, insertOptions)
+        : insertEvidenceAt(state, opts.pos, insertOptions);
+
+    const updatedPage: Page = {
+      ...page,
+      documentJson: serializeState(next),
+      updatedAt: new Date().toISOString(),
+    };
+    const pages = this.data.pages.slice();
+    pages[pageIdx] = updatedPage;
+    this.data = {
+      ...this.data,
+      pages,
+      evidenceInstances: [...this.data.evidenceInstances, evidence],
+    };
+    await this.persist();
+    return evidence;
+  }
+
+  /**
+   * Move a top-level block within a subject page's composition from index
+   * `from` to index `to`, preserving order, formatting, quote identities and
+   * links (A04). Re-derives + persists the canonical JSON.
+   */
+  async moveSubjectBlock(pageId: PageId, from: number, to: number): Promise<void> {
+    const page = this.data.pages.find((p) => p.id === pageId);
+    if (!page) throw new Error("moveSubjectBlock: unknown page");
+    const state = hydrateState((page.documentJson as DocumentJson) ?? emptyDocJson());
+    const next = moveBlock(state, from, to);
+    await this.saveSubjectDoc(pageId, serializeState(next));
+  }
+
+  /**
+   * Resolve the live source passage for one evidence instance (source-return,
+   * spec section 8.2, A17). Returns the owning annotation's current anchor and a
+   * resolution: a changed/missing source version yields an explicit
+   * `mismatched`/`unresolved` state, NEVER a silent navigation to unrelated
+   * content. Following a quote does not close or replace the subject page.
+   */
+  resolveEvidenceSource(evidenceId: string):
+    | {
+        readonly sourceId: SourceId;
+        readonly anchor: TextAnchor | null;
+        readonly scopeStartPageIndex: number;
+        readonly resolution: AnchorResolution;
+      }
+    | null {
+    const evidence = this.data.evidenceInstances.find((e) => e.id === evidenceId);
+    if (!evidence) return null;
+    const annotation = this.data.annotations.find((a) => a.id === evidence.annotationId);
+    if (!annotation) {
+      return {
+        sourceId: evidence.annotationId as unknown as SourceId,
+        anchor: null,
+        scopeStartPageIndex: 0,
+        resolution: { kind: "unresolved", reason: "source annotation no longer exists" },
+      };
+    }
+    const source = this.data.sources.find((s) => s.id === annotation.sourceId);
+    if (!source) {
+      return {
+        sourceId: annotation.sourceId,
+        anchor: null,
+        scopeStartPageIndex: 0,
+        resolution: { kind: "unresolved", reason: "source document not available" },
+      };
+    }
+    const expectedHash =
+      annotation.scope.kind === "text"
+        ? annotation.scope.anchor.sourceVersionHash
+        : annotation.scope.anchor.sourceVersionHash;
+    if (expectedHash !== source.versionHash) {
+      return {
+        sourceId: annotation.sourceId,
+        anchor: annotation.scope.kind === "text" ? annotation.scope.anchor : null,
+        scopeStartPageIndex:
+          annotation.scope.kind === "pages" ? annotation.scope.anchor.startPageIndex : 0,
+        resolution: {
+          kind: "mismatched",
+          reason: "source version changed since the quote was captured",
+          expectedVersionHash: expectedHash,
+          actualVersionHash: source.versionHash,
+        },
+      };
+    }
+    return {
+      sourceId: annotation.sourceId,
+      anchor: annotation.scope.kind === "text" ? annotation.scope.anchor : null,
+      scopeStartPageIndex:
+        annotation.scope.kind === "pages" ? annotation.scope.anchor.startPageIndex : 0,
+      resolution: { kind: "resolved" },
+    };
+  }
+
+  /** Structural details for a subject page's composition (section 9, A07). */
+  compositionStatsForPage(pageId: PageId): CompositionStats {
+    const page = this.data.pages.find((p) => p.id === pageId);
+    if (!page) throw new Error("compositionStatsForPage: unknown page");
+    const state = hydrateState((page.documentJson as DocumentJson) ?? emptyDocJson());
+    return compositionStats(state.doc);
+  }
+
+  /** Find the document position of an evidence node within a subject page. */
+  evidencePosInPage(pageId: PageId, evidenceId: string): number | null {
+    const page = this.data.pages.find((p) => p.id === pageId);
+    if (!page) return null;
+    const state = hydrateState((page.documentJson as DocumentJson) ?? emptyDocJson());
+    return findEvidencePos(state.doc, evidenceId);
   }
 
   /**
@@ -481,7 +788,7 @@ export class Workbench {
     return assoc;
   }
 
-  /** Remove a tentative association for a pair (dotted → none if no evidence). */
+  /** Remove a tentative association for a pair (dotted -> none if no evidence). */
   async removeAssociation(
     annotationId: AnnotationId,
     destinationPageId: PageId,
@@ -497,17 +804,22 @@ export class Workbench {
   }
 
   /**
-   * Insert a provenance-bearing quote for an annotation into a subject page
-   * (DOTTED → SOLID). FEAT-004 owns the real ProseMirror insertion; here we
-   * record the EvidenceInstance that makes the pair derive as "cited". Multiple
-   * quotes may exist for one pair; removing one must not demote the pair while
-   * another remains.
+   * Legacy direct-citation entry (FEAT-003 path): record an EvidenceInstance
+   * for a pair WITHOUT composing the page document. FEAT-004's real insertion
+   * is `insertEvidenceIntoPage`; this remains for the reader's quick
+   * "Insert into subject page..." action against a not-yet-open page and for
+   * the derived-status tests. The pair derives as "cited".
    */
   async insertEvidence(
     annotationId: AnnotationId,
     destinationPageId: PageId,
     quotedText: string,
   ): Promise<EvidenceInstance> {
+    // If the page exists, compose the quote into its document too so the model
+    // and composition never drift; otherwise just record the instance.
+    if (this.data.pages.some((p) => p.id === destinationPageId)) {
+      return this.insertEvidenceIntoPage(annotationId, destinationPageId, { pos: null });
+    }
     const evidence: EvidenceInstance = {
       id: newEvidenceInstanceId(),
       annotationId,
@@ -524,14 +836,33 @@ export class Workbench {
   }
 
   /**
-   * Remove one evidence instance. The pair's status is RE-DERIVED: it stays
-   * "cited" while another quote remains, otherwise falls back per the
-   * last-citation policy (ADR-0007: revert-to-tentative if an association
-   * exists, else none).
+   * Remove one evidence instance AND its node from the destination page's
+   * composition. The pair's status is RE-DERIVED: it stays "cited" while
+   * another quote remains, otherwise reverts to "tentative" if an association
+   * exists, else "none" (ADR-0007).
    */
   async removeEvidence(evidenceId: string): Promise<void> {
+    const evidence = this.data.evidenceInstances.find((e) => e.id === evidenceId);
+    let pages: readonly Page[] = this.data.pages;
+    if (evidence) {
+      const pageIdx = this.data.pages.findIndex((p) => p.id === evidence.destinationPageId);
+      if (pageIdx >= 0) {
+        const page = this.data.pages[pageIdx]!;
+        const state = hydrateState((page.documentJson as DocumentJson) ?? emptyDocJson());
+        const next = removeEvidenceNode(state, evidenceId);
+        const updated: Page = {
+          ...page,
+          documentJson: serializeState(next),
+          updatedAt: new Date().toISOString(),
+        };
+        const nextPages = this.data.pages.slice();
+        nextPages[pageIdx] = updated;
+        pages = nextPages;
+      }
+    }
     this.data = {
       ...this.data,
+      pages,
       evidenceInstances: this.data.evidenceInstances.filter((e) => e.id !== evidenceId),
     };
     await this.persist();

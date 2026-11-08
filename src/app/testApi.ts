@@ -11,6 +11,13 @@
  */
 
 import type { AnnotationId, PageId, SourceId } from "../model";
+import {
+  hydrateState,
+  outline,
+  evidenceInOrder,
+  compositionStatsFromJson,
+  type DocumentJson,
+} from "../editor";
 import type { Workbench } from "./workbench";
 
 interface ItoTestApi {
@@ -26,10 +33,34 @@ interface ItoTestApi {
   referenceStatus(annotationId: string, destinationPageId: string): string;
   /** Create a subject page and return its id (test setup convenience). */
   createSubject(title: string): Promise<string>;
+  /** Open a subject page for composition alongside the reader. */
+  openSubject(pageId: string): void;
+  /** The currently open subject page id, or null. */
+  openSubjectId(): string | null;
+  /** Linear outline of a subject page composition (writing + ⟦evidence⟧). */
+  subjectOutline(pageId: string): string[];
+  /** Evidence-node ids in exact composition order for a subject page. */
+  subjectEvidenceOrder(pageId: string): string[];
+  /** The id of the first annotation for the first source (test convenience). */
+  firstAnnotationId(): string | null;
+  /** Structural detail counts for a subject page composition. */
+  subjectStats(pageId: string): {
+    blockCount: number;
+    paragraphCount: number;
+    headingCount: number;
+    quoteCount: number;
+    sourceCount: number;
+  };
+  /** Count of evidence instances whose destination is the given page. */
+  pageEvidenceCount(pageId: string): number;
+  /** Resolve the source-return state for an evidence instance. */
+  evidenceResolution(evidenceId: string): string;
   /** Count of Page + Relationship + Category records (invariant probe). */
   graphRecordCount(): { pages: number; relationships: number; categories: number };
   /** Test-only: force the next N persist() calls to fail (R12). */
   forceNextSaveFailures(count: number): void;
+  /** Test-only: drift a source's stored version hash to trigger A17 mismatch. */
+  forceSourceVersionDrift(sourceId: string): Promise<void>;
   /** Raw counts for assertions. */
   counts(): {
     sources: number;
@@ -128,6 +159,45 @@ export function installTestApi(wb: Workbench, bump: () => void): void {
       bump();
       return page.id;
     },
+    openSubject(pageId) {
+      wb.openSubjectPage(pageId as PageId);
+      bump();
+    },
+    openSubjectId() {
+      return wb.snapshot().openSubjectPageId;
+    },
+    subjectOutline(pageId) {
+      const json = wb.subjectDocJson(pageId as PageId) as DocumentJson;
+      return outline(hydrateState(json).doc);
+    },
+    subjectEvidenceOrder(pageId) {
+      const json = wb.subjectDocJson(pageId as PageId) as DocumentJson;
+      return evidenceInOrder(hydrateState(json).doc).map((e) => e.attrs.evidenceId);
+    },
+    firstAnnotationId() {
+      const d = wb.rawData();
+      return d.annotations[0]?.id ?? null;
+    },
+    subjectStats(pageId) {
+      const json = wb.subjectDocJson(pageId as PageId) as DocumentJson;
+      const s = compositionStatsFromJson(json);
+      return {
+        blockCount: s.blockCount,
+        paragraphCount: s.paragraphCount,
+        headingCount: s.headingCount,
+        quoteCount: s.quoteCount,
+        sourceCount: s.sourceCount,
+      };
+    },
+    pageEvidenceCount(pageId) {
+      return wb
+        .rawData()
+        .evidenceInstances.filter((e) => e.destinationPageId === (pageId as PageId)).length;
+    },
+    evidenceResolution(evidenceId) {
+      const resolved = wb.resolveEvidenceSource(evidenceId);
+      return resolved ? resolved.resolution.kind : "missing";
+    },
     graphRecordCount() {
       const d = wb.rawData();
       return {
@@ -138,6 +208,10 @@ export function installTestApi(wb: Workbench, bump: () => void): void {
     },
     forceNextSaveFailures(count) {
       wb.forceNextSaveFailures(count);
+    },
+    async forceSourceVersionDrift(sourceId) {
+      await wb.forceSourceVersionDrift(sourceId as SourceId);
+      bump();
     },
     counts() {
       const d = wb.rawData();

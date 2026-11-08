@@ -21,6 +21,8 @@
   "dependencies": {
     "idb": "^8.0.0",
     "pdfjs-dist": "^4.7.76",
+    "prosemirror-commands": "^1.7.2",
+    "prosemirror-keymap": "^1.2.3",
     "prosemirror-model": "^1.23.0",
     "prosemirror-state": "^1.4.3",
     "prosemirror-view": "^1.34.3",

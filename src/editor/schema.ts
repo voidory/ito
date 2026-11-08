@@ -99,10 +99,25 @@ const nodes: Record<string, NodeSpec> = {
   paragraph: {
     group: "block",
     content: "inline*",
-    toDOM() {
-      return ["p", 0];
+    // `copiedComment` marks a paragraph that was copied in from an annotation
+    // comment at insertion time (spec section 4.3). It is CLEARLY distinguished
+    // from ordinary page writing and never silently merged into it. The flag
+    // lives in the JSON (source of truth), not only in the rendered DOM.
+    attrs: { copiedComment: { default: false } },
+    toDOM(node) {
+      return node.attrs.copiedComment
+        ? ["p", { class: "copied-comment", "data-copied-comment": "true" }, 0]
+        : ["p", 0];
     },
-    parseDOM: [{ tag: "p" }],
+    parseDOM: [
+      {
+        tag: "p",
+        getAttrs(dom) {
+          const el = dom as HTMLElement;
+          return { copiedComment: el.getAttribute("data-copied-comment") === "true" };
+        },
+      },
+    ],
   },
   heading: {
     group: "block",
