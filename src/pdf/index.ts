@@ -1,0 +1,8 @@
+/**
+ * PDF integration barrel. `anchor.ts` holds the DOM-independent portable anchor
+ * create/resolve logic (unit-testable); `render.ts` holds the browser-only
+ * pdf.js rendering + text-layer wiring exercised by the Playwright spike.
+ */
+
+export * from "./anchor";
+export * from "./render";

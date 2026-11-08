@@ -15,7 +15,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "gen-fixtures": "node scripts/gen-fixtures.mjs"
+    "gen-fixtures": "node scripts/gen-fixtures.mjs",
+    "koofr-probe": "node scripts/koofr-probe.mjs"
   },
   "dependencies": {
     "idb": "^8.0.0",

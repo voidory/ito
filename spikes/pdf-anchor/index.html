@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ito spike — pdf anchor</title>
+  </head>
+  <body>
+    <h1>PDF anchor round-trip spike harness</h1>
+    <p>
+      This page is a RUNTIME harness driven by e2e/pdf-anchor.spec.ts. It renders
+      a real pdf.js document with a selectable text layer and exposes
+      <code>window.__spike</code> for the Playwright test to exercise
+      createAnchor / resolveAnchor.
+    </p>
+    <div id="mount"></div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
