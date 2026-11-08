@@ -10,16 +10,24 @@ import type { Workbench } from "./workbench";
  */
 export function Library({
   wb,
+  categoryScope,
+  onScopeChange,
   onOpen,
   onOpenTogether,
 }: {
   wb: Workbench;
+  categoryScope: string | null;
+  onScopeChange: (category: string | null) => void;
   onOpen: (id: SourceId) => void;
   onOpenTogether: (ids: SourceId[]) => void;
 }): JSX.Element {
   const [sortBy, setSortBy] = useState<"title" | "importedAt">("title");
   const [selected, setSelected] = useState<Set<SourceId>>(new Set());
-  const sections = useMemo(() => wb.librarySections(sortBy), [wb, sortBy, wb.rawData()]);
+  const categories = useMemo(() => wb.categories(), [wb, wb.rawData()]);
+  const sections = useMemo(
+    () => wb.librarySections(sortBy),
+    [wb, sortBy, categoryScope, wb.rawData()],
+  );
 
   const toggle = (id: SourceId): void => {
     setSelected((prev) => {
@@ -35,6 +43,21 @@ export function Library({
       <header style={styles.header}>
         <h2 style={{ margin: 0 }}>Library</h2>
         <div>
+          <label style={{ fontSize: "0.85rem", color: "#555", marginRight: "0.75rem" }}>
+            Category{" "}
+            <select
+              data-testid="library-scope"
+              value={categoryScope ?? ""}
+              onChange={(e) => onScopeChange(e.target.value === "" ? null : e.target.value)}
+            >
+              <option value="">All</option>
+              {categories.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </label>
           <label style={{ fontSize: "0.85rem", color: "#555" }}>
             Sort by{" "}
             <select

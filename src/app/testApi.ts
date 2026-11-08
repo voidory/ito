@@ -55,6 +55,26 @@ interface ItoTestApi {
   pageEvidenceCount(pageId: string): number;
   /** Resolve the source-return state for an evidence instance. */
   evidenceResolution(evidenceId: string): string;
+  /** The ordered open source ids, the flex-grow weights per pane slot. */
+  paneWidths(): Record<string, number>;
+  /** Whether passage-to-evidence lines are currently set visible. */
+  linesVisible(): boolean;
+  /** Toggle passage-to-evidence line visibility (presentation only). */
+  setLinesVisible(visible: boolean): void;
+  /** The passage-to-evidence line DATA (independent of whether drawn). */
+  passageLineData(): {
+    evidenceId: string;
+    sourceId: string;
+    sourcePageIndex: number;
+  }[];
+  /** The active library category scope (or null for all). */
+  categoryScope(): string | null;
+  /** Set the active library category scope. */
+  setCategoryScope(category: string | null): void;
+  /** Switch a reader pane from one source to another (third-paper swap). */
+  switchReaderPane(fromSourceId: string, toSourceId: string): void;
+  /** All distinct library category names. */
+  categories(): string[];
   /** Count of Page + Relationship + Category records (invariant probe). */
   graphRecordCount(): { pages: number; relationships: number; categories: number };
   /** Test-only: force the next N persist() calls to fail (R12). */
@@ -197,6 +217,37 @@ export function installTestApi(wb: Workbench, bump: () => void): void {
     evidenceResolution(evidenceId) {
       const resolved = wb.resolveEvidenceSource(evidenceId);
       return resolved ? resolved.resolution.kind : "missing";
+    },
+    paneWidths() {
+      return { ...wb.snapshot().workspaceLayout.paneWidths };
+    },
+    linesVisible() {
+      return wb.linesVisible();
+    },
+    setLinesVisible(visible) {
+      wb.setLinesVisible(visible);
+      bump();
+    },
+    passageLineData() {
+      return wb.passageEvidenceLines().map((l) => ({
+        evidenceId: l.evidenceId,
+        sourceId: l.sourceId,
+        sourcePageIndex: l.sourcePageIndex,
+      }));
+    },
+    categoryScope() {
+      return wb.categoryScope();
+    },
+    setCategoryScope(category) {
+      wb.setCategoryScope(category);
+      bump();
+    },
+    switchReaderPane(fromSourceId, toSourceId) {
+      wb.switchReaderPane(fromSourceId as SourceId, toSourceId as SourceId);
+      bump();
+    },
+    categories() {
+      return wb.categories();
     },
     graphRecordCount() {
       const d = wb.rawData();

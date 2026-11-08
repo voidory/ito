@@ -1,0 +1,202 @@
+# MILESTONE MATRIX — M0 + M1
+
+The spec (section 22) requires an implemented / pending / unsupported matrix at
+every milestone. This is that matrix for the first two milestones. It is the
+single place that states, honestly, what the delivered app does at runtime
+(real browser, real pdf.js text), what is deferred to later milestones, and
+what is currently unsupported.
+
+Legend for **Status**:
+
+- **implemented** — delivered and covered by an automated test that runs the
+  real app (Playwright) or the real domain logic (Vitest). Not a stub.
+- **pending** — in scope for a later milestone; intentionally not built yet.
+- **unsupported** — not available in the current delivery and called out so no
+  one assumes it works (e.g. phone three-pane editing, remote storage).
+
+Test kinds: `e2e` = Playwright chromium (real browser, real PDF text), `unit` =
+Vitest, `n/a` = decision/record only.
+
+---
+
+## 1. Run instructions
+
+```sh
+npm install                      # install dependencies (Node >= 22)
+npm run typecheck                # tsc --noEmit (strict TypeScript, N01)
+npm run build                    # tsc --noEmit && vite build (N02)
+npm run test                     # Vitest unit/integration suite
+npx playwright install chromium  # first run only
+npm run test:e2e                 # Playwright real-browser suite (webServer = build + preview)
+npm run dev                      # launch the app locally (Vite dev server)
+```
+
+Per spec section 24 the visible READY state is a boot safeguard, NOT a
+substitute for runtime validation: every behavioural claim below marked `e2e`
+is exercised by `npm run test:e2e` driving a real chromium browser against the
+production build, selecting real pdf.js text and reading live Workbench state.
+
+## 2. Automated test results summary
+
+Last run on this working tree (all green):
+
+| Suite                     | Command             | Result               |
+| ------------------------- | ------------------- | -------------------- |
+| TypeScript typecheck      | `npm run typecheck` | pass (0 errors)      |
+| Production build          | `npm run build`     | pass                 |
+| Unit / integration        | `npm run test`      | 63 passed / 8 files  |
+| Runtime (real browser)    | `npm run test:e2e`  | 29 passed / 5 specs  |
+
+E2E specs: `e2e/ready.spec.ts` (boot), `e2e/pdf-anchor.spec.ts` (anchor
+round-trip spike), `e2e/reader-workbench.spec.ts` (M1 reading workbench),
+`e2e/subject-editor.spec.ts` (M1 subject layer + continuous editor),
+`e2e/workspace.spec.ts` (M1 integrated three-pane workspace + context-preserving
+transitions).
+
+---
+
+## 3. Validation ORDER (spec, binding)
+
+The spec fixes the order in which the three core interactions must be validated.
+All three are now validated at runtime, in order:
+
+1. **Highlighting first** — `e2e/reader-workbench.spec.ts` (R01, R09, R20, …).
+2. **Continuous page editing second** — `e2e/subject-editor.spec.ts` (A03–A07,
+   R06, A17).
+3. **Context-preserving view/layout transitions third** — `e2e/workspace.spec.ts`
+   (section 8.2 three-pane workspace, R19/N08 preservation, A06 source-return,
+   A08/R08 line toggle, N03/N08 scope + passage preservation).
+
+---
+
+## 4. M1-relevant acceptance matrix (A01–A08, R01–R20, N03, N08)
+
+Each row maps a spec ID to its status and the automated test that covers it.
+IDs below use the FEAT-003/004/005 behavioural numbering used across the e2e
+suite and `docs/REQUIREMENT-TEST-MAP.md`; where a logical-contract ID (section
+20 / section 10.2) is meant it is noted in the Requirement column.
+
+### Acceptance A01–A08
+
+| ID  | Requirement (summary)                                            | Status      | Kind      | Covering test |
+| --- | ---------------------------------------------------------------- | ----------- | --------- | ------------- |
+| A01 | App boots to a visible READY state in a real browser             | implemented | e2e       | `e2e/ready.spec.ts` |
+| A02 | Startup failure surfaces a visible ERROR state                   | implemented | unit/boot | `src/app/App.tsx` ERROR branch; boot safeguard (dedicated `e2e/error.spec.ts` pending) |
+| A03 | Subject page created ONLY by explicit action from evidence       | implemented | e2e+unit  | `e2e/subject-editor.spec.ts` "A03…"; `src/app/workbench.subject.test.ts` |
+| A04 | Compose/reorder paragraphs + quotes; structure + provenance kept | implemented | e2e+unit  | `e2e/subject-editor.spec.ts` "A04 + R14…"; `workbench.subject.test.ts` |
+| A05 | Insert evidence at the cursor; no mandatory template             | implemented | e2e       | `e2e/subject-editor.spec.ts` "A05 + R06…" |
+| A06 | Follow a quote → exact source passage, page NOT replaced/covered | implemented | e2e       | `e2e/workspace.spec.ts` "A06…"; also `subject-editor.spec.ts` "A17…" |
+| A07 | Structural details toggleable; hiding never breaks attribution   | implemented | e2e       | `e2e/subject-editor.spec.ts` "A07…" |
+| A08 | Passage-to-evidence line toggle = presentation only, no deletion | implemented | e2e+unit  | `e2e/workspace.spec.ts` "A08/R08 foundation…"; `workbench.workspace.test.ts` |
+
+Note on A06/A17: the spec's "return to the exact passage, explicit when the
+anchor cannot be resolved" behaviour is tested both from the standalone editor
+(`A17`) and from inside the integrated workspace (`A06`). A changed source
+edition yields an explicit `mismatched` state and never a silent navigation.
+
+### Requirements R01–R20 (reading workbench + transition behaviours)
+
+| ID  | Requirement (summary)                                           | Status      | Kind      | Covering test |
+| --- | --------------------------------------------------------------- | ----------- | --------- | ------------- |
+| R01 | Selection exposes ONLY compact highlight/color controls         | implemented | e2e       | `reader-workbench.spec.ts` "R01 + R09 + R20…" |
+| R02 | Quiet comments: hidden in reading, revealed on explicit access  | implemented | e2e       | `reader-workbench.spec.ts` "R02…" |
+| R03 | One 3-page range = a single logical annotation identity         | implemented | e2e+unit  | `reader-workbench.spec.ts` "R03 + R04…"; `workbench.test.ts` |
+| R04 | Micro-highlights inside a range stay independent                | implemented | e2e+unit  | `reader-workbench.spec.ts` "R03 + R04…" |
+| R05 | "Associate with subject…" → DOTTED link, no page edit           | implemented | e2e+unit  | `reader-workbench.spec.ts` "R05 + R15…" |
+| R06 | Direct citation dotted→solid; source annotation survives        | implemented | e2e+unit  | `subject-editor.spec.ts` "A05 + R06…" |
+| R07 | Same annotation solid for one subject, tentative for another    | implemented | e2e+unit  | `reader-workbench.spec.ts` "R07…" |
+| R08 | Hiding presentation lines never deletes the relationship        | implemented | e2e+unit  | `workspace.spec.ts` "A08/R08…"; `workbench.workspace.test.ts` |
+| R09 | Soft, uneven, rounded commit overlay hugging line fragments     | implemented | e2e       | `reader-workbench.spec.ts` "R01 + R09 + R20…" |
+| R10 | No standalone isCited boolean (status derived per pair)         | implemented | unit      | `src/model/citation.test.ts`; `workbench.test.ts` |
+| R11 | prefers-reduced-motion AND in-app suppress-motion honoured      | implemented | e2e       | `reader-workbench.spec.ts` two "R11…" tests |
+| R12 | Failed local save retains the draft + actionable error          | implemented | e2e+unit  | `reader-workbench.spec.ts` "R12…"; `workbench.test.ts` |
+| R13 | Reproducible, committed PDF fixtures                            | implemented | unit/n-a  | `scripts/gen-fixtures.mjs`; `src/test/fixtures.test.ts` |
+| R14 | Annotations/comments/composition persist across reopen          | implemented | e2e+unit  | `reader-workbench.spec.ts` "R14…"; `subject-editor.spec.ts` "A04 + R14…" |
+| R15 | Accessible (menu-button) alternative to the right-click menu    | implemented | e2e       | `reader-workbench.spec.ts` "R05 + R15…" |
+| R16 | Each range page carries a BORDER (not a tint wash)              | implemented | e2e       | `reader-workbench.spec.ts` "R03 + R04 + R16 + R17…" |
+| R17 | Range filterable from micro-highlights; shows "pp. X-Y"         | implemented | e2e       | `reader-workbench.spec.ts` "R03 + R04 + R16 + R17…" |
+| R18 | Closed highlights tab reserves ZERO sidebar width               | implemented | e2e       | `reader-workbench.spec.ts` "R18…" |
+| R19 | Layout/tab transitions preserve passage/draft/pane config; no camera motion | implemented | e2e+unit | `workspace.spec.ts` "R19 + N08…", "section 8.2…"; `workbench.workspace.test.ts` |
+| R20 | Multi-line overlay = real line fragments; glyphs stay legible   | implemented | e2e       | `reader-workbench.spec.ts` "R01 + R09 + R20…" |
+
+### Non-functional N03, N08
+
+| ID  | Requirement (summary)                                   | Status      | Kind | Covering test |
+| --- | ------------------------------------------------------- | ----------- | ---- | ------------- |
+| N03 | Runtime validation via a real browser (not type checks) | implemented | e2e  | whole `test:e2e` suite; scope preservation in `workspace.spec.ts` "N03 + N08…" |
+| N08 | Transitions preserve context (source, passage, drafts, pane config, scope) | implemented | e2e+unit | `workspace.spec.ts` "R19 + N08…", "N03 + N08…"; `workbench.workspace.test.ts` |
+
+---
+
+## 5. Integrated three-pane workspace (FEAT-005, section 8.2) — what ships
+
+| Capability                                                           | Status      | Covering test |
+| -------------------------------------------------------------------- | ----------- | ------------- |
+| Paper A · subject page · Paper B rendered SIMULTANEOUSLY             | implemented | `workspace.spec.ts` "section 8.2…" |
+| Editable subject page never hidden behind a modal while composing    | implemented | `workspace.spec.ts` "section 8.2…", "A06…" |
+| Adjustable pane widths (draggable dividers, weight = view state)      | implemented | `workspace.spec.ts` "section 8.2…" |
+| Independent per-pane scrolling                                       | implemented | `workspace.spec.ts` "section 8.2…" |
+| Switch a reader pane to a THIRD paper while keeping the subject       | implemented | `workspace.spec.ts` "section 8.2 note…"; `workbench.workspace.test.ts` |
+| Passage-to-evidence line DATA (section 10.2), margin/inter-pane route | implemented | `workspace.spec.ts` "A08/R08…"; `workbench.workspace.test.ts` |
+| Line visibility toggle = presentation only, non-destructive          | implemented | `workspace.spec.ts` "A08/R08…" |
+| No unexpected graph camera motion on transitions (M2 is full graph)   | implemented | `workspace.spec.ts` "R19 + N08…" |
+| Phone/narrow-screen responsive flow STUB (not a squeezed miniature)   | implemented (stub) | `data-testid="responsive-flow-stub"` renders below 760px; documented limit |
+
+---
+
+## 6. Pending (in scope for later milestones)
+
+| Area                                                  | Milestone | Reference |
+| ----------------------------------------------------- | --------- | --------- |
+| Full concept-network graph (nodes/edges, camera)      | M5        | BACKLOG M5; D11–D13 |
+| Graph `hide` as presentation state at graph scale     | M5        | D13 (foundation shipped here for lines) |
+| Categories grouping pages by id in the graph          | M5        | D14 |
+| Remote storage (Koofr/WebDAV) adapter                 | M4        | ADR-0005; `docs/spikes/koofr-access.md`; D08/D09 |
+| Safe publication against a remote + delivery/hosting   | M4        | ADR-0005; D10, D17 |
+| Captures → structured pages; named revisions          | M6        | D15, D16 |
+| Schema migrations past v1                             | M7        | ADR-0004; D18 |
+| Large-PDF performance pass; full keyboard a11y audit   | M7        | N06, N07 |
+| Dedicated `e2e/error.spec.ts` for the ERROR boot state | M2        | A02 (logic shipped, dedicated e2e pending) |
+
+## 7. Unsupported in the current delivery (called out)
+
+- **Phone-sized three-pane EDITING.** Narrow screens (< 760px) get a documented
+  single-column flow STUB that stacks source → subject → source, NOT a squeezed
+  three-pane miniature. Side-by-side composition is a wide-screen experience.
+- **Remote/shared storage.** Only the local `LocalFileStorageAdapter`
+  (IndexedDB/OPFS) is wired. Koofr/WebDAV is assessed in the M0 spike and
+  implemented at M4; see `docs/spikes/koofr-access.md` for the honest CORS/auth
+  assessment and fallbacks.
+- **Full concept-network graph + its camera.** M1 only guarantees NO unexpected
+  camera motion during transitions and a non-destructive line toggle; the graph
+  itself, its layout persistence, and node/edge hide-at-scale are M5.
+
+---
+
+## 8. Proposed next decisions (D-items)
+
+New decisions surfaced by FEAT-005 that should be recorded before the relevant
+milestone builds on them (numbering continues the decision log D01–D18):
+
+- **D19 — Pane-configuration persistence scope.** Pane width weights, line
+  visibility and category scope are currently SESSION view state (held on the
+  Workbench, preserved across in-session transitions, reset on reload). Decide
+  whether any of these should persist into `BrainData.presentation` across
+  reloads. Default proposal: keep them session-only until M5 ties layout to the
+  concept-network `PresentationState`, so reloading never resurrects a stale
+  layout. (relates R19, N08)
+- **D20 — Passage-to-evidence line routing at scale.** The current lines route
+  through the inter-pane gutter with cubic-Bézier paths re-computed on scroll /
+  zoom / resize. Decide the M2+ policy for many overlapping lines (bundling,
+  fade-on-density, hover-reveal) so readability holds at high evidence counts.
+  Default proposal: keep the simple always-on margin routing for M1 and revisit
+  with the graph work. (relates A08, section 10.2)
+- **D21 — Narrow-screen flow beyond the stub.** The responsive stub is a
+  documented placeholder. Decide the real mobile composition flow (tabbed panes,
+  bottom-sheet editor, or deferred to a packaged app) at M7 hardening. (relates
+  section 8.2, N07)
+- **D22 — Third-paper swap vs. "add a pane".** `switchReaderPane` replaces a
+  pane's source in place. Decide whether the workspace should also support
+  ADDING a pane (N papers open together) or stay at the approved A|subject|B
+  arrangement. Default proposal: keep the fixed arrangement for M1; evaluate an
+  N-pane workspace with the graph navigation work. (relates section 8.2 note)

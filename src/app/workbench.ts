@@ -150,6 +150,53 @@ function writeStyles(
   return { ...data, captures: [...others, cap] };
 }
 
+/**
+ * Per-pane width weights for the integrated workspace (spec section 8.2). These
+ * are PRESENTATION-ONLY view state (pane configuration) that context-preserving
+ * transitions must carry across layout changes (R19, N08). They are flex-grow
+ * weights, so only their RATIO matters, not absolute pixels — which keeps them
+ * independent of zoom and window size. Keyed by a pane slot id (source id for a
+ * reader pane, the literal "subject" for the subject-page pane).
+ */
+export type PaneWidths = Readonly<Record<string, number>>;
+
+/**
+ * The integrated-workspace layout configuration the Reader renders from and
+ * that transitions must preserve (spec sections 7.3, 8.2, R19). Pane widths and
+ * the passage-to-evidence line visibility are presentation-only: changing them
+ * never touches durable records, and the line toggle in particular NEVER
+ * deletes a relationship (A08/R08 foundation).
+ */
+export interface WorkspaceLayout {
+  /** Flex-grow weights per pane slot id; absent slots default to weight 1. */
+  readonly paneWidths: PaneWidths;
+  /** Whether passage-to-evidence lines are drawn. Presentation only (A08). */
+  readonly linesVisible: boolean;
+}
+
+/** The default workspace layout: equal panes, lines visible. */
+export const DEFAULT_WORKSPACE_LAYOUT: WorkspaceLayout = {
+  paneWidths: {},
+  linesVisible: true,
+};
+
+/**
+ * A single passage-to-evidence line relating a source pane to a composed quote
+ * in the subject page (spec section 10.2). This is pure DATA — the geometry
+ * (routing, margins) is computed in the view from live DOM; here we only relate
+ * a source + page + evidence + anchor page index. Toggling visibility changes
+ * only whether the view draws these; it never removes them from this set.
+ */
+export interface PassageEvidenceLine {
+  readonly evidenceId: string;
+  readonly annotationId: AnnotationId;
+  readonly sourceId: SourceId;
+  readonly destinationPageId: PageId;
+  /** 0-based page index of the source passage the quote came from. */
+  readonly sourcePageIndex: number;
+  readonly quotedText: string;
+}
+
 /** Immutable snapshot of workbench state the UI renders from. */
 export interface WorkbenchState {
   readonly brainId: BrainId;
@@ -167,6 +214,15 @@ export interface WorkbenchState {
   readonly highlightsTabOpen: boolean;
   /** Global suppress-motion setting (in-app, independent of OS media query). */
   readonly suppressMotion: boolean;
+  /** The integrated-workspace layout (pane widths + line visibility). */
+  readonly workspaceLayout: WorkspaceLayout;
+  /**
+   * The active library category scope (a category name) or null for "all".
+   * This is a reader/library VIEW filter that context-preserving transitions
+   * must carry between Library, Reader and workspace layouts (N03, N08) — it
+   * never changes durable records.
+   */
+  readonly categoryScope: string | null;
   /** Last save failure, if any; cleared on the next successful save. */
   readonly saveError: SaveError | null;
 }
@@ -199,6 +255,8 @@ export class Workbench {
   private openSubjectPageId: PageId | null = null;
   private highlightsTabOpen = false;
   private suppressMotion = false;
+  private workspaceLayout: WorkspaceLayout = DEFAULT_WORKSPACE_LAYOUT;
+  private activeCategoryScope: string | null = null;
   private saveError: SaveError | null = null;
   /**
    * Test-only: when > 0, the next N persist() calls throw AFTER applying the
@@ -242,6 +300,8 @@ export class Workbench {
       openSubjectPageId: this.openSubjectPageId,
       highlightsTabOpen: this.highlightsTabOpen,
       suppressMotion: this.suppressMotion,
+      workspaceLayout: this.workspaceLayout,
+      categoryScope: this.activeCategoryScope,
       saveError: this.saveError,
     };
   }
@@ -303,13 +363,19 @@ export class Workbench {
     return this.storage.readAsset(this.data.manifest.brainId, source.assetId);
   }
 
-  /** Sources grouped by category, sorted for the library list (spec section 5). */
+  /**
+   * Sources grouped by category, sorted for the library list (spec section 5).
+   * When the active category scope is set, only that category is returned — the
+   * same scope the Reader/workspace carries across transitions (N03, N08).
+   */
   librarySections(sortBy: "title" | "importedAt" = "title"): {
     category: string;
     sources: Source[];
   }[] {
     const byCategory = new Map<string, Source[]>();
     for (const s of this.data.sources) {
+      if (this.activeCategoryScope != null && s.category !== this.activeCategoryScope)
+        continue;
       const list = byCategory.get(s.category) ?? [];
       list.push(s);
       byCategory.set(s.category, list);
@@ -324,6 +390,13 @@ export class Workbench {
     }));
     sections.sort((a, b) => a.category.localeCompare(b.category));
     return sections;
+  }
+
+  /** All distinct library category names present, sorted (for scope controls). */
+  categories(): string[] {
+    return [...new Set(this.data.sources.map((s) => s.category))].sort((a, b) =>
+      a.localeCompare(b),
+    );
   }
 
   /** Open one document in the reading workspace (double-click/tap). */
@@ -363,6 +436,112 @@ export class Workbench {
 
   setSuppressMotion(suppress: boolean): void {
     this.suppressMotion = suppress;
+  }
+
+  // -- workspace layout (pane config + lines) -------------------------------
+
+  /**
+   * Set a pane's flex-grow weight (adjustable pane widths, section 8.2). This
+   * is presentation-only view state that transitions preserve (R19); it never
+   * writes a durable record. Weights are clamped to a sane minimum so a pane
+   * can be made narrow but never collapsed away while composing.
+   */
+  setPaneWidth(slotId: string, weight: number): void {
+    const clamped = Math.max(0.15, weight);
+    this.workspaceLayout = {
+      ...this.workspaceLayout,
+      paneWidths: { ...this.workspaceLayout.paneWidths, [slotId]: clamped },
+    };
+  }
+
+  /** The flex-grow weight for a pane slot (defaults to 1). */
+  paneWidth(slotId: string): number {
+    return this.workspaceLayout.paneWidths[slotId] ?? 1;
+  }
+
+  /**
+   * Toggle passage-to-evidence line visibility. This changes PRESENTATION ONLY
+   * and NEVER deletes a relationship / evidence instance (A08/R08 foundation).
+   * The underlying lines remain derivable from `passageEvidenceLines()` whether
+   * or not they are drawn.
+   */
+  setLinesVisible(visible: boolean): void {
+    this.workspaceLayout = { ...this.workspaceLayout, linesVisible: visible };
+  }
+
+  linesVisible(): boolean {
+    return this.workspaceLayout.linesVisible;
+  }
+
+  /**
+   * Switch ONE reader pane to a different (possibly third) paper while keeping
+   * the same subject open and the other panes untouched (section 8.2 note).
+   * Preserves pane order; only the targeted slot changes source. Does not close
+   * or replace the subject page.
+   */
+  switchReaderPane(fromSourceId: SourceId, toSourceId: SourceId): void {
+    const idx = this.openSourceIds.indexOf(fromSourceId);
+    if (idx < 0) return;
+    if (this.openSourceIds.includes(toSourceId) && this.openSourceIds[idx] !== toSourceId) {
+      // Avoid duplicating a paper into two panes: just replace in place.
+    }
+    const next = this.openSourceIds.slice();
+    next[idx] = toSourceId;
+    this.openSourceIds = next;
+    // Carry the old pane's width weight onto the new source slot so the layout
+    // configuration is preserved across the swap (R19).
+    const prevWeight = this.workspaceLayout.paneWidths[fromSourceId];
+    if (prevWeight != null) this.setPaneWidth(toSourceId, prevWeight);
+  }
+
+  // -- library category scope ----------------------------------------------
+
+  /**
+   * Set the active library category scope (a category name) or null for "all".
+   * A VIEW filter preserved across Library/Reader/workspace transitions (N03,
+   * N08); it changes no durable records.
+   */
+  setCategoryScope(category: string | null): void {
+    this.activeCategoryScope = category;
+  }
+
+  categoryScope(): string | null {
+    return this.activeCategoryScope;
+  }
+
+  // -- passage-to-evidence lines (section 10.2) -----------------------------
+
+  /**
+   * The passage-to-evidence line DATA for the current editing state (section
+   * 10.2): one line per evidence instance in the OPEN subject page that cites
+   * an annotation whose source is OPEN in a reader pane. These relate sources
+   * to the current page/evidence. The returned set is independent of whether
+   * lines are currently drawn (the visibility toggle is presentation-only), so
+   * hiding lines never removes a relationship (A08/R08 foundation).
+   */
+  passageEvidenceLines(): PassageEvidenceLine[] {
+    const pageId = this.openSubjectPageId;
+    if (!pageId) return [];
+    const lines: PassageEvidenceLine[] = [];
+    for (const ev of this.data.evidenceInstances) {
+      if (ev.destinationPageId !== pageId) continue;
+      const annotation = this.data.annotations.find((a) => a.id === ev.annotationId);
+      if (!annotation) continue;
+      if (!this.openSourceIds.includes(annotation.sourceId)) continue;
+      const sourcePageIndex =
+        annotation.scope.kind === "text"
+          ? annotation.scope.anchor.pageIndex
+          : annotation.scope.anchor.startPageIndex;
+      lines.push({
+        evidenceId: ev.id,
+        annotationId: annotation.id,
+        sourceId: annotation.sourceId,
+        destinationPageId: pageId,
+        sourcePageIndex,
+        quotedText: ev.quotedText,
+      });
+    }
+    return lines;
   }
 
   /** Test-only: force the next `count` persist() calls to fail (R12 path). */

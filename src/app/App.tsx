@@ -11,6 +11,7 @@ import { loadDocument, hashBytes } from "../pdf";
 // 3+ page fixture required for the range-annotation flow.
 import fixture3 from "../test/fixtures/sample-3page.pdf?url";
 import fixtureMulti from "../test/fixtures/sample-multicol.pdf?url";
+import fixtureRotated from "../test/fixtures/sample-rotated.pdf?url";
 
 type Boot =
   | { kind: "booting" }
@@ -64,7 +65,10 @@ export function App(): JSX.Element {
     setImporting(true);
     void (async () => {
       await importFixture(wb, fixture3, "Sample Document (3 pages)", "Papers");
-      await importFixture(wb, fixtureMulti, "Multi-Column Fixture", "Papers");
+      await importFixture(wb, fixtureMulti, "Multi-Column Fixture", "References");
+      // A third paper so a reader pane can be switched to a third source while
+      // the same subject stays open (spec section 8.2 note).
+      await importFixture(wb, fixtureRotated, "Rotated Fixture", "Papers");
       bump();
     })();
   }, [wb, importing, bump]);
@@ -111,6 +115,11 @@ export function App(): JSX.Element {
         state.openSourceIds.length === 0 ? (
           <Library
             wb={wb}
+            categoryScope={state.categoryScope}
+            onScopeChange={(category) => {
+              wb.setCategoryScope(category);
+              bump();
+            }}
             onOpen={(id: SourceId) => {
               wb.openSource(id);
               bump();

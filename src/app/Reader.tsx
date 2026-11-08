@@ -107,6 +107,47 @@ export function Reader({
   }, [returnTarget, openSourceIds, wb, bump]);
 
   const subjectOpen = openSubjectPageId != null;
+  // Scroll containers for each pane so lines can be re-routed on scroll and the
+  // integrated workspace scrolls panes INDEPENDENTLY (section 8.2).
+  const paneScrollRefs = useRef<Map<string, HTMLElement>>(new Map());
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const linesVisible = wb.snapshot().workspaceLayout.linesVisible;
+
+  // Narrow-screen (phone) responsive detection. A squeezed three-pane
+  // miniature is explicitly NOT attempted; narrow screens get a documented
+  // single-column flow stub instead (section 8.2).
+  const [narrow, setNarrow] = useState<boolean>(() =>
+    typeof window !== "undefined" ? window.innerWidth < 760 : false,
+  );
+  useEffect(() => {
+    const onResize = (): void => setNarrow(window.innerWidth < 760);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  // The ordered pane slots: each open source is a reader pane; the open subject
+  // page is the middle composition pane. The approved arrangement interleaves
+  // the subject between sources (Paper A | subject | Paper B) when two sources
+  // are open together; otherwise it trails the single source.
+  const paneSlots: { slotId: string; kind: "source" | "subject"; sourceId?: SourceId }[] =
+    (() => {
+      const sources = openSourceIds.map((id) => ({
+        slotId: id as string,
+        kind: "source" as const,
+        sourceId: id,
+      }));
+      if (!subjectOpen) return sources;
+      const subjectPane = { slotId: "subject", kind: "subject" as const };
+      if (sources.length >= 2) {
+        return [sources[0]!, subjectPane, ...sources.slice(1)];
+      }
+      return [...sources, subjectPane];
+    })();
+
+  const registerPaneScroll = useCallback((slotId: string, el: HTMLElement | null) => {
+    if (el) paneScrollRefs.current.set(slotId, el);
+    else paneScrollRefs.current.delete(slotId);
+  }, []);
 
   return (
     <div data-testid="reader" data-view="reader" style={styles.root}>
@@ -128,6 +169,18 @@ export function Reader({
               onChange={(e) => onToggleMotion(e.target.checked)}
             />{" "}
             Suppress motion
+          </label>
+          <label style={{ fontSize: "0.85rem", color: "#555" }}>
+            <input
+              type="checkbox"
+              data-testid="toggle-lines"
+              checked={linesVisible}
+              onChange={(e) => {
+                wb.setLinesVisible(e.target.checked);
+                bump();
+              }}
+            />{" "}
+            Show source lines
           </label>
           <button
             data-testid="toggle-highlights-tab"
@@ -157,47 +210,102 @@ export function Reader({
         data-testid="reader-body"
         data-tab-open={highlightsTabOpen ? "true" : "false"}
         data-subject-open={subjectOpen ? "true" : "false"}
+        data-narrow={narrow ? "true" : "false"}
+        data-pane-count={String(paneSlots.length)}
         style={styles.body}
+        ref={bodyRef}
       >
         <main
           data-testid="reader-main"
           data-together={together ? "true" : "false"}
+          data-layout={narrow ? "stacked" : "panes"}
           style={{
             ...styles.main,
-            // Closed tab = centred + expanded reading column (only when no
-            // subject page shares the workspace).
-            maxWidth: highlightsTabOpen || subjectOpen ? "none" : "60rem",
-            margin: highlightsTabOpen || subjectOpen ? "0" : "0 auto",
+            flexDirection: narrow ? "column" : "row",
+            flexWrap: "nowrap",
+            // Closed tab = centred + expanded reading column (only when a single
+            // source reads solo with no subject sharing the workspace).
+            maxWidth:
+              highlightsTabOpen || subjectOpen || paneSlots.length > 1
+                ? "none"
+                : "60rem",
+            margin:
+              highlightsTabOpen || subjectOpen || paneSlots.length > 1
+                ? "0"
+                : "0 auto",
           }}
         >
-          {openSourceIds.map((sourceId) => (
-            <SourcePane
-              key={sourceId}
+          {narrow && (
+            <div data-testid="responsive-flow-stub" style={styles.responsiveStub} role="note">
+              Narrow screen: the three-pane editing workspace stacks into a
+              single-column flow. Panes appear in order (source → subject →
+              source) rather than as a squeezed miniature. Side-by-side editing
+              is a wide-screen experience (see docs/MILESTONE-MATRIX.md).
+            </div>
+          )}
+
+          {paneSlots.map((slot, i) => (
+            <PaneGroup
+              key={slot.slotId}
+              last={i === paneSlots.length - 1}
+              narrow={narrow}
+              weight={wb.paneWidth(slot.slotId)}
+              onResize={(weight) => {
+                wb.setPaneWidth(slot.slotId, weight);
+                bump();
+              }}
+              slotId={slot.slotId}
+            >
+              {slot.kind === "source" ? (
+                <SourcePane
+                  wb={wb}
+                  sourceId={slot.sourceId!}
+                  suppressMotion={suppressMotion}
+                  returnTarget={
+                    returnTarget && returnTarget.sourceId === slot.sourceId
+                      ? returnTarget
+                      : null
+                  }
+                  openSourceIds={openSourceIds}
+                  onScroll={() => bump()}
+                  registerScroll={(el) => registerPaneScroll(slot.slotId, el)}
+                  bump={bump}
+                />
+              ) : (
+                /* Subject editor sits ALONGSIDE the reader as a first-class
+                   pane; source-return never closes or replaces it (A17). It is
+                   NEVER hidden behind a modal while composing (section 8.2). */
+                <div
+                  style={{ height: "100%" }}
+                  ref={(el) => registerPaneScroll("subject", el)}
+                >
+                  <SubjectEditor
+                    wb={wb}
+                    pageId={openSubjectPageId!}
+                    onFollowSource={followSource}
+                    onClose={() => {
+                      wb.closeSubjectPage();
+                      bump();
+                    }}
+                    bump={bump}
+                  />
+                </div>
+              )}
+            </PaneGroup>
+          ))}
+
+          {/* Passage-to-evidence lines route through the inter-pane margin and
+              never obstruct readability (section 10.2). Presentation only. */}
+          {subjectOpen && !narrow && (
+            <PassageEvidenceLines
               wb={wb}
-              sourceId={sourceId}
-              suppressMotion={suppressMotion}
-              returnTarget={
-                returnTarget && returnTarget.sourceId === sourceId ? returnTarget : null
-              }
+              bodyRef={bodyRef}
+              paneScrollRefs={paneScrollRefs}
+              visible={linesVisible}
               bump={bump}
             />
-          ))}
+          )}
         </main>
-
-        {/* Subject editor sits ALONGSIDE the reader; source-return never
-            closes or replaces it (A17). */}
-        {subjectOpen && (
-          <SubjectEditor
-            wb={wb}
-            pageId={openSubjectPageId!}
-            onFollowSource={followSource}
-            onClose={() => {
-              wb.closeSubjectPage();
-              bump();
-            }}
-            bump={bump}
-          />
-        )}
 
         {/* Closed tab reserves ZERO width: the aside is not rendered at all. */}
         {highlightsTabOpen && (
@@ -205,6 +313,89 @@ export function Reader({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * A pane wrapper that applies the pane's flex-grow WEIGHT (adjustable widths,
+ * section 8.2) and renders a draggable divider after it (except the last pane).
+ * The weight ratio is the durable-across-transitions pane configuration (R19);
+ * dragging the divider calls back into the Workbench so the ratio survives
+ * layout changes.
+ */
+function PaneGroup({
+  children,
+  last,
+  narrow,
+  weight,
+  onResize,
+  slotId,
+}: {
+  children: React.ReactNode;
+  last: boolean;
+  narrow: boolean;
+  weight: number;
+  onResize: (weight: number) => void;
+  slotId: string;
+}): JSX.Element {
+  const ref = useRef<HTMLDivElement>(null);
+  const dragging = useRef(false);
+
+  const onPointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      e.preventDefault();
+      dragging.current = true;
+      const startX = e.clientX;
+      const startWidth = ref.current?.getBoundingClientRect().width ?? 1;
+      const startWeight = weight;
+      const move = (ev: PointerEvent): void => {
+        if (!dragging.current) return;
+        const dx = ev.clientX - startX;
+        // Convert pixel delta into a proportional weight change.
+        const factor = (startWidth + dx) / Math.max(1, startWidth);
+        onResize(Math.max(0.15, startWeight * factor));
+      };
+      const up = (): void => {
+        dragging.current = false;
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+    },
+    [weight, onResize],
+  );
+
+  return (
+    <>
+      <div
+        ref={ref}
+        data-testid="workspace-pane"
+        data-slot-id={slotId}
+        style={{
+          flex: narrow ? "1 1 auto" : `${weight} 1 0`,
+          minWidth: 0,
+          minHeight: narrow ? "60vh" : 0,
+          height: narrow ? "auto" : "100%",
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        {children}
+      </div>
+      {!last && !narrow && (
+        <div
+          data-testid="pane-divider"
+          data-slot-id={slotId}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize pane"
+          onPointerDown={onPointerDown}
+          style={styles.divider}
+        />
+      )}
+    </>
   );
 }
 
@@ -227,12 +418,18 @@ function SourcePane({
   sourceId,
   suppressMotion,
   returnTarget,
+  openSourceIds,
+  onScroll,
+  registerScroll,
   bump,
 }: {
   wb: Workbench;
   sourceId: SourceId;
   suppressMotion: boolean;
   returnTarget: ReturnTarget | null;
+  openSourceIds: readonly SourceId[];
+  onScroll: () => void;
+  registerScroll: (el: HTMLElement | null) => void;
   bump: () => void;
 }): JSX.Element {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -427,17 +624,51 @@ function SourcePane({
     };
   }, [ready, sourceId]);
 
+  // Other sources (not currently open in any pane) the user can switch THIS
+  // pane to — keeps the same subject while a reader pane shows a third paper
+  // (section 8.2 note).
+  const switchable = wb
+    .rawData()
+    .sources.filter((s) => s.id !== sourceId && !openSourceIds.includes(s.id));
+
   return (
-    <div data-testid="source-pane" data-source-id={sourceId} data-ready={ready ? "true" : "false"}>
+    <div
+      data-testid="source-pane"
+      data-source-id={sourceId}
+      data-ready={ready ? "true" : "false"}
+      style={styles.pane}
+    >
       <div style={styles.paneHeader}>
         <strong>{source?.title ?? "…"}</strong>
-        <button
-          data-testid="start-range"
-          onClick={() => setRangeMode((v) => !v)}
-          aria-pressed={rangeMode}
-        >
-          Comment on page range
-        </button>
+        <span style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
+          {switchable.length > 0 && (
+            <select
+              data-testid="switch-paper"
+              aria-label="Switch this pane to another paper"
+              value=""
+              onChange={(e) => {
+                const to = e.target.value;
+                if (!to) return;
+                wb.switchReaderPane(sourceId, to as SourceId);
+                bump();
+              }}
+            >
+              <option value="">Switch paper…</option>
+              {switchable.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.title}
+                </option>
+              ))}
+            </select>
+          )}
+          <button
+            data-testid="start-range"
+            onClick={() => setRangeMode((v) => !v)}
+            aria-pressed={rangeMode}
+          >
+            Comment on page range
+          </button>
+        </span>
       </div>
 
       {rangeMode && source && (
@@ -477,11 +708,19 @@ function SourcePane({
       )}
 
       <div
-        ref={mountRef}
-        data-testid="pdf-mount"
-        style={styles.mount}
-        onMouseUp={onMouseUp}
-      />
+        ref={(el) => registerScroll(el)}
+        data-testid="pane-scroll"
+        data-source-id={sourceId}
+        style={styles.paneScroll}
+        onScroll={onScroll}
+      >
+        <div
+          ref={mountRef}
+          data-testid="pdf-mount"
+          style={styles.mount}
+          onMouseUp={onMouseUp}
+        />
+      </div>
 
       {toolbar && (
         <SelectionToolbar
@@ -952,6 +1191,156 @@ function swatch(c: HighlightColor): string {
   return { yellow: "#ffdd57", green: "#82dc96", blue: "#82beff", pink: "#ff96c8" }[c];
 }
 
+/**
+ * The passage-to-evidence line layer for the editing workspace (spec section
+ * 10.2). It draws one SVG polyline per `passageEvidenceLine`, routing from the
+ * source pane's edge toward the subject pane through the inter-pane margin so
+ * it NEVER crosses over readable text. Lines recompute on source scroll, editor
+ * scroll, zoom and pane resize via a live geometry pass over the registered
+ * pane scroll containers + evidence chips. The visibility toggle controls only
+ * whether this layer renders — the underlying line DATA is always present, so
+ * hiding is non-destructive (A08/R08 foundation). There is NO camera motion:
+ * the layer never scrolls or re-centres any pane.
+ */
+function PassageEvidenceLines({
+  wb,
+  bodyRef,
+  paneScrollRefs,
+  visible,
+  bump,
+}: {
+  wb: Workbench;
+  bodyRef: React.RefObject<HTMLDivElement>;
+  paneScrollRefs: React.MutableRefObject<Map<string, HTMLElement>>;
+  visible: boolean;
+  bump: () => void;
+}): JSX.Element {
+  const [segments, setSegments] = useState<
+    { evidenceId: string; x1: number; y1: number; x2: number; y2: number }[]
+  >([]);
+  const frame = useRef<number>(0);
+
+  const recompute = useCallback(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    const bodyBox = body.getBoundingClientRect();
+    const lines = wb.passageEvidenceLines();
+    const subjectEl = paneScrollRefs.current.get("subject");
+    const next: typeof segments = [];
+    for (const line of lines) {
+      const sourceScroll = paneScrollRefs.current.get(line.sourceId);
+      if (!sourceScroll || !subjectEl) continue;
+      // Anchor the source end at the source passage's page container when it is
+      // on screen; otherwise at the pane's vertical centre (still no motion).
+      const pageEl = sourceScroll.querySelector(
+        `.pdf-page[data-page-index="${line.sourcePageIndex}"]`,
+      ) as HTMLElement | null;
+      const srcBox = (pageEl ?? sourceScroll).getBoundingClientRect();
+      const paneBox = sourceScroll.getBoundingClientRect();
+      // Clamp the source y into the visible pane band so a scrolled-away
+      // passage still yields a sensible margin endpoint (never off-canvas).
+      const srcY = Math.min(
+        Math.max(srcBox.top + srcBox.height / 2, paneBox.top + 6),
+        paneBox.bottom - 6,
+      );
+      // The subject end anchors at the matching evidence chip if present.
+      const chip = subjectEl.querySelector(
+        `[data-testid="evidence-chip"][data-evidence-id="${line.evidenceId}"]`,
+      ) as HTMLElement | null;
+      const subjBox = subjectEl.getBoundingClientRect();
+      const dstBox = chip ? chip.getBoundingClientRect() : subjBox;
+      const dstY = Math.min(
+        Math.max(dstBox.top + dstBox.height / 2, subjBox.top + 6),
+        subjBox.bottom - 6,
+      );
+      // Route from the source pane's INNER edge (toward the subject) to the
+      // subject pane's INNER edge — i.e. through the inter-pane gutter.
+      const sourceLeftOfSubject = paneBox.left < subjBox.left;
+      const x1 = (sourceLeftOfSubject ? paneBox.right : paneBox.left) - bodyBox.left;
+      const x2 = (sourceLeftOfSubject ? subjBox.left : subjBox.right) - bodyBox.left;
+      next.push({
+        evidenceId: line.evidenceId,
+        x1,
+        y1: srcY - bodyBox.top,
+        x2,
+        y2: dstY - bodyBox.top,
+      });
+    }
+    setSegments(next);
+  }, [wb, bodyRef, paneScrollRefs]);
+
+  // Recompute on any scroll (source or editor), resize, and after mount. We use
+  // rAF-coalesced passive listeners so dragging a divider or scrolling a pane
+  // updates lines smoothly without obstructing interaction, and without ever
+  // moving a pane (presentation only, no camera motion).
+  useEffect(() => {
+    const schedule = (): void => {
+      cancelAnimationFrame(frame.current);
+      frame.current = requestAnimationFrame(recompute);
+    };
+    schedule();
+    const scrolls = [...paneScrollRefs.current.values()];
+    // The subject editor's inner scroller (styles.doc) is the element that
+    // actually scrolls the composition, so listen there too (editor scroll).
+    const subjectWrapper = paneScrollRefs.current.get("subject");
+    const subjectDoc = subjectWrapper?.querySelector(
+      '[data-testid="subject-doc"]',
+    ) as HTMLElement | null;
+    const listenEls = subjectDoc ? [...scrolls, subjectDoc] : scrolls;
+    for (const el of listenEls) el.addEventListener("scroll", schedule, { passive: true });
+    window.addEventListener("resize", schedule);
+    const ro = new ResizeObserver(schedule);
+    if (bodyRef.current) ro.observe(bodyRef.current);
+    for (const el of scrolls) ro.observe(el);
+    return () => {
+      cancelAnimationFrame(frame.current);
+      for (const el of listenEls) el.removeEventListener("scroll", schedule);
+      window.removeEventListener("resize", schedule);
+      ro.disconnect();
+    };
+    // `bump` is intentionally not a dep; recompute closes over live refs.
+  }, [recompute, paneScrollRefs, bodyRef, bump]);
+
+  const count = segments.length;
+
+  return (
+    <svg
+      data-testid="passage-evidence-lines"
+      data-visible={visible ? "true" : "false"}
+      data-line-count={String(count)}
+      style={{
+        position: "absolute",
+        inset: 0,
+        width: "100%",
+        height: "100%",
+        pointerEvents: "none",
+        // The toggle changes PRESENTATION ONLY: hidden lines keep their data
+        // (data-line-count stays accurate) but are not painted.
+        visibility: visible ? "visible" : "hidden",
+        zIndex: 5,
+      }}
+      aria-hidden="true"
+    >
+      {segments.map((s) => {
+        const midX = (s.x1 + s.x2) / 2;
+        return (
+          <path
+            key={s.evidenceId}
+            data-testid="evidence-line"
+            data-evidence-id={s.evidenceId}
+            d={`M ${s.x1} ${s.y1} C ${midX} ${s.y1}, ${midX} ${s.y2}, ${s.x2} ${s.y2}`}
+            fill="none"
+            stroke="#1a56db"
+            strokeWidth={1.5}
+            strokeOpacity={0.55}
+            strokeDasharray="4 3"
+          />
+        );
+      })}
+    </svg>
+  );
+}
+
 const styles: Record<string, React.CSSProperties> = {
   root: { display: "flex", flexDirection: "column", height: "100vh" },
   toolbar: {
@@ -964,7 +1353,44 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#fafafa",
   },
   body: { display: "flex", flex: 1, overflow: "hidden" },
-  main: { flex: 1, overflow: "auto", padding: "1rem", display: "flex", gap: "1.5rem", flexWrap: "wrap" },
+  main: {
+    flex: 1,
+    position: "relative",
+    overflow: "hidden",
+    display: "flex",
+    alignItems: "stretch",
+  },
+  pane: {
+    display: "flex",
+    flexDirection: "column",
+    height: "100%",
+    minHeight: 0,
+    minWidth: 0,
+    borderRight: "1px solid #eee",
+  },
+  paneScroll: {
+    flex: 1,
+    minHeight: 0,
+    overflow: "auto",
+    padding: "1rem",
+  },
+  divider: {
+    flex: "0 0 8px",
+    cursor: "col-resize",
+    background: "#e6e6e6",
+    borderLeft: "1px solid #d4d4d4",
+    borderRight: "1px solid #d4d4d4",
+    alignSelf: "stretch",
+  },
+  responsiveStub: {
+    padding: "0.75rem 1rem",
+    margin: "0.5rem",
+    background: "#fff4e5",
+    border: "1px solid #f0c38a",
+    borderRadius: "6px",
+    color: "#7a4b00",
+    fontSize: "0.85rem",
+  },
   paneHeader: {
     display: "flex",
     alignItems: "center",

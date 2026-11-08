@@ -54,10 +54,10 @@ Test kinds: `unit` (Vitest), `e2e` (Playwright chromium, real browser), `n/a`.
 | R13 | Reproducible fixture generation script             | M0        | n/a       | implemented |
 | R14 | Vitest harness                                     | M0        | unit      | implemented |
 | R15 | Playwright real-browser harness                    | M0        | e2e       | implemented |
-| R16 | Highlighting validated first (order binding)        | M2        | e2e       | planned     |
-| R17 | Continuous page editing validated second            | M3        | e2e       | planned     |
-| R18 | Context-preserving view transitions validated third | M5        | e2e       | planned     |
-| R19 | Making annotations never auto-creates nodes/pages   | M2        | e2e       | planned     |
+| R16 | Highlighting validated first (order binding)        | M1        | e2e       | implemented (`reader-workbench.spec.ts`) |
+| R17 | Continuous page editing validated second            | M1        | e2e       | implemented (`subject-editor.spec.ts`) |
+| R18 | Context-preserving view transitions validated third | M1        | e2e       | implemented (`workspace.spec.ts`) |
+| R19 | Making annotations never auto-creates nodes/pages   | M1        | e2e       | implemented (`reader-workbench.spec.ts`) |
 | R20 | Categories never duplicate pages                    | M5        | unit      | planned     |
 
 ## M1 reading-workbench behaviours (FEAT-003, spec section 6)
@@ -92,6 +92,32 @@ D15 decisions recorded before claiming the interactions complete:
 granularity, whole-page border styling/hit area, range-citation representation)
 and `docs/decisions/ADR-0007-association-citation-state.md` (last-citation
 deletion policy, accessible association control).
+
+## M1 integrated-workspace behaviours (FEAT-005, spec sections 7.3, 8.2, 10.2)
+
+The THIRD item in the binding validation order: context-preserving view/layout
+transitions. Every row is covered by a REAL-browser Playwright test in
+`e2e/workspace.spec.ts` (real pdf.js text, real selection, real ProseMirror,
+real persistence); the presentation-only view-state invariants are additionally
+unit-tested in `src/app/workbench.workspace.test.ts`. The full M0+M1
+implemented/pending/unsupported matrix lives in `docs/MILESTONE-MATRIX.md`.
+
+| ID  | Behaviour                                                          | Test kind | Status      |
+| --- | ----------------------------------------------------------------- | --------- | ----------- |
+| 8.2 | Paper A · subject · Paper B simultaneous, editor never behind modal | e2e     | implemented |
+| 8.2 | Adjustable pane widths + independent per-pane scrolling            | e2e      | implemented |
+| 8.2 | Switch a reader pane to a THIRD paper, keep the subject             | e2e+unit | implemented |
+| 8.2 | Narrow-screen responsive flow STUB (not a squeezed miniature)      | e2e      | implemented (stub) |
+| R19 | Tab/layout transitions preserve passage + draft + pane config      | e2e+unit | implemented |
+| R19 | No forced camera motion / changed passage on transition            | e2e      | implemented |
+| A06 | Follow a quote in the workspace → exact source, page not replaced  | e2e      | implemented |
+| A08 | Passage-to-evidence line DATA (section 10.2) relates source↔evidence | e2e+unit | implemented |
+| R08 | Line visibility toggle = presentation only, never deletes links    | e2e+unit | implemented |
+| N03 | Library→Reader→workspace transitions preserve category scope        | e2e+unit | implemented |
+| N08 | Transitions preserve source identity + a meaningful passage         | e2e+unit | implemented |
+
+D-items proposed from FEAT-005 (D19–D22) are recorded in
+`docs/MILESTONE-MATRIX.md` section 8.
 
 ## Non-functional (N01–N08)
 

@@ -362,8 +362,8 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     height: "100%",
-    minWidth: "22rem",
-    borderLeft: "1px solid #ddd",
+    minWidth: 0,
+    width: "100%",
     background: "#fff",
   },
   header: {

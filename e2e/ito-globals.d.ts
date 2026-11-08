@@ -26,6 +26,14 @@ interface ItoTestApi {
   };
   pageEvidenceCount(pageId: string): number;
   evidenceResolution(evidenceId: string): string;
+  paneWidths(): Record<string, number>;
+  linesVisible(): boolean;
+  setLinesVisible(visible: boolean): void;
+  passageLineData(): { evidenceId: string; sourceId: string; sourcePageIndex: number }[];
+  categoryScope(): string | null;
+  setCategoryScope(category: string | null): void;
+  switchReaderPane(fromSourceId: string, toSourceId: string): void;
+  categories(): string[];
   graphRecordCount(): { pages: number; relationships: number; categories: number };
   forceNextSaveFailures(count: number): void;
   forceSourceVersionDrift(sourceId: string): Promise<void>;
