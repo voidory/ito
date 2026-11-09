@@ -9,11 +9,14 @@
  * It also guards the comment autosave-on-blur behaviour (4e29b1a): typing a
  * comment and then clicking OUTSIDE the popover must let the textarea blur-save
  * commit before the popover unmounts, so the draft is persisted (the <Popover>
- * dismisses on `mouseup`, after the blur, specifically to make this safe).
+ * dismisses on `mouseup`, after the blur, specifically to make this safe). That
+ * case drives open/close through React state so the outside `mouseup` genuinely
+ * unmounts the surface, and asserts BOTH that the surface left the DOM and that
+ * the draft persisted — so it fails if <Popover> reverted to `mousedown`.
  */
 
 import { afterEach, describe, expect, it } from "vitest";
-import { act, createElement } from "react";
+import { act, createElement, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { InMemoryStorageAdapter } from "../test/InMemoryStorageAdapter";
 import { sha256Hex } from "../storage";
@@ -140,7 +143,7 @@ describe("FEAT-001 Escape dismisses the annotation overlays", () => {
     expect(closed).toBe(true);
   });
 
-  it("clicking outside the popover commits the comment autosave-on-blur before closing (4e29b1a)", async () => {
+  it("clicking outside the popover commits the comment autosave-on-blur before it unmounts (4e29b1a)", async () => {
     (window as unknown as { innerWidth: number }).innerWidth = 1000;
     const wb = await Workbench.open(new InMemoryStorageAdapter());
     const src = await importHashed(wb);
@@ -153,16 +156,27 @@ describe("FEAT-001 Escape dismisses the annotation overlays", () => {
       sourceId: src.id,
       rect: { left: 300, top: 300, right: 300, bottom: 300, width: 0 },
     };
-    await render(
-      createElement(HighlightEditPopover, {
+
+    // Drive open/close through real React state so the outside `mouseup`
+    // genuinely UNMOUNTS the surface (onClose sets open=false). This is what
+    // exercises the save-before-unmount ordering 4e29b1a protects: if <Popover>
+    // dismissed on `mousedown` the surface would unmount before the textarea's
+    // blur-save ran, and the typed comment would be lost.
+    function Harness(): ReturnType<typeof createElement> | null {
+      const [open, setOpen] = useState(true);
+      if (!open) return null;
+      return createElement(HighlightEditPopover, {
         wb,
         popover,
-        onClose: () => undefined,
+        onClose: () => setOpen(false),
         bump: () => undefined,
-      }),
-    );
+      });
+    }
+
+    await render(createElement(Harness));
     const textarea = q('[data-testid="comment-input"]') as HTMLTextAreaElement;
     expect(textarea).not.toBeNull();
+    expect(q('[data-testid="highlight-edit-popover"]')).not.toBeNull();
 
     // Type a comment into the textarea.
     await act(async () => {
@@ -175,17 +189,34 @@ describe("FEAT-001 Escape dismisses the annotation overlays", () => {
       textarea.dispatchEvent(new Event("input", { bubbles: true }));
     });
 
-    // Click OUTSIDE the surface: mousedown -> the textarea blurs (autosave),
-    // then mouseup -> the <Popover> dismisses. The blur save must have run.
+    // Click OUTSIDE the surface and model the real pointer gesture step by step:
+    //   mousedown (pointer lands outside)
+    //   -> the textarea blurs (in a browser the focus change does this; the
+    //      React onBlur handler fires the autosave) — but this only reaches a
+    //      LIVE handler if the surface is still mounted at blur time
+    //   -> mouseup (the <Popover> dismisses here, unmounting the surface).
+    // With `mouseup` dismissal the surface is still mounted when the textarea
+    // blurs, so onBlur autosaves. If <Popover> reverted to `mousedown` the
+    // surface would already be unmounted by the time the textarea blurs, its
+    // React onBlur handler would be detached, the autosave would never run, and
+    // the comment assertion below would fail.
     await act(async () => {
       document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    });
+    await act(async () => {
+      // React delegates onBlur via the bubbling `focusout` event.
+      textarea.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
       textarea.blur();
+    });
+    await act(async () => {
       document.body.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
     });
     await act(async () => {
       await Promise.resolve();
     });
 
+    // Both must hold: the surface actually unmounted AND the draft persisted.
+    expect(q('[data-testid="highlight-edit-popover"]')).toBeNull();
     expect(wb.viewFor(a.annotation.id)?.annotation.comment).toBe("a note worth keeping");
   });
 });

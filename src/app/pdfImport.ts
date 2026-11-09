@@ -79,11 +79,22 @@ export async function readPdfMetadata(bytes: Uint8Array): Promise<PdfImportMetad
   }
 }
 
-/** Parse a 4-digit year out of a PDF date string ("D:YYYYMMDDHHmmSS"). */
-function yearFromPdfDate(value: unknown): string | undefined {
+/**
+ * Parse a 4-digit year out of a PDF date string ("D:YYYYMMDDHHmmSS").
+ *
+ * Prefers the leading `D:YYYY` PDF-date form; otherwise falls back to the first
+ * 4-digit run anywhere in the string. Either way the result is constrained to a
+ * plausible-year range (1500-2099, the same `\b(1[5-9]\d{2}|20\d{2})\b` window
+ * Library.tsx's title regex uses) so a malformed date field cannot yield a
+ * non-year number — in which case we return `undefined` and the caller's
+ * title-regex/em-dash fallback still applies. Best-effort and never throws.
+ */
+export function yearFromPdfDate(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const m = value.match(/D:(\d{4})/) ?? value.match(/(\d{4})/);
-  return m ? m[1] : undefined;
+  if (!m) return undefined;
+  const year = m[1]!;
+  return /^(1[5-9]\d{2}|20\d{2})$/.test(year) ? year : undefined;
 }
 
 /** Import a single PDF File as a Source. Resolves to the import result. */
