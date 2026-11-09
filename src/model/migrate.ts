@@ -92,6 +92,11 @@ function fillDefaults(data: BrainData): BrainData {
       data.tentativeAssociations ?? defaults.tentativeAssociations,
     captures: data.captures ?? defaults.captures,
     revisions: data.revisions ?? defaults.revisions,
+    // M7 (H06, H04): additive optional collections; a v2 brain without them
+    // reads fine and gets the empty defaults here (no version bump needed).
+    checkpoints: data.checkpoints ?? defaults.checkpoints ?? [],
+    reflections: data.reflections ?? defaults.reflections ?? [],
+    revisionComments: data.revisionComments ?? defaults.revisionComments ?? {},
     presentation: {
       ...defaults.presentation,
       ...(data.presentation ?? {}),

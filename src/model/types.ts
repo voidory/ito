@@ -37,8 +37,10 @@ import type {
   BrainId,
   CaptureId,
   CategoryId,
+  CheckpointId,
   EvidenceInstanceId,
   PageId,
+  ReflectionId,
   RelationshipId,
   RevisionId,
   SourceId,
@@ -348,6 +350,28 @@ export interface Capture {
  * change can be reviewed or reversed. All new fields are OPTIONAL and readonly
  * so existing revisions and v1 data still typecheck and load with no migration.
  */
+/**
+ * M7 (H01, H02) classification of what a Revision recorded, so the history
+ * timeline can describe each change and the coalescing logic can tell a
+ * same-Page prose edit (coalesced within a 2s idle window) apart from a
+ * structural action (quote insert/remove/reorder, annotation comment, range
+ * boundary, tentative association, category, relationship) which flushes
+ * immediately. Optional/additive so existing (M3) revisions still typecheck.
+ */
+export type RevisionKind =
+  | "page-prose"
+  | "quote-insert"
+  | "quote-remove"
+  | "quote-reorder"
+  | "annotation-comment"
+  | "range-boundary"
+  | "tentative-association"
+  | "category"
+  | "relationship"
+  | "delete-highlight-and-quotes"
+  | "restore"
+  | "other";
+
 export interface Revision {
   readonly id: RevisionId;
   readonly publicationRevision: number;
@@ -361,6 +385,61 @@ export interface Revision {
   readonly afterSnapshot?: unknown;
   /** Human-readable description of what the revision recorded. */
   readonly summary?: string;
+  /**
+   * M7 (H01/H02) structured classification of the change. Optional/additive;
+   * absent on pre-M7 revisions. `"page-prose"` revisions are the ones coalesced
+   * within COALESCE_WINDOW_MS; every other kind is flushed immediately.
+   */
+  readonly kind?: RevisionKind;
+  /**
+   * M7 (H03) creation-timezone day key `YYYY-MM-DD` derived from `createdAt`,
+   * used to group the timeline by day. Optional/additive; the panel recomputes
+   * it from `createdAt` when absent so old revisions still group correctly.
+   */
+  readonly dateKey?: string;
+}
+
+/**
+ * M7 (H06, D13) periodic history checkpoint: a validated point-in-time snapshot
+ * of the brain's STRUCTURED state written every CHECKPOINT_INTERVAL revisions so
+ * `reconstructRevisionState` can replay forward from the nearest prior
+ * checkpoint instead of from the very beginning.
+ *
+ * CRITICAL (H06): `stateSnapshot` MUST exclude the `revisions` and `checkpoints`
+ * collections (no recursive history nesting) and MUST NOT duplicate PDF binary
+ * bytes - it snapshots only the structured records (sources carry asset ids,
+ * not bytes). All fields readonly; the whole collection is optional on BrainData
+ * so a pre-M7 brain loads with no migration.
+ */
+export interface Checkpoint {
+  readonly id: CheckpointId;
+  readonly createdAt: Timestamp;
+  /** Index into `revisions` of the last revision included in this snapshot. */
+  readonly revisionIndex: number;
+  /** Id of the last revision included in this snapshot (for direct lookup). */
+  readonly afterRevisionId: RevisionId;
+  /**
+   * Structured BrainData with `revisions` and `checkpoints` EXCLUDED (H06) and
+   * no asset bytes. Opaque to the model layer; replayed by the Workbench.
+   */
+  readonly stateSnapshot: unknown;
+}
+
+/**
+ * M7 (H04, D14) a multi-span reflection: a user's written analysis that LINKS a
+ * cherry-picked set of revisions (possibly spanning multiple days / weeks /
+ * months). A reflection NEVER rewrites a Revision and NEVER creates a graph node
+ * (Page/Relationship/Category) - it is a pure annotation over history.
+ */
+export interface ReflectionEntry {
+  readonly id: ReflectionId;
+  readonly text: string;
+  readonly linkedRevisionIds: readonly RevisionId[];
+  /** Earliest creation-timezone day key `YYYY-MM-DD` of the linked revisions. */
+  readonly startDateKey: string;
+  /** Latest creation-timezone day key `YYYY-MM-DD` of the linked revisions. */
+  readonly endDateKey: string;
+  readonly createdAt: Timestamp;
 }
 
 /**
@@ -497,4 +576,23 @@ export interface BrainData {
   readonly captures: readonly Capture[];
   readonly revisions: readonly Revision[];
   readonly presentation: PresentationState;
+  /**
+   * M7 (H06, D13) periodic history checkpoints. Optional/readonly and additive
+   * so a pre-M7 (v2) brain loads with no migration and SCHEMA_VERSION stays 2;
+   * brain.ts seeds it to `[]` and migrate.ts defaults it. Written every
+   * CHECKPOINT_INTERVAL revisions by the Workbench.
+   */
+  readonly checkpoints?: readonly Checkpoint[];
+  /**
+   * M7 (H04, D14) multi-span reflections over history. Optional/readonly and
+   * additive (seeded to `[]`). Reflections never rewrite revisions and never
+   * create graph nodes.
+   */
+  readonly reflections?: readonly ReflectionEntry[];
+  /**
+   * M7 (H04) per-revision user comments, keyed by revision id string. A
+   * RevisionComment is a note ABOUT a change; it never rewrites the revision.
+   * Optional/readonly and additive (seeded to `{}`).
+   */
+  readonly revisionComments?: Readonly<Record<string, string>>;
 }

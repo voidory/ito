@@ -38,6 +38,12 @@ export function createEmptyBrainData(
     tentativeAssociations: [],
     captures: [],
     revisions: [],
+    // M7 (H06, H04): periodic history checkpoints, multi-span reflections, and
+    // per-revision comments. All optional/additive so a v2 brain loads fine;
+    // seeded here so a fresh brain is fully populated. SCHEMA_VERSION stays 2.
+    checkpoints: [],
+    reflections: [],
+    revisionComments: {},
     presentation: {
       hiddenPageIds: [],
       hiddenRelationshipIds: [],

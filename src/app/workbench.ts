@@ -22,7 +22,9 @@ import {
   newAssetId,
   newCategoryId,
   newEvidenceInstanceId,
+  newCheckpointId,
   newPageId,
+  newReflectionId,
   newRelationshipId,
   newRevisionId,
   newSourceId,
@@ -38,14 +40,18 @@ import {
   type BrainManifest,
   type Category,
   type CategoryId,
+  type Checkpoint,
   type EvidenceInstance,
   type NormalizedRect,
   type Page,
   type PageId,
+  type ReflectionEntry,
   type Relationship,
   type RelationshipId,
   type RelationshipKind,
   type Revision,
+  type RevisionId,
+  type RevisionKind,
   type ScopeAnchor,
   type Source,
   type SourceId,
@@ -97,6 +103,26 @@ function emptyDocJson(): DocumentJson {
   return { type: "doc", content: [{ type: "paragraph" }] };
 }
 
+/**
+ * UTF-8 byte length of a string (M7 H07 overhead measurement). Uses TextEncoder
+ * when available (browser + Node 22) and falls back to a UTF-8 code-unit count
+ * so the measurement works in any runtime the tests use.
+ */
+function utf8ByteLength(s: string): number {
+  if (typeof TextEncoder !== "undefined") return new TextEncoder().encode(s).length;
+  let bytes = 0;
+  for (let i = 0; i < s.length; i += 1) {
+    const code = s.charCodeAt(i);
+    if (code < 0x80) bytes += 1;
+    else if (code < 0x800) bytes += 2;
+    else if (code >= 0xd800 && code <= 0xdbff) {
+      bytes += 4;
+      i += 1;
+    } else bytes += 3;
+  }
+  return bytes;
+}
+
 /** The highlight style an annotation is committed with. */
 export type HighlightStyle = "highlight" | "underline";
 
@@ -117,6 +143,61 @@ export interface AnnotationStyle {
 
 /** Default style applied when a selection is committed with no explicit color. */
 export const DEFAULT_STYLE: AnnotationStyle = { kind: "highlight", color: "yellow" };
+
+/**
+ * M7 (H01) idle window for coalescing same-Page prose typing into a single
+ * Revision. Edits to the SAME page within this window fold into one buffered
+ * revision; a different page, a structural action, or an explicit
+ * `flushPendingRevision()` commits the buffer first. Deterministic in tests:
+ * `recordProseEdit` compares `createdAt` timestamps against this window rather
+ * than relying on a wall-clock timer so a test can advance "time" by passing an
+ * explicit `now`.
+ */
+export const COALESCE_WINDOW_MS = 2000;
+
+/**
+ * M7 (H06) number of revisions between automatic Checkpoints. A validated
+ * Checkpoint is written whenever the revision count crosses a multiple of this.
+ */
+export const CHECKPOINT_INTERVAL = 20;
+
+/** A buffered, not-yet-committed coalesced prose-edit revision (H01). */
+interface PendingProseRevision {
+  readonly pageId: PageId;
+  readonly beforeDocumentJson: unknown;
+  afterDocumentJson: unknown;
+  readonly firstEditAt: string;
+  lastEditAt: string;
+}
+
+/** Input to `createReflection` (H04, D14). */
+export interface ReflectionInput {
+  readonly text: string;
+  readonly linkedRevisionIds: readonly string[];
+}
+
+/** Shape returned by `measureHistoryOverhead` (H07). */
+export interface HistoryOverhead {
+  readonly revisionCount: number;
+  readonly checkpointCount: number;
+  readonly deltaBytes: number;
+  readonly checkpointBytes: number;
+  readonly replayDurationMs: number;
+}
+
+/**
+ * Result of `reconstructRevisionState` (H05). On a complete delta chain it
+ * returns the reconstructed structured state; when the chain is broken it
+ * returns an explicit `missing-segment` result carrying the ids it could not
+ * replay and the best-effort fallback state it could still assemble.
+ */
+export type ReconstructResult =
+  | { readonly status: "ok"; readonly state: unknown }
+  | {
+      readonly status: "missing-segment";
+      readonly missingIds: readonly string[];
+      readonly fallbackState: unknown;
+    };
 
 /**
  * Legacy M1 sentinel tag (read-only migration). M1 smuggled annotation styles
@@ -388,6 +469,12 @@ export class Workbench {
    * via 'Try Import Anyway' or discard. null = nothing staged.
    */
   private stagedImport: StagedImport | null = null;
+  /**
+   * M7 (H01) the buffered, not-yet-committed coalesced prose-edit revision.
+   * Same-page prose typing within COALESCE_WINDOW_MS folds into this buffer;
+   * `flushPendingRevision()` commits it. null = nothing buffered.
+   */
+  private pendingProse: PendingProseRevision | null = null;
 
   private constructor(
     private readonly storage: StorageAdapter,
@@ -2349,6 +2436,399 @@ export class Workbench {
     );
     if (annotationIds.size === 0) return false;
     return this.data.evidenceInstances.some((ev) => annotationIds.has(ev.annotationId));
+  }
+
+  // -- M7 linked history, checkpoints & reflection (H01-H07, D13, D14) ------
+
+  /** Read-only view of the recorded revisions (oldest first). */
+  revisions(): readonly Revision[] {
+    return this.data.revisions;
+  }
+
+  /** Read-only view of the periodic history checkpoints (H06). */
+  checkpoints(): readonly Checkpoint[] {
+    return this.data.checkpoints ?? [];
+  }
+
+  /** Read-only view of the recorded multi-span reflections (H04, D14). */
+  reflections(): readonly ReflectionEntry[] {
+    return this.data.reflections ?? [];
+  }
+
+  /** Read-only view of the per-revision comments (H04). */
+  revisionComments(): Readonly<Record<string, string>> {
+    return this.data.revisionComments ?? {};
+  }
+
+  /**
+   * Creation-timezone day key `YYYY-MM-DD` for an ISO timestamp (H03). Uses the
+   * LOCAL calendar date so the timeline groups by the author's day, matching
+   * the HistoryReflectionPanel's grouping.
+   */
+  static dateKeyOf(iso: string): string {
+    const d = new Date(iso);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+
+  /**
+   * M7 (H01) record a prose edit to a Subject Page's documentJson. Same-page
+   * edits within COALESCE_WINDOW_MS COALESCE into one buffered revision; an edit
+   * to a DIFFERENT page (or after the idle window elapses) first flushes the
+   * pending buffer, then starts a new one. The buffer is committed to
+   * `data.revisions` by `flushPendingRevision()`. This records NO revision by
+   * itself - it only mutates the page + buffers the coalesced delta.
+   *
+   * `now` is injectable so tests can simulate the passage of the idle window
+   * deterministically without a wall-clock timer.
+   */
+  async recordProseEdit(
+    pageId: PageId,
+    nextDocumentJson: unknown,
+    now: string = new Date().toISOString(),
+  ): Promise<void> {
+    const idx = this.data.pages.findIndex((p) => p.id === pageId);
+    if (idx < 0) return;
+    const page = this.data.pages[idx]!;
+    const beforeForBuffer = structuredClone(page.documentJson);
+
+    // If the buffer belongs to a different page or the idle window elapsed,
+    // flush it before starting a fresh coalescing buffer for this edit.
+    if (this.pendingProse) {
+      const sincePrev =
+        new Date(now).getTime() - new Date(this.pendingProse.lastEditAt).getTime();
+      if (this.pendingProse.pageId !== pageId || sincePrev > COALESCE_WINDOW_MS) {
+        await this.flushPendingRevision(this.pendingProse.lastEditAt);
+      }
+    }
+
+    if (this.pendingProse && this.pendingProse.pageId === pageId) {
+      // Fold into the existing buffer: keep the ORIGINAL before-snapshot, extend
+      // the after-snapshot and the last-edit timestamp.
+      this.pendingProse.afterDocumentJson = structuredClone(nextDocumentJson);
+      this.pendingProse.lastEditAt = now;
+    } else {
+      this.pendingProse = {
+        pageId,
+        beforeDocumentJson: beforeForBuffer,
+        afterDocumentJson: structuredClone(nextDocumentJson),
+        firstEditAt: now,
+        lastEditAt: now,
+      };
+    }
+
+    // Apply the edit to the live page (prose edits are not deferred, only the
+    // REVISION record is coalesced).
+    const pages = this.data.pages.slice();
+    pages[idx] = { ...page, documentJson: nextDocumentJson, updatedAt: now };
+    this.data = { ...this.data, pages };
+    await this.persist();
+  }
+
+  /**
+   * M7 (H01) commit the buffered coalesced prose-edit revision (if any) as ONE
+   * `page-prose` Revision. Public + deterministic so tests can force the
+   * coalescing boundary. A no-op when nothing is buffered.
+   */
+  async flushPendingRevision(now: string = new Date().toISOString()): Promise<void> {
+    const pending = this.pendingProse;
+    if (!pending) return;
+    this.pendingProse = null;
+    const createdAt = pending.lastEditAt ?? now;
+    await this.appendRevision({
+      kind: "page-prose",
+      label: "page-prose",
+      createdAt,
+      affectedObjectIds: [pending.pageId],
+      beforeSnapshot: { pageId: pending.pageId, documentJson: pending.beforeDocumentJson },
+      afterSnapshot: { pageId: pending.pageId, documentJson: pending.afterDocumentJson },
+      summary: `Edited page ${pending.pageId}`,
+    });
+  }
+
+  /**
+   * M7 (H02) record a STRUCTURAL action as its own Revision immediately (never
+   * coalesced). Flushes any pending prose buffer first so history stays ordered.
+   * Structural kinds: quote insert/remove/reorder, annotation comments, range
+   * boundaries, tentative associations, categories, relationships.
+   */
+  async recordStructuralRevision(input: {
+    kind: RevisionKind;
+    label?: string;
+    affectedObjectIds?: readonly string[];
+    beforeSnapshot?: unknown;
+    afterSnapshot?: unknown;
+    summary?: string;
+    now?: string;
+  }): Promise<Revision> {
+    // A structural action supersedes buffered prose typing; flush it first.
+    if (this.pendingProse) await this.flushPendingRevision(input.now);
+    return this.appendRevision({
+      kind: input.kind,
+      label: input.label ?? input.kind,
+      createdAt: input.now ?? new Date().toISOString(),
+      ...(input.affectedObjectIds !== undefined
+        ? { affectedObjectIds: input.affectedObjectIds }
+        : {}),
+      ...(input.beforeSnapshot !== undefined
+        ? { beforeSnapshot: input.beforeSnapshot }
+        : {}),
+      ...(input.afterSnapshot !== undefined
+        ? { afterSnapshot: input.afterSnapshot }
+        : {}),
+      ...(input.summary !== undefined ? { summary: input.summary } : {}),
+    });
+  }
+
+  /**
+   * Append a fully-formed Revision to `data.revisions`, stamp its creation-day
+   * key, write a Checkpoint when the count crosses a CHECKPOINT_INTERVAL
+   * boundary (H06), and persist once. Internal: all public recorders funnel
+   * through here so checkpoint cadence + dateKey stamping happen in one place.
+   */
+  private async appendRevision(input: {
+    kind: RevisionKind;
+    label: string;
+    createdAt: string;
+    affectedObjectIds?: readonly string[];
+    beforeSnapshot?: unknown;
+    afterSnapshot?: unknown;
+    summary?: string;
+  }): Promise<Revision> {
+    const revision: Revision = {
+      id: newRevisionId(),
+      publicationRevision: this.data.manifest.publicationRevision,
+      label: input.label,
+      createdAt: input.createdAt,
+      kind: input.kind,
+      dateKey: Workbench.dateKeyOf(input.createdAt),
+      ...(input.affectedObjectIds !== undefined
+        ? { affectedObjectIds: input.affectedObjectIds }
+        : {}),
+      ...(input.beforeSnapshot !== undefined
+        ? { beforeSnapshot: input.beforeSnapshot }
+        : {}),
+      ...(input.afterSnapshot !== undefined
+        ? { afterSnapshot: input.afterSnapshot }
+        : {}),
+      ...(input.summary !== undefined ? { summary: input.summary } : {}),
+    };
+    const revisions = [...this.data.revisions, revision];
+    let checkpoints = this.data.checkpoints ?? [];
+    // Write a checkpoint every CHECKPOINT_INTERVAL revisions (H06).
+    if (revisions.length % CHECKPOINT_INTERVAL === 0) {
+      checkpoints = [...checkpoints, this.buildCheckpoint(revisions)];
+    }
+    this.data = { ...this.data, revisions, checkpoints };
+    await this.persist();
+    return revision;
+  }
+
+  /**
+   * M7 (H06) build a validated Checkpoint over `revisions`. CRITICAL: the
+   * `stateSnapshot` EXCLUDES the `revisions` and `checkpoints` collections (no
+   * recursive history nesting) and carries NO PDF binary bytes (BrainData holds
+   * only asset ids + a manifest asset index, never the bytes themselves, so a
+   * structuredClone of the structured records is binary-free by construction).
+   */
+  private buildCheckpoint(revisions: readonly Revision[]): Checkpoint {
+    const last = revisions[revisions.length - 1]!;
+    // Strip history collections so the snapshot never nests history in history.
+    const { revisions: _r, checkpoints: _c, ...structured } = this.data;
+    return {
+      id: newCheckpointId(),
+      createdAt: new Date().toISOString(),
+      revisionIndex: revisions.length - 1,
+      afterRevisionId: last.id,
+      stateSnapshot: structuredClone({ ...structured, revisions: [], checkpoints: [] }),
+    };
+  }
+
+  /**
+   * M7 (H05) reconstruct the structured brain state AS OF `revId` by replaying
+   * the recorded prose deltas forward from the nearest prior Checkpoint (or from
+   * an empty snapshot if none). Returns the reconstructed state on a complete
+   * chain; returns an explicit `missing-segment` result (with the ids it could
+   * not replay and the best-effort fallback state) when the delta chain between
+   * the checkpoint and the target is broken.
+   */
+  reconstructRevisionState(revId: string): ReconstructResult {
+    const revisions = this.data.revisions;
+    const targetIdx = revisions.findIndex((r) => r.id === revId);
+    if (targetIdx < 0) {
+      return { status: "missing-segment", missingIds: [revId], fallbackState: null };
+    }
+
+    // Find the nearest checkpoint at or before the target revision.
+    const checkpoints = this.data.checkpoints ?? [];
+    const priorCheckpoint = [...checkpoints]
+      .filter((c) => c.revisionIndex <= targetIdx)
+      .sort((a, b) => b.revisionIndex - a.revisionIndex)[0];
+
+    // Base state: the checkpoint's structured snapshot, or an empty snapshot.
+    const baseState: Record<string, unknown> = priorCheckpoint
+      ? (structuredClone(priorCheckpoint.stateSnapshot) as Record<string, unknown>)
+      : this.emptyStructuredSnapshot();
+    const startIdx = priorCheckpoint ? priorCheckpoint.revisionIndex + 1 : 0;
+
+    const missingIds: string[] = [];
+    const pages = new Map<string, unknown>();
+    for (const page of (baseState["pages"] as { id: string; documentJson: unknown }[]) ?? []) {
+      pages.set(page.id, page.documentJson);
+    }
+
+    for (let i = startIdx; i <= targetIdx; i += 1) {
+      const rev = revisions[i]!;
+      if (rev.kind !== "page-prose") continue;
+      const after = rev.afterSnapshot as
+        | { pageId?: string; documentJson?: unknown }
+        | undefined;
+      if (!after || typeof after.pageId !== "string") {
+        // A prose revision with no replayable after-delta breaks the chain.
+        missingIds.push(rev.id);
+        continue;
+      }
+      pages.set(after.pageId, after.documentJson);
+    }
+
+    const reconstructedPages: { id: string; documentJson: unknown }[] = (
+      (baseState["pages"] as { id: string }[]) ?? []
+    ).map((p) => ({ ...p, documentJson: pages.get(p.id) }));
+    // Include any page only referenced by replayed deltas (defensive).
+    const known = new Set(reconstructedPages.map((p) => p.id));
+    for (const [id, documentJson] of pages) {
+      if (!known.has(id)) reconstructedPages.push({ id, documentJson });
+    }
+    const state = { ...baseState, pages: reconstructedPages };
+
+    if (missingIds.length > 0) {
+      return { status: "missing-segment", missingIds, fallbackState: state };
+    }
+    return { status: "ok", state };
+  }
+
+  /** A minimal empty structured snapshot (history collections excluded). */
+  private emptyStructuredSnapshot(): Record<string, unknown> {
+    const { revisions: _r, checkpoints: _c, ...structured } = this.data;
+    const clone = structuredClone({ ...structured }) as Record<string, unknown>;
+    clone["pages"] = [];
+    return clone;
+  }
+
+  /**
+   * M7 (H05) restore the brain to the state AS OF `revId` by reconstructing that
+   * state and applying it to the live pages, recording a NEW FORWARD Revision.
+   * It NEVER erases intermediate history - the revision list only GROWS, so the
+   * restore is itself reversible. Returns the new forward Revision (or null when
+   * the chain is broken and nothing could be restored).
+   */
+  async restoreRevision(revId: string): Promise<Revision | null> {
+    // Flush any buffered prose so the restore records against settled history.
+    if (this.pendingProse) await this.flushPendingRevision();
+    const result = this.reconstructRevisionState(revId);
+    const state =
+      result.status === "ok" ? result.state : result.fallbackState;
+    if (!state) return null;
+    const restoredPages = (state as { pages?: { id: string; documentJson: unknown }[] })
+      .pages;
+    if (!restoredPages) return null;
+
+    const beforePages = this.data.pages.map((p) => ({
+      pageId: p.id,
+      documentJson: structuredClone(p.documentJson),
+    }));
+    const now = new Date().toISOString();
+    const restoredById = new Map(restoredPages.map((p) => [p.id, p.documentJson]));
+    const pages = this.data.pages.map((p) =>
+      restoredById.has(p.id)
+        ? { ...p, documentJson: restoredById.get(p.id), updatedAt: now }
+        : p,
+    );
+    this.data = { ...this.data, pages };
+    // Record the restore as a NEW forward revision (history is never erased).
+    return this.appendRevision({
+      kind: "restore",
+      label: "restore",
+      createdAt: now,
+      affectedObjectIds: restoredPages.map((p) => p.id),
+      beforeSnapshot: beforePages,
+      afterSnapshot: restoredPages.map((p) => ({
+        pageId: p.id,
+        documentJson: structuredClone(p.documentJson),
+      })),
+      summary: `Restored state as of revision ${revId}`,
+    });
+  }
+
+  /**
+   * M7 (H07) measure the on-disk/in-memory overhead of the linked-history
+   * machinery: the number of revisions + checkpoints, the serialized byte size
+   * of the revision deltas and of the checkpoint snapshots, and the wall-clock
+   * time to replay the full revision chain once (the reconstruct cost).
+   */
+  measureHistoryOverhead(): HistoryOverhead {
+    const revisions = this.data.revisions;
+    const checkpoints = this.data.checkpoints ?? [];
+    const deltaBytes = utf8ByteLength(JSON.stringify(revisions));
+    const checkpointBytes = utf8ByteLength(JSON.stringify(checkpoints));
+    const start =
+      typeof performance !== "undefined" ? performance.now() : Date.now();
+    const last = revisions[revisions.length - 1];
+    if (last) this.reconstructRevisionState(last.id);
+    const end = typeof performance !== "undefined" ? performance.now() : Date.now();
+    return {
+      revisionCount: revisions.length,
+      checkpointCount: checkpoints.length,
+      deltaBytes,
+      checkpointBytes,
+      replayDurationMs: Math.max(0, end - start),
+    };
+  }
+
+  /**
+   * M7 (H04, D14) create a multi-span reflection linking a cherry-picked set of
+   * revisions. Computes `startDateKey`/`endDateKey` from the linked revisions'
+   * creation-day keys. A reflection NEVER rewrites a Revision and NEVER creates
+   * a graph node (Page/Relationship/Category) - the counts are unchanged.
+   */
+  async createReflection(input: ReflectionInput): Promise<ReflectionEntry> {
+    const linkedRevisionIds = input.linkedRevisionIds as readonly RevisionId[];
+    const dateKeys = this.data.revisions
+      .filter((r) => input.linkedRevisionIds.includes(r.id))
+      .map((r) => r.dateKey ?? Workbench.dateKeyOf(r.createdAt))
+      .sort();
+    const now = new Date().toISOString();
+    const entry: ReflectionEntry = {
+      id: newReflectionId(),
+      text: input.text,
+      linkedRevisionIds,
+      startDateKey: dateKeys[0] ?? Workbench.dateKeyOf(now),
+      endDateKey: dateKeys[dateKeys.length - 1] ?? Workbench.dateKeyOf(now),
+      createdAt: now,
+    };
+    this.data = {
+      ...this.data,
+      reflections: [...(this.data.reflections ?? []), entry],
+    };
+    await this.persist();
+    return entry;
+  }
+
+  /**
+   * M7 (H04) attach (or replace) a per-change comment on a revision. It is a
+   * note ABOUT the change and NEVER rewrites the Revision itself. A no-op for an
+   * unknown revision id.
+   */
+  async addRevisionComment(revId: string, text: string): Promise<void> {
+    if (!this.data.revisions.some((r) => r.id === revId)) return;
+    const revisionComments = {
+      ...(this.data.revisionComments ?? {}),
+      [revId]: text,
+    };
+    this.data = { ...this.data, revisionComments };
+    await this.persist();
   }
 
   // -- persistence ----------------------------------------------------------
