@@ -4,6 +4,8 @@ import { useWorkbench } from "./useWorkbench";
 import { Library } from "./Library";
 import { Reader } from "./Reader";
 import { NodesCanvas } from "./NodesCanvas";
+import { ThreeScene } from "./ThreeScene";
+import { revealPresentation } from "./threeScene.map";
 import { installTestApi } from "./testApi";
 import type { SourceId } from "../model";
 import { loadDocument, hashBytes } from "../pdf";
@@ -258,19 +260,64 @@ function NodesView({
       ? wb.nodePlaceholderFor(soloSourceId)
       : null;
 
+  // §3.4 density reward: the "enter 3D" prompt is revealed ONLY once the live
+  // graph reaches the density threshold (is3DUnlocked). Its presentation (glow
+  // vs static control) honors suppress-motion via the pure reveal mapping.
+  const reveal = revealPresentation(wb.is3DUnlocked(), suppressMotion);
+  const active3D = wb.active3D();
+
   return (
     <div
       data-testid="nodes-view"
       style={{ position: "fixed", inset: 0, top: "3rem", display: "flex", flexDirection: "column" }}
     >
-      <div style={{ flex: 1, minHeight: 0 }}>
-        <NodesCanvas
-          wb={wb}
-          categoryScope={categoryScope}
-          placeholder={placeholder}
-          suppressMotion={suppressMotion}
-          bump={bump}
-        />
+      <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
+        {active3D ? (
+          // Smooth scale-out transition from the 2D canvas into 3D; an instant
+          // swap when motion is suppressed (no scale animation).
+          <div
+            data-testid="three-container"
+            data-suppress-motion={suppressMotion ? "true" : "false"}
+            style={{
+              width: "100%",
+              height: "100%",
+              animation: suppressMotion ? undefined : "ito-3d-enter 420ms ease-out",
+            }}
+          >
+            <ThreeScene
+              wb={wb}
+              suppressMotion={suppressMotion}
+              onExit={() => {
+                void wb.setActive3D(false);
+                bump();
+              }}
+            />
+          </div>
+        ) : (
+          <>
+            <NodesCanvas
+              wb={wb}
+              categoryScope={categoryScope}
+              placeholder={placeholder}
+              suppressMotion={suppressMotion}
+              bump={bump}
+            />
+            {reveal.present ? (
+              <button
+                data-testid="enter-3d"
+                data-glow={reveal.glow ? "true" : "false"}
+                className={reveal.glow ? "enter-3d enter-3d-glow" : "enter-3d"}
+                aria-label="Enter the 3D dimensional view"
+                onClick={() => {
+                  void wb.setActive3D(true);
+                  bump();
+                }}
+              >
+                Enter 3D
+              </button>
+            ) : null}
+          </>
+        )}
       </div>
     </div>
   );

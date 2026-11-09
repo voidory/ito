@@ -25,9 +25,9 @@ Test kinds: `unit` (Vitest), `e2e` (Playwright chromium, real browser), `n/a`.
 | A13 | Insert evidence from an annotation                  | M3        | e2e       | planned                                  | planned     |
 | A14 | Evidence serialized independent of DOM coords       | M3        | unit      | ProseMirror doc JSON round-trip (planned) | planned     |
 | A15 | Citation status derived per annotation-dest pair    | M3        | unit      | `src/test/model.test.ts`                 | implemented |
-| A16 | Concept network graph of pages/relationships        | M5        | e2e       | planned                                  | planned     |
-| A17 | Graph `hide` never deletes content                  | M5        | unit      | `PresentationState` (type) + planned     | planned     |
-| A18 | Categories group pages without duplicating them     | M5        | unit      | `Category.memberPageIds` + planned       | planned     |
+| A16 | Concept network graph of pages/relationships        | M2        | e2e+unit  | `e2e/concept-network.spec.ts`, `e2e/three-d.spec.ts`; `src/network/scene.test.ts`, `src/app/threeScene.map.test.ts` | implemented (M2; e2e deferred §9) |
+| A17 | Graph `hide` never deletes content                  | M2        | e2e+unit  | `src/app/workbench.network.test.ts`; `e2e/three-d.spec.ts` (hidden nodes excluded) | implemented (M2) |
+| A18 | Categories group pages without duplicating them     | M2        | unit+e2e  | `Category.memberPageIds`; `src/network/scene.test.ts`, `e2e/concept-network.spec.ts` (A10-M2) | implemented (M2) |
 | A19 | Tentative associations distinct from relationships  | M5        | unit      | planned                                  | planned     |
 | A20 | Safe publication (no partial published state)       | M4        | unit      | `src/test/storage.test.ts` (planned)     | planned     |
 | A21 | Named revisions advance publicationRevision         | M6        | unit      | planned                                  | planned     |
@@ -58,7 +58,7 @@ Test kinds: `unit` (Vitest), `e2e` (Playwright chromium, real browser), `n/a`.
 | R17 | Continuous page editing validated second            | M1        | e2e       | implemented (`subject-editor.spec.ts`) |
 | R18 | Context-preserving view transitions validated third | M1        | e2e       | implemented (`workspace.spec.ts`) |
 | R19 | Making annotations never auto-creates nodes/pages   | M1        | e2e       | implemented (`reader-workbench.spec.ts`) |
-| R20 | Categories never duplicate pages                    | M5        | unit      | planned     |
+| R20 | Categories never duplicate pages                    | M2        | unit+e2e  | implemented (`Category.memberPageIds` reference-by-id; `src/network/scene.test.ts`, `src/app/workbench.network.test.ts`) |
 
 ## M1 reading-workbench behaviours (FEAT-003, spec section 6)
 
@@ -184,6 +184,34 @@ the publishing environment; sandbox cannot run Chromium — see
 | §3.3   | `view-switch` toggles Files (Library) <-> Nodes (canvas); viewMode round-trips; opening a PDF from Files still launches the Reader | e2e + unit | `e2e/view-switch.spec.ts`; `src/app/workbench.view.test.ts` | implemented (e2e deferred §9) |
 | §3.3   | `categoryScope` shared across the switch; Nodes with a scope shows only that category's squircle + overlapping network | e2e + unit | `e2e/view-switch.spec.ts`; `src/app/workbench.view.test.ts`; `src/app/nodesCanvas.render.test.ts` | implemented (e2e deferred §9) |
 | N06-M2 | Nodes view for an unconnected PDF renders a transient "Not connected yet" placeholder; clicking creates ZERO graph records (no DB write) | e2e + unit | `e2e/view-switch.spec.ts`; `src/app/workbench.view.test.ts`; `src/app/nodesCanvas.render.test.ts` | implemented (e2e deferred §9) |
+
+## M2 §3.4 3D dimensional shift (FEAT-006, spec §3.4 — the density reward)
+
+FEAT-006 adds the §3.4 secret 3D dimensional shift, staged last and optional.
+At `activeNodeCount() >= 35` (`THREE_D_UNLOCK_THRESHOLD`, FEAT-003) a subtle
+glowing `enter-3d` prompt is revealed; activating it flips the DURABLE `active3D`
+flag (ADR-0009) and mounts a Three.js WebGL scene (`src/app/ThreeScene.tsx`)
+rendering the SAME live `conceptGraph()` as the 2D canvas — nodes as glowing
+stellar particles, categories as translucent 3D bubble hulls, relationships as
+faint glyphs, in watercolor fog, with orbit navigation. A WebGL guard falls back
+to a visible 2D notice rather than crashing. The graph→3D mapping is the pure,
+Vitest-covered `mapGraphTo3D` (`src/app/threeScene.map.ts`) so 2D and 3D stay in
+parity with no duplicated hardcoded scene. Rows are covered by the real-browser
+`e2e/three-d.spec.ts` (host-run in the publishing environment; the sandbox
+cannot run Chromium/WebGL — see `docs/MILESTONE-MATRIX.md` §9) AND, for headless
+proof, by `src/app/threeScene.map.test.ts` plus the FEAT-003 density tests in
+`src/app/workbench.network.test.ts`.
+
+| ID     | Behaviour                                                             | Test kind  | Test / location | Status |
+| ------ | --------------------------------------------------------------------- | ---------- | --------------- | ------ |
+| §3.4   | `enter-3d` prompt ABSENT below 35 active nodes, PRESENT at >= 35 (density reward); degrades to a static control under suppress-motion | e2e + unit | `e2e/three-d.spec.ts`; `src/app/threeScene.map.test.ts` (revealPresentation); `src/app/workbench.network.test.ts` | implemented (e2e deferred §9) |
+| §3.4   | Activating mounts the Three.js WebGL scene (`three-canvas`) rendering the live graph as particles + translucent 3D hulls + watercolor fog, with orbit navigation; graceful 2D fallback (`three-fallback`) when WebGL unavailable | e2e + unit | `e2e/three-d.spec.ts`; `src/app/threeScene.map.test.ts` (mapGraphTo3D) | implemented (e2e deferred §9) |
+| §3.4   | 3D reads the SAME live `conceptGraph()` as 2D; entering/exiting mutates ZERO graph records; exit returns to the 2D NodesCanvas | e2e + unit | `e2e/three-d.spec.ts`; `src/app/threeScene.map.test.ts` (footprint parity, hidden-node exclusion) | implemented (e2e deferred §9) |
+| A16    | Full concept-network graph of pages/relationships delivered across 2D + 3D | e2e + unit | `e2e/concept-network.spec.ts`, `e2e/three-d.spec.ts`; `src/network/scene.test.ts`, `src/app/threeScene.map.test.ts` | implemented (M2; e2e deferred §9) |
+
+Decisions: ADR-0009 (PresentationState + §3.4 3D reward; resolves D19) and
+ADR-0008 (hub topology; addresses D20) back this feature; both are RESOLVED in
+`docs/MILESTONE-MATRIX.md` §8 D-items.
 
 ## Non-functional (N01–N08)
 

@@ -100,6 +100,61 @@
 }
 
 /*
+ * §3.4 density reward: the subtle glowing "Enter 3D" transition prompt. It is
+ * only mounted once is3DUnlocked() (35+ active nodes). The glow is a soft,
+ * slow pulse; it DEGRADES to a static control when motion is suppressed or the
+ * OS prefers reduced motion (the .enter-3d-glow animation is simply removed).
+ */
+.enter-3d {
+  position: absolute;
+  bottom: 1.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  padding: 0.55rem 1.3rem;
+  border-radius: 999px;
+  border: 1px solid rgba(75, 85, 120, 0.5);
+  background: rgba(251, 250, 247, 0.92);
+  color: #3a3733;
+  font: 600 13px system-ui, sans-serif;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.enter-3d-glow {
+  animation: ito-enter-3d-glow 2.8s ease-in-out infinite;
+}
+
+@keyframes ito-enter-3d-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 6px 1px rgba(75, 85, 120, 0.25);
+  }
+  50% {
+    box-shadow: 0 0 18px 4px rgba(75, 85, 120, 0.55);
+  }
+}
+
+/* Smooth scale-out from the 2D canvas into the 3D space (§3.4). */
+@keyframes ito-3d-enter {
+  from {
+    transform: scale(0.82);
+    opacity: 0.2;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Honor reduced motion / suppress-motion: no glow pulse, no scale transition. */
+@media (prefers-reduced-motion: reduce) {
+  .enter-3d-glow {
+    animation: none;
+  }
+}
+
+/*
  * N06 transient "Not connected yet" placeholder: a faint, dashed ghost node so
  * it is visibly NOT a real network node. It persists nothing — clicking is a
  * no-op (ephemeral UI only).

@@ -48,7 +48,9 @@ interface ItoTestApi {
   };
   activeNodeCount(): number;
   is3DUnlocked(): boolean;
+  active3D(): boolean;
   setActive3D(on: boolean): Promise<void>;
+  webglAvailable(): boolean;
   nodePlaceholderFor(sourceId: string): { sourceId: string; title: string; transient: boolean };
   createCategory(name: string, colorCode?: string): Promise<string>;
   createRelationship(endpointPageIds: string[], kind?: string, label?: string): Promise<string>;

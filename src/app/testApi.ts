@@ -26,6 +26,7 @@ import {
   type DocumentJson,
 } from "../editor";
 import { buildScene, squircleContains, type SceneGraphInput } from "../network";
+import { isWebGLAvailable } from "./ThreeScene";
 import type { Workbench } from "./workbench";
 
 /** Map the live Workbench graph to the scene mapper's input shape. */
@@ -171,8 +172,12 @@ interface ItoTestApi {
   squircleContainsPoint(categoryId: string, x: number, y: number): boolean;
   /** Whether the 3D presentation is unlocked (activeNodeCount >= 35). */
   is3DUnlocked(): boolean;
+  /** Whether the 3D presentation is currently active (user opted in). */
+  active3D(): boolean;
   /** Set the active-3D flag (presentation only). */
   setActive3D(on: boolean): Promise<void>;
+  /** Whether a WebGL context can be acquired here (3D vs 2D-fallback branch). */
+  webglAvailable(): boolean;
   /** The transient N06 "not connected yet" placeholder for a source id. */
   nodePlaceholderFor(sourceId: string): { sourceId: string; title: string; transient: boolean };
   /** Create a category with a watercolor color (test setup convenience). */
@@ -454,9 +459,15 @@ export function installTestApi(wb: Workbench, bump: () => void): void {
     is3DUnlocked() {
       return wb.is3DUnlocked();
     },
+    active3D() {
+      return wb.active3D();
+    },
     async setActive3D(on) {
       await wb.setActive3D(on);
       bump();
+    },
+    webglAvailable() {
+      return isWebGLAvailable();
     },
     nodePlaceholderFor(sourceId) {
       return wb.nodePlaceholderFor(sourceId);

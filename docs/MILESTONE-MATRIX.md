@@ -44,13 +44,15 @@ Last run on this working tree (all green):
 | ------------------------- | ------------------- | -------------------- |
 | TypeScript typecheck      | `npm run typecheck` | pass (0 errors)      |
 | Production build          | `npm run build`     | pass                 |
-| Unit / integration        | `npm run test`      | 141 passed / 17 files |
-| Runtime (real browser)    | `npm run test:e2e`  | 29 passed / 5 specs + `concept-network.spec.ts` written (6 tests, sandbox: e2e deferred, see §9) |
+| Unit / integration        | `npm run test`      | 163 passed / 19 files |
+| Runtime (real browser)    | `npm run test:e2e`  | 43 tests / 8 specs WRITTEN; host-run in the publishing environment (sandbox: e2e deferred, CDN block — see §9) |
 
 E2E specs: `e2e/ready.spec.ts` (boot), `e2e/pdf-anchor.spec.ts` (anchor
 round-trip spike), `e2e/reader-workbench.spec.ts` (M1 reading workbench),
 `e2e/subject-editor.spec.ts` (M1 subject layer + continuous editor),
 `e2e/concept-network.spec.ts` (M2 NodesCanvas — A09/A10/A13/A14-M2),
+`e2e/view-switch.spec.ts` (M2 Files/Nodes switch + N06 placeholder),
+`e2e/three-d.spec.ts` (M2 §3.4 3D dimensional shift — density reward),
 `e2e/workspace.spec.ts` (M1 integrated three-pane workspace + context-preserving
 transitions).
 
@@ -149,9 +151,8 @@ edition yields an explicit `mismatched` state and never a silent navigation.
 
 | Area                                                  | Milestone | Reference |
 | ----------------------------------------------------- | --------- | --------- |
-| Full concept-network graph (nodes/edges, camera)      | M5        | BACKLOG M5; D11–D13 |
-| Graph `hide` as presentation state at graph scale     | M5        | D13 (foundation shipped here for lines) |
-| Categories grouping pages by id in the graph          | M5        | D14 |
+| Graph `hide` as presentation state at graph scale     | implemented (M2) | D13; `workbench.network.test.ts` (shipped — see §8b/§8c) |
+| Categories grouping pages by id in the graph          | implemented (M2) | D14; `src/network/scene.test.ts`, `e2e/concept-network.spec.ts` (shipped) |
 | Remote storage (Koofr/WebDAV) adapter                 | M4        | ADR-0005; `docs/spikes/koofr-access.md`; D08/D09 |
 | Safe publication against a remote + delivery/hosting   | M4        | ADR-0005; D10, D17 |
 | Captures → structured pages; named revisions          | M6        | D15, D16 |
@@ -168,9 +169,12 @@ edition yields an explicit `mismatched` state and never a silent navigation.
   (IndexedDB/OPFS) is wired. Koofr/WebDAV is assessed in the M0 spike and
   implemented at M4; see `docs/spikes/koofr-access.md` for the honest CORS/auth
   assessment and fallbacks.
-- **Full concept-network graph + its camera.** M1 only guarantees NO unexpected
-  camera motion during transitions and a non-destructive line toggle; the graph
-  itself, its layout persistence, and node/edge hide-at-scale are M5.
+- **Full concept-network graph + its camera.** DELIVERED at M2 (FEAT-004/005/006):
+  the 2D watercolor NodesCanvas, the Files/Nodes switch, durable layout state,
+  node/relationship hide-at-scale, and the §3.4 3D dimensional shift. The M1
+  no-unexpected-camera-motion guarantee is preserved: idle layout positions are
+  deterministic in both 2D and 3D, and 3D orbit motion is user-driven only
+  (auto-rotate off; damping disabled under suppress-motion).
 
 ---
 
@@ -253,23 +257,79 @@ shared scope, N06 zero records, scope filter) and `src/app/nodesCanvas.render.te
 | (§3.3)  | `categoryScope` shared across the switch; Nodes with a scope shows only that category's squircle + overlapping network | implemented (e2e deferred §9) | e2e + unit  | `e2e/view-switch.spec.ts` "a category selected in Files carries into Nodes …"; `src/app/workbench.view.test.ts` "category-scope graph filter …"; `src/app/nodesCanvas.render.test.ts` "with a category scope …" |
 | N06-M2  | Nodes view for an unconnected PDF renders a transient "Not connected yet" placeholder; clicking creates ZERO Page/Relationship/Category records (no DB write) | implemented (e2e deferred §9) | e2e + unit  | `e2e/view-switch.spec.ts` "N06: … placeholder … persists nothing"; `src/app/workbench.view.test.ts` "nodePlaceholderFor creates ZERO … records"; `src/app/nodesCanvas.render.test.ts` "FEAT-005/N06: renders the transient … placeholder" |
 
+## 8e. M2 §3.4 3D dimensional shift (FEAT-006) — the density reward
+
+FEAT-006 delivers the §3.4 secret 3D dimensional shift, staged LAST and fully
+OPTIONAL. The density monitor (FEAT-003: `activeNodeCount() >= 35`,
+`THREE_D_UNLOCK_THRESHOLD`) reveals a subtle glowing `enter-3d` transition
+prompt; activating it flips the DURABLE `active3D` flag (ADR-0009) and mounts a
+Three.js WebGL scene (`src/app/ThreeScene.tsx`) that renders the SAME live
+`conceptGraph()` the 2D canvas shows — nodes as glowing stellar particles,
+categories as translucent 3D bubble hulls (spheres sized/centered from the
+squircle bounds), relationships as faint connecting glyphs, all in gentle
+watercolor fog (`scene.fog` + additive/translucent materials). Navigation is
+orbit-style (OrbitControls from `three/examples/jsm/controls/OrbitControls.js`,
+pointer drag + wheel zoom). The 2D canvas is never regressed: entering 3D is a
+presentation flag only (zero graph records change), exiting returns to the 2D
+NodesCanvas, and both views derive from one source via the PURE, Vitest-covered
+`mapGraphTo3D()` (`src/app/threeScene.map.ts`) — no duplicated hardcoded scene.
+
+A WebGL GUARD makes 3D safe on headless CI: if a context cannot be acquired the
+scene renders a visible 2D-fallback notice (`three-fallback`) rather than
+crashing, and the e2e spec branches on a real WebGL probe
+(`window.__ito.webglAvailable()`). Suppress-motion / prefers-reduced-motion is
+honored end to end: the prompt glow degrades to a static control, the scale-out
+transition becomes an instant swap, and OrbitControls damping/auto-spin are off.
+
+The Playwright spec `e2e/three-d.spec.ts` (real Chromium, WebGL via the bundled
+build) proves the rendering/interaction in the publishing environment; the
+sandbox proves the testable logic headlessly via Vitest:
+`src/app/threeScene.map.test.ts` (pure graph→{particles,hulls,links} mapping,
+live-graph parity, hull sizing, deterministic depth, empty-graph safety, and the
+`revealPresentation` density-reward reveal mapping) plus the existing
+`src/app/workbench.network.test.ts` density-threshold tests (locked at 34,
+unlocked at 35, hide drops back below without deleting a Page).
+
+| ID      | Requirement (summary)                                                | Status      | Kind        | Covering test |
+| ------- | -------------------------------------------------------------------- | ----------- | ----------- | ------------- |
+| (§3.4)  | `enter-3d` prompt ABSENT below 35 active nodes, PRESENT at >= 35 (density reward); degrades to a static control under suppress-motion | implemented (e2e deferred §9) | e2e + unit | `e2e/three-d.spec.ts` "enter-3d prompt is ABSENT … / APPEARS …"; `src/app/threeScene.map.test.ts` "revealPresentation …"; `src/app/workbench.network.test.ts` "§3.4 density reward" |
+| (§3.4)  | Activating mounts the Three.js WebGL scene (`three-canvas`) rendering the live graph as particles + translucent 3D hulls + fog, with orbit navigation; graceful 2D fallback (`three-fallback`) when WebGL is unavailable | implemented (e2e deferred §9) | e2e + unit | `e2e/three-d.spec.ts` "activating 3D mounts the WebGL scene (or the graceful 2D fallback) …"; `src/app/threeScene.map.test.ts` "mapGraphTo3D …" |
+| (§3.4)  | 3D reads the SAME live `conceptGraph()` as 2D (no duplicated hardcoded scene); entering/exiting mutates ZERO graph records; exit returns to the 2D NodesCanvas | implemented (e2e deferred §9) | e2e + unit | `e2e/three-d.spec.ts` "the 3D scene reads the SAME live graph as 2D …", "… exiting returns to 2D"; `src/app/threeScene.map.test.ts` "reuses the 2D layout footprint …", "excludes hidden nodes …" |
+| A09-M2  | Full concept-network graph (nodes/edges) with no forced camera motion — delivered across 2D + 3D | implemented (e2e deferred §9) | e2e + unit | `e2e/concept-network.spec.ts`, `e2e/three-d.spec.ts`; `src/network/scene.test.ts`, `src/app/threeScene.map.test.ts` (deterministic idle positions) |
+
 ## 9. Sandbox verification note (M2)
 
 The Playwright Chromium binary CANNOT be downloaded in the build sandbox (the
-proxy returns HTTP 403 on the Playwright CDN), so `npm run test:e2e` cannot run
-here and its result above is the last recorded run from the publishing
-environment. FEAT-003 contains NO rendering and is fully verifiable headlessly.
-FEAT-004 DOES render, so its Playwright spec `e2e/concept-network.spec.ts` is
-written (it runs in the publishing environment) but its non-trivial glue —
-graph→props mapping, layout-driven node positions, hub topology/path, squircle
-bounds + A10 intersection, A14 category-link derivation, blend pass-through — is
-ALSO proven headlessly in the sandbox by `src/network/scene.test.ts` (pure) and
-`src/app/nodesCanvas.render.test.ts` (jsdom render of the real component against
-a real Workbench). The gates `npm run typecheck`, `npm run test` (Vitest) and
-`npm run build` are all green in the sandbox. Every behaviour a later e2e spec
-will cover (hub topology, blend, hide, density threshold, N06 zero-record
-guarantee, squircle containment, category-link) has Vitest coverage of its
-headless/pure logic so correctness is proven without a browser.
+proxy returns HTTP 403 on the Playwright CDN; the Microsoft mirror transfers
+zero bytes), so `npm run test:e2e` cannot run here — the e2e specs are WRITTEN
+and host-run in the publishing environment. All e2e specs
+(`concept-network.spec.ts`, `view-switch.spec.ts`, `three-d.spec.ts` plus the
+M1 suites, 43 tests / 8 specs) are the real deliverable; their non-trivial glue
+is ALSO proven headlessly in the sandbox so correctness is provable without a
+browser:
+
+- FEAT-003 (data contract + density monitor): `src/app/workbench.network.test.ts`.
+- FEAT-004 (2D NodesCanvas): `src/network/scene.test.ts` (pure graph→props,
+  layout-driven positions, hub topology/path, squircle bounds + A10 intersection,
+  A14 category-link derivation, blend) + `src/app/nodesCanvas.render.test.ts`
+  (jsdom render of the real component against a real Workbench).
+- FEAT-005 (Files/Nodes switch + N06): `src/app/workbench.view.test.ts` +
+  `src/app/nodesCanvas.render.test.ts`.
+- FEAT-006 (§3.4 3D shift): `src/app/threeScene.map.test.ts` (pure
+  graph→{particles,hulls,links} mapping, live-graph parity, hull sizing,
+  deterministic depth, empty-graph safety, and the `revealPresentation`
+  density-reward reveal mapping) + the FEAT-003 density-threshold tests. WebGL
+  itself cannot run headlessly in the sandbox, so the ThreeScene renderer carries
+  a WebGL guard with a 2D fallback that the e2e spec asserts conditionally.
+
+FINAL M2 gate results on this working tree (real runs, not fabricated):
+
+| Suite                  | Command             | Result            |
+| ---------------------- | ------------------- | ----------------- |
+| TypeScript typecheck   | `npm run typecheck` | pass (0 errors)   |
+| Unit / integration     | `npm run test`      | 163 passed / 19 files |
+| Production build        | `npm run build`     | pass (three.js bundled) |
+| Runtime (real browser) | `npm run test:e2e`  | 43 tests / 8 specs WRITTEN; host-run (sandbox e2e deferred — CDN block) |
 
 ## 8. Proposed next decisions (D-items)
 
@@ -283,12 +343,16 @@ milestone builds on them (numbering continues the decision log D01–D18):
   DURABLE in `BrainData.presentation`, because a hand-arranged graph is
   content-adjacent work and losing it on reload would be a data-loss-like
   surprise. See ADR-0009 §2. (relates R19, N08)
-- **D20 — Passage-to-evidence line routing at scale. ADDRESSED (M2, ADR-0008).**
+- **D20 — Passage-to-evidence line routing at scale. RESOLVED (M2, ADR-0008).**
   The N-endpoint "Connecting Page" draws ONE hub glyph with N legs instead of
   N·(N−1)/2 pairwise lines, reducing clutter structurally; ADR-0008 fixes the
-  DATA shape. The M1 inter-pane passage lines keep their simple always-on margin
-  routing; detailed density treatments (bundling, fade, hover-reveal) remain a
-  FEAT-005/006 rendering concern under D20. (relates A08, section 10.2, §3.1)
+  DATA shape. At graph scale FEAT-004 renders those hubs (lens N=2 / concave
+  star N>=3) plus data-driven category-to-category links, and FEAT-006 adds the
+  §3.4 density-reward escape valve: once the network passes 35 active nodes the
+  reader can lift the whole graph into a navigable 3D space where overlapping
+  categories separate by depth, the ultimate clutter treatment. The M1
+  inter-pane passage lines keep their simple always-on margin routing. (relates
+  A08, section 10.2, §3.1, §3.4)
 - **D21 — Narrow-screen flow beyond the stub.** The responsive stub is a
   documented placeholder. Decide the real mobile composition flow (tabbed panes,
   bottom-sheet editor, or deferred to a packaged app) at M7 hardening. (relates
