@@ -4,6 +4,9 @@ import { expect, test, type Page } from "@playwright/test";
  * App-wide right-click menu: the browser's default menu is replaced everywhere
  * except editable text, with a short list that depends on what was clicked.
  */
+// Nodes bob gently when motion is on; Playwright waits for them to settle.
+test.use({ reducedMotion: "reduce" });
+
 async function boot(page: Page): Promise<void> {
   await page.goto("/");
   await expect(page.getByTestId("library-item").first()).toBeVisible({ timeout: 15_000 });

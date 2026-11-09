@@ -174,10 +174,11 @@
   min-height: 2rem;
 }
 
-/* Watercolor fill: translucent pigment that darkens where areas overlap. */
+/* Watercolor fill: a radial wash (light centre, pigment pooled at the edge)
+   whose boundary is bled by turbulence; multiplies where areas overlap. */
 .category-squircle-fill {
   mix-blend-mode: multiply;
-  opacity: 0.15;
+  opacity: 1;
   filter: url(#watercolor-turbulent-edge);
 }
 
@@ -374,4 +375,111 @@
 .node-placeholder-title {
   font: 500 11px system-ui, sans-serif;
   fill: #a39d94;
+}
+
+
+/* --- Living water: gentle ambient motion ------------------------------ */
+/* The backdrop is a few huge, heavily blurred pigment pools drifting slowly. */
+.ito-water-blob {
+  opacity: 0.16;
+  animation: ito-water-drift 26s ease-in-out infinite alternate;
+}
+
+@keyframes ito-water-drift {
+  from {
+    transform: translate(-60px, -30px) scale(1);
+  }
+  to {
+    transform: translate(70px, 40px) scale(1.12);
+  }
+}
+
+/* Overlap zones: the two blooms swirl slowly into and through each other. */
+.ito-overlap {
+  /* Normal blending (not multiply): the meeting zone shows the MIXED HUE, so
+     overlaps stay colourful instead of stacking toward black. */
+  mix-blend-mode: normal;
+  opacity: 0.5;
+}
+
+.ito-overlap-blooms {
+  opacity: 0.38;
+}
+
+.ito-overlap-blooms[data-animated="true"] .ito-bloom-a {
+  animation: ito-bloom-a 12s ease-in-out infinite alternate;
+}
+
+.ito-overlap-blooms[data-animated="true"] .ito-bloom-b {
+  animation: ito-bloom-b 15s ease-in-out infinite alternate;
+}
+
+@keyframes ito-bloom-a {
+  to {
+    transform: translate(26px, 10px) scale(1.18);
+  }
+}
+
+@keyframes ito-bloom-b {
+  to {
+    transform: translate(-24px, -12px) scale(1.22);
+  }
+}
+
+/* The reflection: a soft light band sliding across each wash. */
+.ito-sheen {
+  /* No filter here: an animated gradient under a displacement filter would be
+     re-rasterised every frame. */
+  mix-blend-mode: soft-light;
+  opacity: 0.5;
+}
+
+/* Dots bob very slightly; hubs breathe. Decoration only: the layout data and
+   camera never move on idle. */
+.graph-node .graph-node-dot {
+  animation: ito-dot-bob 7s ease-in-out infinite;
+}
+
+@keyframes ito-dot-bob {
+  50% {
+    transform: translateY(-1.6px);
+  }
+}
+
+.graph-hub {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: ito-hub-breathe 6.5s ease-in-out infinite;
+}
+
+@keyframes ito-hub-breathe {
+  50% {
+    transform: scale(1.035);
+  }
+}
+
+.nodes-canvas[data-suppress-motion="true"] .ito-water-blob,
+.nodes-canvas[data-suppress-motion="true"] .ito-bloom,
+.nodes-canvas[data-suppress-motion="true"] .graph-node-dot,
+.nodes-canvas[data-suppress-motion="true"] .graph-hub {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ito-water-blob,
+  .ito-bloom,
+  .graph-node .graph-node-dot,
+  .graph-hub {
+    animation: none !important;
+  }
+}
+
+/* Decorative layers never take the pointer: clicks fall through to the map and
+   to the controls floating above it. */
+.ito-water,
+.ito-water *,
+.ito-overlap,
+.ito-overlap *,
+.ito-sheen {
+  pointer-events: none;
 }

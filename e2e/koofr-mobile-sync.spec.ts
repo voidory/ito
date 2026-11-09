@@ -83,6 +83,17 @@ test("A21: the mobile reader shell preserves the source across the writing sheet
 
   const sourceBefore = await page.evaluate(() => window.__ito.openSourceIds());
 
+  // "Inspect Related Writing" only exists for a passage that is cited into a
+  // page, so give the document one highlight quoted into a subject page first.
+  await page.evaluate((n) => window.__ito.selectText(n, 0), "quick brown fox");
+  await page.getByTestId("commit-highlight").click();
+  const annotationId = await page.evaluate(() => window.__ito.firstAnnotationId());
+  expect(annotationId).toBeTruthy();
+  await page.evaluate(async (ann) => {
+    const subject = await window.__ito.createSubject("Related writing");
+    await window.__ito.citeAnnotationIntoPage(ann, subject);
+  }, annotationId!);
+
   // Phone Reading toggle now lives in the shell gear settings menu (M9).
   await page.getByTestId("settings-menu-btn").click();
   await page.getByTestId("toggle-mobile-mode").click();

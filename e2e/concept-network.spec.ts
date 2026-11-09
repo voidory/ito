@@ -19,6 +19,11 @@ import { test, expect, type Page } from "@playwright/test";
  *    the two squircle boundaries.
  */
 
+// The map has ambient (decorative) animation. Playwright waits for an element to
+// stop moving before clicking it, so these specs run with reduced motion, which
+// switches that animation off. The camera-motion tests below opt back in.
+test.use({ reducedMotion: "reduce" });
+
 async function bootToNodesView(page: Page): Promise<void> {
   await page.goto("/");
   await expect(page.getByTestId("app-status")).toHaveAttribute("data-state", "ready", {
@@ -201,8 +206,9 @@ test("clicking a hub opens the connecting-page label surface", async ({ page }) 
   );
 
   page.once("dialog", (d) => void d.accept("Bridges P and Q"));
-  // Double-click edits the short label; a single click opens the page.
-  await page.getByTestId("graph-hub").dblclick();
+  // A single click opens the page; the short label has its own hover control.
+  await page.getByTestId("graph-hub").hover();
+  await page.getByTestId("edit-hub-label").click();
 
   await expect
     .poll(() => page.evaluate((id) => window.__ito.relationshipLabel(id), relId))
@@ -376,4 +382,101 @@ test("clicking a hub opens its Connecting Page docked beside the map", async ({ 
   );
   expect(explanatory).toBeTruthy();
   await expect(page.getByTestId("nodes-page-dock")).toHaveAttribute("data-page-id", explanatory!);
+});
+
+async function settledCamera(page: Page): Promise<void> {
+  // The camera eases to its target and then drops its transform entirely.
+  await expect
+    .poll(() => page.getByTestId("camera").evaluate((g) => g.hasAttribute("transform")), {
+      timeout: 4_000,
+    })
+    .toBe(false);
+}
+
+/** A node's screen position from its group's transform (ignores the dot's idle bob). */
+async function nodeCenter(page: Page, id: string): Promise<{ x: number; y: number }> {
+  return page.locator(`[data-testid="graph-node"][data-page-id="${id}"]`).evaluate((g) => {
+    const el = g as unknown as SVGGraphicsElement;
+    const m = el.getScreenCTM()!;
+    return { x: m.e, y: m.f };
+  });
+}
+
+test.describe("camera motion", () => {
+  test.use({ reducedMotion: "no-preference" });
+
+test("wheel zoom is anchored on the cursor and the camera glides to rest", async ({ page }) => {
+  await bootToNodesView(page);
+  const [a, b] = await createPages(page, ["Left", "Right"]);
+  await page.evaluate(
+    ([x, y]) => window.__ito.createRelationship([x!, y!]),
+    [a, b] as const,
+  );
+  await settledCamera(page);
+
+  const before = await nodeCenter(page, b!);
+  const aBefore = await nodeCenter(page, a!);
+  const distBefore = Math.hypot(before.x - aBefore.x, before.y - aBefore.y);
+  await page.mouse.move(before.x, before.y);
+  await page.mouse.wheel(0, -300); // zoom in, on top of that node
+  // While gliding there is an interpolation transform on the scene group...
+  await expect(page.getByTestId("camera")).toHaveAttribute("transform", /scale/, { timeout: 1_000 });
+  await settledCamera(page);
+
+  // ...and the node under the cursor did not slide away from it.
+  const after = await nodeCenter(page, b!);
+  expect(Math.abs(after.x - before.x)).toBeLessThan(4);
+  expect(Math.abs(after.y - before.y)).toBeLessThan(4);
+  // The map really did zoom (the dots moved further apart).
+  const aAfter = await nodeCenter(page, a!);
+  expect(Math.hypot(after.x - aAfter.x, after.y - aAfter.y)).toBeGreaterThan(distBefore + 10);
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+});
+
+test("zoom buttons glide instead of jumping, and reduced motion snaps", async ({ page, browser }) => {
+  await bootToNodesView(page);
+  await createPages(page, ["One", "Two"]);
+  await settledCamera(page);
+  await page.getByTestId("canvas-zoom-in").click();
+  await expect(page.getByTestId("camera")).toHaveAttribute("transform", /scale/, { timeout: 1_000 });
+  await settledCamera(page);
+
+  // With the OS reduced-motion preference the camera never interpolates.
+  const ctx = await browser.newContext({ reducedMotion: "reduce", baseURL: "http://localhost:4173" });
+  const rp = await ctx.newPage();
+  await bootToNodesView(rp);
+  await createPages(rp, ["One", "Two"]);
+  await rp.getByTestId("canvas-zoom-in").click();
+  await rp.waitForTimeout(80);
+  expect(await rp.getByTestId("camera").evaluate((g) => g.hasAttribute("transform"))).toBe(false);
+  await ctx.close();
+});
+
+});
+
+test("overlapping categories render a colour-mixing zone; motion can be switched off", async ({ page }) => {
+  await bootToNodesView(page);
+  const [a, b, c] = await createPages(page, ["A", "B", "C"]);
+  await page.evaluate(
+    async ([x, y, z]) => {
+      const c1 = await window.__ito.createCategory("Blue", "#4b5578");
+      const c2 = await window.__ito.createCategory("Ochre", "#c98b4b");
+      await window.__ito.addPageToCategory(c1, x!);
+      await window.__ito.addPageToCategory(c1, y!);
+      await window.__ito.addPageToCategory(c2, y!);
+      await window.__ito.addPageToCategory(c2, z!);
+    },
+    [a, b, c] as const,
+  );
+  await expect(page.getByTestId("category-squircle")).toHaveCount(2);
+  await expect(page.getByTestId("category-overlap")).toHaveCount(1);
+  // The two pigments meet through a gradient that contains both hues.
+  const stops = await page.evaluate(() =>
+    [...document.querySelectorAll('linearGradient[id^="mix-"] stop')].map((s) =>
+      (s.getAttribute("stop-color") ?? "").toLowerCase(),
+    ),
+  );
+  expect(stops).toContain("#4b5578");
+  expect(stops).toContain("#c98b4b");
+  expect(new Set(stops).size).toBeGreaterThanOrEqual(3); // a mixed middle tone too
 });

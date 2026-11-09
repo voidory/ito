@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   buildScene,
   categoryPigment,
@@ -10,6 +10,7 @@ import {
 import type { CategoryId, PageId, RelationshipId, RelationshipKind, SourceId } from "../model";
 import type { ConceptGraph, Workbench } from "./workbench";
 import { Button, IconButton } from "./ui/primitives";
+import { OverlapBleeds, SheenOverlay, WatercolorDefs, WaterBackdrop } from "./WatercolorLayer";
 import "./network.css";
 
 /** The relationship kinds a user can pick when creating a hub (§3.1). */
@@ -140,6 +141,8 @@ export function NodesCanvas({
     moved: boolean;
   } | null>(null);
 
+  const velRef = useRef<{ x: number; y: number; t: number; vx: number; vy: number } | null>(null);
+
   // N06: render one transient placeholder per open UNCONNECTED source. The
   // `placeholders` array (open-together) takes precedence; the single
   // `placeholder` prop is kept for backwards compatibility.
@@ -232,14 +235,145 @@ export function NodesCanvas({
     setPan({ x: 0, y: 0 });
     commitZoom(1);
   }, [commitZoom]);
-  // Wheel zooms the canvas. It MUST be a native non-passive listener: React's
-  // onWheel is passive, so preventDefault is ignored and the wheel would also
-  // scroll the surrounding page. The latest zoom handler is kept in a ref so the
-  // listener is attached once.
-  const wheelRef = useRef<(deltaY: number) => void>(() => undefined);
-  wheelRef.current = (deltaY: number): void => {
-    // Wheel up (negative deltaY) zooms in; down zooms out.
-    commitZoom(deltaY < 0 ? zoom * ZOOM_STEP : zoom / ZOOM_STEP);
+  // --- Smooth camera --------------------------------------------------------
+  // `pan` / `zoom` (and therefore `viewBox`) are the camera's TARGET. What is on
+  // screen eases toward it: we keep the displayed view box `dv` and express the
+  // difference to the target as a transform on the scene group (a FLIP), so a
+  // zoom-button press, a wheel tick or a reset glides instead of jumping, and a
+  // retarget mid-flight continues from wherever the picture currently is.
+  // While the pointer is dragging the canvas (or momentum is carrying it) the
+  // camera snaps 1:1 so the map sticks to the finger/cursor.
+  const prefersReduced = usePrefersReducedMotion();
+  const motion = !suppressMotion && !prefersReduced;
+  const camRef = useRef<SVGGElement | null>(null);
+  const dvRef = useRef<ViewBoxNums | null>(null);
+  const tvRef = useRef<ViewBoxNums>(parseViewBox(viewBox));
+  const snapRef = useRef(false);
+  const camFrame = useRef(0);
+
+  const applyCam = useCallback((): void => {
+    const g = camRef.current;
+    const d = dvRef.current;
+    const t = tvRef.current;
+    if (!g || !d) return;
+    const k = t.w / d.w;
+    const tx = t.x - d.x * k;
+    const ty = t.y - d.y * k;
+    if (Math.abs(k - 1) < 1e-5 && Math.abs(tx) < 1e-3 && Math.abs(ty) < 1e-3) {
+      g.removeAttribute("transform");
+    } else {
+      g.setAttribute("transform", `translate(${tx} ${ty}) scale(${k})`);
+    }
+  }, []);
+
+  const runCam = useCallback((): void => {
+    if (camFrame.current) return;
+    let last = performance.now();
+    const tick = (now: number): void => {
+      const dt = Math.min(64, now - last);
+      last = now;
+      const d = dvRef.current;
+      const t = tvRef.current;
+      if (!d) {
+        camFrame.current = 0;
+        return;
+      }
+      // Frame-rate independent exponential ease (~120ms time constant).
+      const a = 1 - Math.exp(-dt / 120);
+      d.x += (t.x - d.x) * a;
+      d.y += (t.y - d.y) * a;
+      d.w += (t.w - d.w) * a;
+      d.h += (t.h - d.h) * a;
+      const close =
+        Math.abs(t.x - d.x) < 0.02 &&
+        Math.abs(t.y - d.y) < 0.02 &&
+        Math.abs(t.w - d.w) < 0.02;
+      if (close) {
+        dvRef.current = { ...t };
+        applyCam();
+        camFrame.current = 0;
+        return;
+      }
+      applyCam();
+      camFrame.current = requestAnimationFrame(tick);
+    };
+    camFrame.current = requestAnimationFrame(tick);
+  }, [applyCam]);
+
+  useLayoutEffect(() => {
+    const t = parseViewBox(viewBox);
+    tvRef.current = t;
+    if (!dvRef.current || snapRef.current || !motion) {
+      dvRef.current = { ...t };
+      applyCam();
+      return;
+    }
+    runCam();
+  }, [viewBox, motion, applyCam, runCam]);
+
+  useEffect(
+    () => () => {
+      if (camFrame.current) cancelAnimationFrame(camFrame.current);
+      if (inertiaFrame.current) cancelAnimationFrame(inertiaFrame.current);
+      if (wheelPersist.current) clearTimeout(wheelPersist.current);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  // --- Wheel: zoom toward the cursor ---------------------------------------
+  // Native non-passive listener: React's onWheel is passive, so preventDefault
+  // would be ignored and the wheel would also scroll the page. The zoom is
+  // continuous (proportional to the wheel delta, so trackpads feel natural) and
+  // anchored on the point under the cursor; the camera easing above smooths it.
+  const wheelPersist = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inertiaFrame = useRef(0);
+  const latest = useRef({ zoom, pan, baseViewBox, viewBox });
+  latest.current = { zoom, pan, baseViewBox, viewBox };
+  const wheelRef = useRef<(e: WheelEvent) => void>(() => undefined);
+  wheelRef.current = (e: WheelEvent): void => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    if (inertiaFrame.current) {
+      cancelAnimationFrame(inertiaFrame.current);
+      inertiaFrame.current = 0;
+      snapRef.current = false;
+    }
+    const { zoom: z, baseViewBox: base, viewBox: vbStr } = latest.current;
+    const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
+    const rate = e.ctrlKey ? 0.01 : 0.0018; // pinch gestures report ctrlKey
+    const factor = Math.exp(-e.deltaY * unit * rate);
+    const nz = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z * factor));
+    if (nz === z) return;
+
+    const rect = svg.getBoundingClientRect();
+    // Map the cursor through what is ACTUALLY on screen (the eased, displayed
+    // view), not the target - a wheel tick can land mid-glide.
+    const shown = dvRef.current ?? parseViewBox(vbStr);
+    const sD = Math.min(rect.width / shown.w, rect.height / shown.h);
+    const oxD = (rect.width - shown.w * sD) / 2;
+    const oyD = (rect.height - shown.h * sD) / 2;
+    const sx = e.clientX - rect.left;
+    const sy = e.clientY - rect.top;
+    const cxs = shown.x + (sx - oxD) / sD;
+    const cys = shown.y + (sy - oyD) / sD;
+    // New target view at the new zoom, positioned so that scene point stays put
+    // under the cursor.
+    const bv = parseViewBox(base);
+    const nw = bv.w / nz;
+    const nh = bv.h / nz;
+    const s2 = Math.min(rect.width / nw, rect.height / nh);
+    const ox2 = (rect.width - nw * s2) / 2;
+    const oy2 = (rect.height - nh * s2) / 2;
+    const nx = cxs - (sx - ox2) / s2;
+    const ny = cys - (sy - oy2) / s2;
+    const bcx = bv.x + bv.w / 2;
+    const bcy = bv.y + bv.h / 2;
+    setPan({ x: nx - (bcx - nw / 2), y: ny - (bcy - nh / 2) });
+    setZoom(nz);
+    // Persist once the wheel settles, not on every tick.
+    if (wheelPersist.current) clearTimeout(wheelPersist.current);
+    wheelPersist.current = setTimeout(() => void wb.setZoom(nz), 250);
   };
 
   // --- §3.3 node drag + background pan gestures ----------------------------
@@ -249,7 +383,7 @@ export function NodesCanvas({
     if (!svg) return;
     const onNativeWheel = (e: WheelEvent): void => {
       e.preventDefault();
-      wheelRef.current(e.deltaY);
+      wheelRef.current(e);
     };
     svg.addEventListener("wheel", onNativeWheel, { passive: false });
     return () => svg.removeEventListener("wheel", onNativeWheel);
@@ -304,16 +438,68 @@ export function NodesCanvas({
       } else {
         // Background pan: dragging right/down moves the view the same way, so
         // the viewBox origin shifts in the OPPOSITE direction.
-        setPan({ x: drag.basePanX - dx, y: drag.basePanY - dy });
+        const next = { x: drag.basePanX - dx, y: drag.basePanY - dy };
+        // Track release velocity (scene units / ms, lightly smoothed) for momentum.
+        const now = performance.now();
+        const prev = velRef.current;
+        if (prev && now > prev.t) {
+          const dt = now - prev.t;
+          const k = 0.35;
+          velRef.current = {
+            x: next.x,
+            y: next.y,
+            t: now,
+            vx: prev.vx * (1 - k) + ((next.x - prev.x) / dt) * k,
+            vy: prev.vy * (1 - k) + ((next.y - prev.y) / dt) * k,
+          };
+        } else {
+          velRef.current = { x: next.x, y: next.y, t: now, vx: 0, vy: 0 };
+        }
+        setPan(next);
       }
     },
     [toSceneDelta],
   );
 
+  // Momentum: after a quick flick the map keeps gliding and settles, instead of
+  // stopping dead under the cursor.
+  const startInertia = useCallback((vx: number, vy: number): void => {
+    snapRef.current = true;
+    let last = performance.now();
+    let cvx = vx;
+    let cvy = vy;
+    const tick = (now: number): void => {
+      const dt = Math.min(48, now - last);
+      last = now;
+      const decay = Math.exp(-dt / 240);
+      cvx *= decay;
+      cvy *= decay;
+      if (Math.hypot(cvx, cvy) < 0.004) {
+        inertiaFrame.current = 0;
+        snapRef.current = false;
+        return;
+      }
+      setPan((p) => ({ x: p.x + cvx * dt, y: p.y + cvy * dt }));
+      inertiaFrame.current = requestAnimationFrame(tick);
+    };
+    inertiaFrame.current = requestAnimationFrame(tick);
+  }, []);
+
   const endGesture = useCallback((): void => {
     const drag = dragRef.current;
     dragRef.current = null;
     if (!drag) return;
+    if (drag.kind === "pan") {
+      const v = velRef.current;
+      velRef.current = null;
+      // A flick: momentum only if the pointer was still moving when released.
+      const stale = v ? performance.now() - v.t > 90 : true;
+      if (drag.moved && motion && v && !stale && Math.hypot(v.vx, v.vy) > 0.02) {
+        startInertia(v.vx, v.vy);
+      } else {
+        snapRef.current = false;
+      }
+    }
     if (drag.kind === "node" && drag.moved) {
       const live = liveDrag;
       const dx = drag.baseDx + (live?.dx ?? 0);
@@ -327,7 +513,7 @@ export function NodesCanvas({
     } else {
       setLiveDrag(null);
     }
-  }, [liveDrag, wb, bump]);
+  }, [liveDrag, wb, bump, motion, startInertia]);
 
   const onBackgroundPointerDown = useCallback(
     (e: React.PointerEvent<SVGSVGElement>): void => {
@@ -336,6 +522,12 @@ export function NodesCanvas({
       // following `click` to the <svg>, so plain clicks on anything inside it
       // that isn't a node (e.g. a placeholder's "Return to Reader") never fire.
       // The capture is taken once the press actually turns into a drag.
+      if (inertiaFrame.current) {
+        cancelAnimationFrame(inertiaFrame.current);
+        inertiaFrame.current = 0;
+      }
+      snapRef.current = true; // the map follows the pointer 1:1 while held
+      velRef.current = null;
       dragRef.current = {
         kind: "pan",
         startX: e.clientX,
@@ -639,7 +831,15 @@ export function NodesCanvas({
             yChannelSelector="G"
           />
         </filter>
+        <WatercolorDefs squircles={scene.squircles} motion={motion} />
       </defs>
+
+      <g ref={camRef} data-testid="camera">
+      <WaterBackdrop
+        squircles={scene.squircles}
+        extent={parseViewBox(baseViewBox)}
+        motion={motion}
+      />
 
       {effectivePlaceholders.length > 0 ? (
         <g data-testid="node-placeholder-layer">
@@ -716,7 +916,12 @@ export function NodesCanvas({
               data-testid="category-squircle"
               data-category-id={sq.categoryId}
             >
-              <path className="category-squircle-fill" d={sq.d} fill={pigment} />
+              <path
+                className="category-squircle-fill"
+                d={sq.d}
+                fill={`url(#wash-${sq.categoryId.replace(/[^a-zA-Z0-9_-]/g, "_")})`}
+              />
+              {motion && <SheenOverlay d={sq.d} />}
               <path
                 className="category-squircle-border"
                 d={sq.d}
@@ -734,6 +939,9 @@ export function NodesCanvas({
           );
         })}
       </g>
+
+      {/* Where two category washes overlap their pigments mix like colours in water. */}
+      <OverlapBleeds squircles={scene.squircles} motion={motion} />
 
       {/* Category-to-category boundary connections (A14-M2). */}
       <g data-testid="category-link-layer">
@@ -782,7 +990,6 @@ export function NodesCanvas({
               d={hub.d}
               fill={hub.blendColor}
               onClick={() => onOpenConnectingPage(hub.relationshipId)}
-              onDoubleClick={() => onHubClick(hub.relationshipId)}
             />
             {/*
               A13-M2: develop/open the hub's FULL Connecting Page in the
@@ -808,6 +1015,25 @@ export function NodesCanvas({
               onClick={() => onOpenConnectingPage(hub.relationshipId)}
             >
               Open connecting page
+            </text>
+            {/* Short-label edit lives on its own hover control: a single click on
+                the hub opens the page (which re-lays-out the map), so a
+                double-click gesture cannot be relied on. */}
+            <text
+              className="open-connecting-page"
+              data-testid="edit-hub-label"
+              data-relationship-id={hub.relationshipId}
+              x={round(hub.center.x)}
+              y={round(hub.center.y) + 40}
+              textAnchor="middle"
+              role="button"
+              style={{
+                opacity: pillVisible ? 1 : 0,
+                pointerEvents: pillVisible ? "auto" : "none",
+              }}
+              onClick={() => onHubClick(hub.relationshipId)}
+            >
+              Edit label
             </text>
           </g>
           );
@@ -837,7 +1063,12 @@ export function NodesCanvas({
               setHoveredNode((cur) => (cur === node.pageId ? null : cur))
             }
           >
-            <circle r={7} />
+            <circle
+              r={7}
+              className="graph-node-dot"
+              // De-phase the idle bob so the dots drift independently.
+              style={{ animationDelay: `${-((hashPhase(node.pageId) % 70) / 10)}s` }}
+            />
             <text
               className="graph-node-label"
               x={11}
@@ -848,6 +1079,7 @@ export function NodesCanvas({
             </text>
           </g>
         ))}
+      </g>
       </g>
       </svg>
     </div>
@@ -863,6 +1095,37 @@ const MAX_ZOOM = 5;
 const ZOOM_STEP = 1.2;
 
 /** Parse an SVG viewBox string into its numeric components. */
+/** Small stable per-id number used to de-phase ambient animation. */
+function hashPhase(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i += 1) h = (h * 31 + id.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
+interface ViewBoxNums {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** True when the OS asks for reduced motion (live-updating). */
+function usePrefersReducedMotion(): boolean {
+  const [reduced, setReduced] = useState<boolean>(() =>
+    typeof window !== "undefined" && typeof window.matchMedia === "function"
+      ? window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      : false,
+  );
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const on = (): void => setReduced(mq.matches);
+    mq.addEventListener?.("change", on);
+    return () => mq.removeEventListener?.("change", on);
+  }, []);
+  return reduced;
+}
+
 function parseViewBox(vb: string): { x: number; y: number; w: number; h: number } {
   const [x, y, w, h] = vb.split(/\s+/).map(Number);
   return { x: x ?? 0, y: y ?? 0, w: w || 1, h: h || 1 };

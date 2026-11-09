@@ -20,10 +20,16 @@ test("the comment popover follows its highlight while scrolling and never leaves
   await expect(popover).toBeVisible();
 
   const frag = page.locator(".ito-highlight-fragment").first();
+  // Highlight overlays are removed and redrawn on refit, so a read can land in
+  // the gap; retry until both boxes exist.
   const gap = async () => {
-    const f = (await frag.boundingBox())!;
-    const p = (await popover.boundingBox())!;
-    return { fragBottom: f.y + f.height, popTop: p.y, popBottom: p.y + p.height };
+    for (let i = 0; i < 40; i++) {
+      const f = await frag.boundingBox();
+      const p = await popover.boundingBox();
+      if (f && p) return { fragBottom: f.y + f.height, popTop: p.y, popBottom: p.y + p.height };
+      await page.waitForTimeout(50);
+    }
+    throw new Error("highlight or popover never had a box");
   };
   const before = await gap();
   expect(before.popBottom).toBeLessThanOrEqual(600);

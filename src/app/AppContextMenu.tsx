@@ -119,7 +119,12 @@ export function buildContextEntries(target: Element, selectedText: string): {
       id: "hub-label",
       label: "Edit label…",
       icon: Icons.pencil,
-      onSelect: () => (hub as unknown as HTMLElement).dispatchEvent(new MouseEvent("dblclick", { bubbles: true })),
+      onSelect: () => {
+        const rel = hub.getAttribute("data-relationship-id");
+        (
+          document.querySelector(`[data-testid="edit-hub-label"][data-relationship-id="${rel}"]`) as unknown as HTMLElement | null
+        )?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      },
     });
     entries.push({ kind: "separator", id: "s-hub" });
   } else if (target.closest('[data-testid="nodes-view"]')) {
