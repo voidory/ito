@@ -20,7 +20,6 @@ import {
   deriveSubjectReferences,
   newAnnotationId,
   newAssetId,
-  newCaptureId,
   newCategoryId,
   newEvidenceInstanceId,
   newPageId,
@@ -30,10 +29,10 @@ import {
   relationshipEndpoints,
   type Annotation,
   type AnnotationId,
+  type AnnotationStyleRecord,
   type AnchorResolution,
   type BrainData,
   type BrainId,
-  type Capture,
   type Category,
   type CategoryId,
   type EvidenceInstance,
@@ -80,10 +79,10 @@ export const HIGHLIGHT_COLORS = ["yellow", "green", "blue", "pink"] as const;
 export type HighlightColor = (typeof HIGHLIGHT_COLORS)[number];
 
 /**
- * Presentation attributes for an annotation. These are stored in the comment
- * channel's sibling map rather than on the model's Annotation (which stays the
- * pure section-20 contract); the workbench owns them and persists them inside
- * a reserved structure so save/reopen restores them. See `AnnotationView`.
+ * Presentation attributes for an annotation. These live OUTSIDE the model's
+ * Annotation (which stays the pure section-20 contract) in
+ * `PresentationState.annotationStyles`, keyed by annotation id, so save/reopen
+ * restores them without polluting `BrainData.captures`. See `AnnotationView`.
  */
 export interface AnnotationStyle {
   readonly kind: HighlightStyle;
@@ -92,6 +91,34 @@ export interface AnnotationStyle {
 
 /** Default style applied when a selection is committed with no explicit color. */
 export const DEFAULT_STYLE: AnnotationStyle = { kind: "highlight", color: "yellow" };
+
+/**
+ * Legacy M1 sentinel tag (read-only migration). M1 smuggled annotation styles
+ * into `BrainData.captures` via a reserved Capture whose `sourceId` was null and
+ * whose `text` started with this tag. M2.5 (ADR-0010) moves styles into
+ * `PresentationState.annotationStyles`; this constant exists ONLY so the one-time
+ * load migration can detect and strip such legacy records. It is NEVER written.
+ */
+const LEGACY_STYLE_CAPTURE_TAG = "\u0000ito:annotation-styles\u0000";
+
+/**
+ * Parse the legacy sentinel Capture's style payload into plain
+ * {id -> AnnotationStyle} entries (read-only migration helper). Returns an empty
+ * object when there is no sentinel or the payload is corrupt (non-fatal).
+ */
+function parseLegacyStyleCapture(data: BrainData): Record<string, AnnotationStyle> {
+  const cap = data.captures.find(
+    (c) => c.sourceId === null && c.text.startsWith(LEGACY_STYLE_CAPTURE_TAG),
+  );
+  if (!cap) return {};
+  try {
+    const json = cap.text.slice(LEGACY_STYLE_CAPTURE_TAG.length);
+    const parsed = JSON.parse(json) as Record<string, AnnotationStyle>;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
 
 /**
  * A denormalized reader-side view of an annotation: the model Annotation plus
@@ -112,52 +139,6 @@ export interface AnnotationView {
 export interface SaveError {
   readonly message: string;
   readonly atISO: string;
-}
-
-/**
- * Styles live outside the pure model so the section-20 Annotation stays clean.
- * They are persisted inside the manifest-adjacent `captures` channel would be
- * wrong (that is real data); instead the workbench serializes them into a
- * dedicated note Page? No — that would create a Page. Keep them in a parallel
- * record persisted alongside annotations via the adapter's structured blob.
- *
- * To avoid changing the storage contract we encode styles as a JSON string in
- * a single reserved Capture whose sourceId is null and whose text is tagged.
- */
-const STYLE_CAPTURE_TAG = "\u0000ito:annotation-styles\u0000";
-
-function readStyles(data: BrainData): Map<AnnotationId, AnnotationStyle> {
-  const map = new Map<AnnotationId, AnnotationStyle>();
-  const cap = data.captures.find((c) => c.text.startsWith(STYLE_CAPTURE_TAG));
-  if (!cap) return map;
-  try {
-    const json = cap.text.slice(STYLE_CAPTURE_TAG.length);
-    const parsed = JSON.parse(json) as Record<string, AnnotationStyle>;
-    for (const [id, style] of Object.entries(parsed)) {
-      map.set(id as AnnotationId, style);
-    }
-  } catch {
-    // Corrupt style blob is non-fatal: fall back to defaults.
-  }
-  return map;
-}
-
-function writeStyles(
-  data: BrainData,
-  styles: Map<AnnotationId, AnnotationStyle>,
-): BrainData {
-  const payload: Record<string, AnnotationStyle> = {};
-  for (const [id, style] of styles) payload[id] = style;
-  const text = STYLE_CAPTURE_TAG + JSON.stringify(payload);
-  const existing = data.captures.find((c) => c.text.startsWith(STYLE_CAPTURE_TAG));
-  const others = data.captures.filter((c) => !c.text.startsWith(STYLE_CAPTURE_TAG));
-  const cap: Capture = {
-    id: existing?.id ?? newCaptureId(),
-    sourceId: null,
-    text,
-    createdAt: existing?.createdAt ?? new Date().toISOString(),
-  };
-  return { ...data, captures: [...others, cap] };
 }
 
 /**
@@ -333,7 +314,6 @@ export interface CommitRangeAnnotationInput {
  */
 export class Workbench {
   private data: BrainData;
-  private styles: Map<AnnotationId, AnnotationStyle>;
   private openSourceIds: SourceId[] = [];
   private openSubjectPageId: PageId | null = null;
   private highlightsTabOpen = false;
@@ -354,12 +334,12 @@ export class Workbench {
     data: BrainData,
   ) {
     this.data = data;
-    this.styles = readStyles(data);
   }
 
   /** Open an existing brain, or create+persist a new empty one. */
   static async open(storage: StorageAdapter, brainId?: BrainId): Promise<Workbench> {
     let data: BrainData | null = null;
+    let createdFresh = false;
     if (brainId) {
       data = await storage.readBrain(brainId);
     } else {
@@ -369,8 +349,45 @@ export class Workbench {
     if (!data) {
       data = createEmptyBrainData();
       await storage.writeBrain(data);
+      createdFresh = true;
     }
-    return new Workbench(storage, data);
+    const wb = new Workbench(storage, data);
+    // One-time M1 -> M2.5 migration (ADR-0010): strip any legacy sentinel
+    // Capture (sourceId===null + tagged style payload) out of BrainData.captures
+    // and fold its styles into presentation.annotationStyles. A freshly created
+    // brain can never carry the sentinel, so skip the extra persist for it.
+    if (!createdFresh) await wb.migrateLegacyStyleCaptures();
+    return wb;
+  }
+
+  /**
+   * Remove any legacy M1 style-sentinel Capture (sourceId===null + tagged text)
+   * from `captures` and migrate its parsed styles into
+   * `presentation.annotationStyles` (only for annotation ids not already
+   * present). Persists ONCE so the sentinel never reaches an M3 export. A no-op
+   * (no persist) when no sentinel record is present.
+   */
+  private async migrateLegacyStyleCaptures(): Promise<void> {
+    const hasSentinel = this.data.captures.some(
+      (c) => c.sourceId === null && c.text.startsWith(LEGACY_STYLE_CAPTURE_TAG),
+    );
+    if (!hasSentinel) return;
+    const legacyStyles = parseLegacyStyleCapture(this.data);
+    const existing = this.data.presentation.annotationStyles ?? {};
+    const merged: Record<string, AnnotationStyleRecord> = { ...existing };
+    for (const [id, style] of Object.entries(legacyStyles)) {
+      // Only adopt a legacy style for ids not already styled in presentation.
+      if (!(id in merged)) merged[id] = { kind: style.kind, color: style.color };
+    }
+    const cleanedCaptures = this.data.captures.filter(
+      (c) => !(c.sourceId === null && c.text.startsWith(LEGACY_STYLE_CAPTURE_TAG)),
+    );
+    this.data = {
+      ...this.data,
+      captures: cleanedCaptures,
+      presentation: { ...this.data.presentation, annotationStyles: merged },
+    };
+    await this.persist();
   }
 
   // -- snapshot -------------------------------------------------------------
@@ -717,8 +734,10 @@ export class Workbench {
       updatedAt: now,
     };
     const style = input.style ?? DEFAULT_STYLE;
-    this.styles.set(annotation.id, style);
-    this.data = { ...this.data, annotations: [...this.data.annotations, annotation] };
+    this.data = {
+      ...this.writeStyle(this.data, annotation.id, style),
+      annotations: [...this.data.annotations, annotation],
+    };
     await this.persist();
     return this.viewFor(annotation.id)!;
   }
@@ -752,16 +771,46 @@ export class Workbench {
       createdAt: now,
       updatedAt: now,
     };
-    this.styles.set(annotation.id, input.style ?? DEFAULT_STYLE);
-    this.data = { ...this.data, annotations: [...this.data.annotations, annotation] };
+    this.data = {
+      ...this.writeStyle(this.data, annotation.id, input.style ?? DEFAULT_STYLE),
+      annotations: [...this.data.annotations, annotation],
+    };
     await this.persist();
     return this.viewFor(annotation.id)!;
+  }
+
+  /**
+   * Immutably set an annotation's style in `presentation.annotationStyles`,
+   * keyed by annotation id. Stores a plain {kind, color} record (the model's
+   * AnnotationStyleRecord; strokeWidth is an optional/unused §14 refinement).
+   * Returns new BrainData; never mutates in place.
+   */
+  private writeStyle(
+    data: BrainData,
+    id: AnnotationId,
+    style: AnnotationStyle,
+  ): BrainData {
+    const existing = data.presentation.annotationStyles ?? {};
+    return {
+      ...data,
+      presentation: {
+        ...data.presentation,
+        annotationStyles: { ...existing, [id]: { kind: style.kind, color: style.color } },
+      },
+    };
+  }
+
+  /** Read an annotation's style, or DEFAULT_STYLE when none is stored. */
+  private readStyle(id: AnnotationId): AnnotationStyle {
+    const rec = this.data.presentation.annotationStyles?.[id];
+    if (!rec) return DEFAULT_STYLE;
+    return { kind: rec.kind as HighlightStyle, color: rec.color as HighlightColor };
   }
 
   /** Change an annotation's highlight style (compact color/kind controls). */
   async setAnnotationStyle(id: AnnotationId, style: AnnotationStyle): Promise<void> {
     if (!this.data.annotations.some((a) => a.id === id)) return;
-    this.styles.set(id, style);
+    this.data = this.writeStyle(this.data, id, style);
     await this.persist();
   }
 
@@ -787,6 +836,8 @@ export class Workbench {
 
   /** Delete an annotation and its style. Associating/citing never calls this. */
   async deleteAnnotation(id: AnnotationId): Promise<void> {
+    const { [id]: _removed, ...remainingStyles } =
+      this.data.presentation.annotationStyles ?? {};
     this.data = {
       ...this.data,
       annotations: this.data.annotations.filter((a) => a.id !== id),
@@ -794,8 +845,8 @@ export class Workbench {
       subjectAssociations: this.data.subjectAssociations.filter(
         (a) => a.annotationId !== id,
       ),
+      presentation: { ...this.data.presentation, annotationStyles: remainingStyles },
     };
-    this.styles.delete(id);
     await this.persist();
   }
 
@@ -1208,7 +1259,7 @@ export class Workbench {
   viewFor(id: AnnotationId): AnnotationView | null {
     const annotation = this.data.annotations.find((a) => a.id === id);
     if (!annotation) return null;
-    const style = this.styles.get(id) ?? DEFAULT_STYLE;
+    const style = this.readStyle(id);
     const isRange = annotation.scope.kind === "pages";
     const rangeLabel =
       annotation.scope.kind === "pages"
@@ -1566,17 +1617,18 @@ export class Workbench {
   // -- persistence ----------------------------------------------------------
 
   /**
-   * Persist the current data (styles folded in) through the adapter, advancing
-   * the publication revision. On failure, retain in-memory state and record a
-   * SaveError — the caller/UI shows an actionable error and keeps the draft.
+   * Persist the current data through the adapter, advancing the publication
+   * revision. Annotation styles live in `presentation.annotationStyles`, so
+   * there is no longer any style-folding step here (the M1 capture sentinel is
+   * gone). On failure, retain in-memory state and record a SaveError — the
+   * caller/UI shows an actionable error and keeps the draft.
    */
   private async persist(): Promise<void> {
-    const withStyles = writeStyles(this.data, this.styles);
     const next: BrainData = {
-      ...withStyles,
+      ...this.data,
       manifest: {
-        ...withStyles.manifest,
-        publicationRevision: withStyles.manifest.publicationRevision + 1,
+        ...this.data.manifest,
+        publicationRevision: this.data.manifest.publicationRevision + 1,
         updatedAt: new Date().toISOString(),
       },
     };
