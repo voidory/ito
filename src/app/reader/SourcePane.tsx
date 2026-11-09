@@ -187,10 +187,17 @@ export function SourcePane({
   // A single frame is scheduled at a time and torn down on unmount.
   const redrawOverlaysRef = useRef(redrawOverlays);
   redrawOverlaysRef.current = redrawOverlays;
+  // Forward ref to the live-selection overlay recompute (defined later in the
+  // component). The coalescer callback only runs on scroll, by which time this
+  // ref is populated, so calling through the ref avoids an ordering hazard.
+  const onScrollRecomputeRef = useRef<() => void>(() => {});
   const scrollCoalescerRef = useRef<ScrollCoalescer | null>(null);
   if (scrollCoalescerRef.current === null) {
     scrollCoalescerRef.current = createScrollCoalescer(() => {
       redrawOverlaysRef.current();
+      // Re-pin the live selection pills and toolbar to the scrolled selection,
+      // clipping anything that left the pane viewport (Bug B).
+      onScrollRecomputeRef.current();
     });
   }
   const onPaneScroll = useCallback(() => {
@@ -809,36 +816,88 @@ export function SourcePane({
   // FEAT-002 (2.3a) live watercolor selection preview pills: while a
   // non-collapsed selection lives inside a page stage, mirror its client rects
   // on the fixed layer as soft, on-theme pills tinted with the active color.
+  //
+  // BUGFIX (floating pill / toolbar drift on scroll): the live preview pills
+  // and the selection toolbar are both `position: fixed` surfaces anchored to
+  // VIEWPORT rects. Those rects are only valid for the current scroll offset;
+  // when `.pane-scroll` scrolls, `selectionchange` does NOT fire, so a
+  // viewport-fixed pill/toolbar would freeze at stale coordinates and drift
+  // out onto the beige desk. We therefore recompute the live selection
+  // geometry on every scroll frame (below, via the scroll coalescer), reading
+  // fresh `range.getClientRects()`, and CLIP anything scrolled outside the
+  // pane-scroll viewport so nothing floats past the page edges.
+  const recomputeSelectionOverlays = useCallback((): void => {
+    const sel = typeof window !== "undefined" ? window.getSelection() : null;
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
+      setLivePreview(null);
+      return;
+    }
+    const range = sel.getRangeAt(0);
+    const page = pagesRef.current.find((p) =>
+      p.textLayer.contains(range.commonAncestorContainer),
+    );
+    if (!page) {
+      setLivePreview(null);
+      return;
+    }
+
+    // The visible band of the scroll container: a selection rect scrolled above
+    // or below this band is off-page and must not be drawn on the fixed layer.
+    const scroller = scrollRef.current;
+    const clipTop = scroller ? scroller.getBoundingClientRect().top : -Infinity;
+    const clipBottom = scroller ? scroller.getBoundingClientRect().bottom : Infinity;
+
+    const rects = Array.from(range.getClientRects())
+      .filter((r) => r.width > 0 && r.height > 0)
+      // Keep only rects whose vertical centre is inside the scroll viewport.
+      .filter((r) => {
+        const centre = r.top + r.height / 2;
+        return centre >= clipTop - 1 && centre <= clipBottom + 1;
+      })
+      .map((r) => ({
+        left: r.left,
+        top: Math.max(r.top, clipTop),
+        right: r.right,
+        bottom: Math.min(r.bottom, clipBottom),
+        width: r.width,
+      }))
+      .filter((r) => r.bottom - r.top > 0);
+
+    if (rects.length === 0) {
+      setLivePreview(null);
+      return;
+    }
+    setLivePreview({ color: swatch("yellow"), rects });
+
+    // Keep the committed-but-pending selection toolbar anchored to the live
+    // selection rect as the page scrolls; hide it (clear) once the selection
+    // has scrolled entirely out of the pane viewport.
+    setToolbar((prev) => {
+      if (!prev) return prev;
+      const box = range.getBoundingClientRect();
+      if (box.width === 0 && box.height === 0) return prev;
+      const centre = box.top + box.height / 2;
+      if (centre < clipTop - 1 || centre > clipBottom + 1) return null;
+      return {
+        ...prev,
+        rect: {
+          left: box.left,
+          top: box.top,
+          right: box.right,
+          bottom: box.bottom,
+          width: box.width,
+        },
+      };
+    });
+  }, []);
+
+  const recomputeSelectionOverlaysRef = useRef(recomputeSelectionOverlays);
+  recomputeSelectionOverlaysRef.current = recomputeSelectionOverlays;
+  // Let the scroll coalescer (declared earlier) drive the recompute.
+  onScrollRecomputeRef.current = recomputeSelectionOverlays;
+
   useEffect(() => {
-    const onSelectionChange = (): void => {
-      const sel = window.getSelection();
-      if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
-        setLivePreview(null);
-        return;
-      }
-      const range = sel.getRangeAt(0);
-      const page = pagesRef.current.find((p) =>
-        p.textLayer.contains(range.commonAncestorContainer),
-      );
-      if (!page) {
-        setLivePreview(null);
-        return;
-      }
-      const rects = Array.from(range.getClientRects())
-        .filter((r) => r.width > 0 && r.height > 0)
-        .map((r) => ({
-          left: r.left,
-          top: r.top,
-          right: r.right,
-          bottom: r.bottom,
-          width: r.width,
-        }));
-      if (rects.length === 0) {
-        setLivePreview(null);
-        return;
-      }
-      setLivePreview({ color: swatch("yellow"), rects });
-    };
+    const onSelectionChange = (): void => recomputeSelectionOverlaysRef.current();
     document.addEventListener("selectionchange", onSelectionChange);
     return () => document.removeEventListener("selectionchange", onSelectionChange);
   }, []);

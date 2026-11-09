@@ -12,8 +12,18 @@
 import * as pdfjs from "pdfjs-dist";
 // Vite resolves this to a hashed asset URL and copies the worker into the build.
 import PdfWorker from "pdfjs-dist/build/pdf.worker.mjs?url";
-import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
+import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from "pdfjs-dist";
 import type { PageBox } from "./anchor";
+
+/** True when an error is pdf.js's render-cancelled signal (safe to ignore). */
+function isRenderingCancelled(err: unknown): boolean {
+  return (
+    err instanceof pdfjs.RenderingCancelledException ||
+    (typeof err === "object" &&
+      err !== null &&
+      (err as { name?: string }).name === "RenderingCancelledException")
+  );
+}
 
 pdfjs.GlobalWorkerOptions.workerSrc = PdfWorker;
 
@@ -134,7 +144,19 @@ export async function renderPage(
 
   const textContent = await page.getTextContent();
 
-  async function draw(renderScale: number): Promise<void> {
+  // BUGFIX (blank canvas on fit-width/zoom): two `page.render()` calls must
+  // NEVER overlap on the same <canvas>, or pdf.js throws "Cannot use the same
+  // canvas during multiple render() operations" (or clears the canvas
+  // mid-paint, leaving a blank page). The initial renderPage() draw() and a
+  // near-immediate rerender() from the ResizeObserver / fit-width effect are
+  // exactly such a race. We serialize them here, at the source, independent of
+  // any caller-side serializer: each draw() cancels the in-flight RenderTask,
+  // waits for it to settle, then chains behind the previous draw() so renders
+  // on this page are strictly sequential.
+  let activeTask: RenderTask | null = null;
+  let drawChain: Promise<void> = Promise.resolve();
+
+  async function paint(renderScale: number): Promise<void> {
     const viewport = page.getViewport({ scale: renderScale });
     const ratio = globalThis.devicePixelRatio || 1;
     canvas.width = Math.floor(viewport.width * ratio);
@@ -155,7 +177,13 @@ export async function renderPage(
 
     const ctx = canvas.getContext("2d")!;
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-    await page.render({ canvasContext: ctx, viewport }).promise;
+    const task = page.render({ canvasContext: ctx, viewport });
+    activeTask = task;
+    try {
+      await task.promise;
+    } finally {
+      if (activeTask === task) activeTask = null;
+    }
 
     // Rebuild the text layer for this scale.
     textLayer.replaceChildren();
@@ -165,6 +193,23 @@ export async function renderPage(
       viewport,
     });
     await textLayerBuilder.render();
+  }
+
+  function draw(renderScale: number): Promise<void> {
+    // Cancel any paint still in flight so the next one owns the canvas alone.
+    activeTask?.cancel();
+    const next = drawChain
+      .catch((err) => {
+        if (!isRenderingCancelled(err)) throw err;
+      })
+      .then(() => paint(renderScale));
+    // Swallow cancellation on the shared chain so a cancelled paint never
+    // rejects a later, legitimate draw(). The returned promise still rejects
+    // for real errors (and for the cancellation of THIS specific call).
+    drawChain = next.catch((err) => {
+      if (!isRenderingCancelled(err)) throw err;
+    });
+    return next;
   }
 
   await draw(scale);
@@ -227,7 +272,13 @@ export async function renderPage(
       return rangeFor(start, end);
     },
     async rerender(nextScale: number): Promise<void> {
-      await draw(nextScale);
+      try {
+        await draw(nextScale);
+      } catch (err) {
+        // A newer draw() superseded this one and cancelled its RenderTask;
+        // that is expected during rapid fit/zoom changes and is not an error.
+        if (!isRenderingCancelled(err)) throw err;
+      }
     },
   };
 
