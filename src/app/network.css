@@ -98,3 +98,29 @@
   font: 500 14px system-ui, sans-serif;
   fill: #8a847c;
 }
+
+/*
+ * N06 transient "Not connected yet" placeholder: a faint, dashed ghost node so
+ * it is visibly NOT a real network node. It persists nothing — clicking is a
+ * no-op (ephemeral UI only).
+ */
+.node-placeholder {
+  cursor: default;
+}
+
+.node-placeholder-dot {
+  fill: none;
+  stroke: #b7afa3;
+  stroke-width: 1.5;
+  stroke-dasharray: 3 3;
+}
+
+.node-placeholder-label {
+  font: 600 13px system-ui, sans-serif;
+  fill: #8a847c;
+}
+
+.node-placeholder-title {
+  font: 500 11px system-ui, sans-serif;
+  fill: #a39d94;
+}

@@ -5,8 +5,8 @@ import {
   type Scene,
   type SceneGraphInput,
 } from "../network";
-import type { PageId, RelationshipId } from "../model";
-import type { Workbench } from "./workbench";
+import type { CategoryId, PageId, RelationshipId } from "../model";
+import type { ConceptGraph, Workbench } from "./workbench";
 import "./network.css";
 
 /**
@@ -31,12 +31,31 @@ import "./network.css";
  * Geometry is NOT reimplemented here: it is all delegated to the proven pure
  * src/network modules.
  */
+/**
+ * A transient N06 placeholder descriptor (never a durable record). Passed in by
+ * the shell when the user opens the Nodes view for an unconnected PDF.
+ */
+export interface NodePlaceholderProps {
+  readonly sourceId: string;
+  readonly title: string;
+  readonly transient: boolean;
+}
+
 export function NodesCanvas({
   wb,
+  categoryScope = null,
+  placeholder = null,
   suppressMotion,
   bump,
 }: {
   wb: Workbench;
+  /**
+   * The active category scope (§3.3). null = the global network; a category
+   * name = only that category's squircle + its local/overlapping network.
+   */
+  categoryScope?: string | null;
+  /** A transient "not connected yet" placeholder (N06), or null. */
+  placeholder?: NodePlaceholderProps | null;
   suppressMotion: boolean;
   bump: () => void;
 }): JSX.Element {
@@ -46,21 +65,25 @@ export function NodesCanvas({
   // structural signature so the deterministic layout only re-runs when the
   // underlying records actually change (idle = stable positions, A09-M2).
   const graph = wb.conceptGraph();
+  // Apply the §3.3 category filter off the LIVE graph: with a scope selected we
+  // keep only that category's members plus nodes in overlapping categories
+  // (categories sharing at least one member page with the scoped one).
+  const filtered = filterGraphToScope(graph, categoryScope);
   const graphInput: SceneGraphInput = {
-    nodes: graph.nodes.map((n) => ({
+    nodes: filtered.nodes.map((n) => ({
       pageId: n.pageId,
       title: n.title,
       hidden: n.hidden,
       position: n.position,
     })),
-    links: graph.links.map((l) => ({
+    links: filtered.links.map((l) => ({
       relationshipId: l.relationshipId,
       endpointPageIds: l.endpointPageIds,
       label: l.label,
       blendColor: l.blendColor,
       hidden: l.hidden,
     })),
-    categories: graph.categories.map((c) => ({
+    categories: filtered.categories.map((c) => ({
       categoryId: c.categoryId,
       name: c.name,
       colorCode: c.colorCode,
@@ -137,7 +160,39 @@ export function NodesCanvas({
         </filter>
       </defs>
 
-      {scene.nodes.length === 0 && scene.squircles.length === 0 ? (
+      {placeholder ? (
+        <g
+          data-testid="node-placeholder"
+          data-transient={placeholder.transient ? "true" : "false"}
+          data-source-id={placeholder.sourceId}
+          className="node-placeholder"
+          // Clicking a placeholder is EPHEMERAL UI only: it creates no
+          // Page/Relationship/Category and performs no DB write (N06-M2). We
+          // deliberately do nothing persistent here.
+          onClick={() => {
+            /* intentionally no-op: placeholder persists nothing (N06-M2) */
+          }}
+        >
+          <circle className="node-placeholder-dot" r={9} cx={0} cy={0} />
+          <text
+            className="node-placeholder-label"
+            x={0}
+            y={28}
+            textAnchor="middle"
+          >
+            Not connected yet
+          </text>
+          <text
+            className="node-placeholder-title"
+            data-testid="node-placeholder-title"
+            x={0}
+            y={48}
+            textAnchor="middle"
+          >
+            {placeholder.title}
+          </text>
+        </g>
+      ) : scene.nodes.length === 0 && scene.squircles.length === 0 ? (
         <text className="nodes-empty" x={0} y={0} textAnchor="middle">
           No concept nodes yet
         </text>
@@ -243,6 +298,47 @@ export function NodesCanvas({
 
 function round(n: number): number {
   return Math.round(n * 1000) / 1000;
+}
+
+/**
+ * Filter a derived concept graph to the §3.3 category scope. With no scope the
+ * graph is returned unchanged (the GLOBAL network). With a scope (a category
+ * name) we keep ONLY:
+ *   - the scoped category and every category that OVERLAPS it (shares at least
+ *     one member page), and
+ *   - the nodes that belong to any of those kept categories, and
+ *   - the links whose endpoints all fall inside that kept node set.
+ * This is pure and operates entirely off the live graph — no record is touched.
+ */
+export function filterGraphToScope(
+  graph: ConceptGraph,
+  categoryScope: string | null,
+): ConceptGraph {
+  if (categoryScope == null) return graph;
+  const scoped = graph.categories.find((c) => c.name === categoryScope);
+  // Scope names an unknown/empty category: show nothing rather than everything.
+  if (!scoped) {
+    return { nodes: [], links: [], categories: [] };
+  }
+  const scopedMembers = new Set<PageId>(scoped.memberPageIds);
+  // Categories that overlap the scoped one (including the scoped category).
+  const keptCategoryIds = new Set<CategoryId>([scoped.categoryId]);
+  for (const c of graph.categories) {
+    if (c.categoryId === scoped.categoryId) continue;
+    if (c.memberPageIds.some((p) => scopedMembers.has(p))) {
+      keptCategoryIds.add(c.categoryId);
+    }
+  }
+  const keptCategories = graph.categories.filter((c) => keptCategoryIds.has(c.categoryId));
+  const keptPageIds = new Set<PageId>();
+  for (const c of keptCategories) {
+    for (const p of c.memberPageIds) keptPageIds.add(p);
+  }
+  const nodes = graph.nodes.filter((n) => keptPageIds.has(n.pageId));
+  const links = graph.links.filter((l) =>
+    l.endpointPageIds.every((p) => keptPageIds.has(p)),
+  );
+  return { nodes, links, categories: keptCategories };
 }
 
 /**

@@ -56,6 +56,9 @@ interface ItoTestApi {
   hideRelationship(relationshipId: string): Promise<void>;
   nodesViewActive(): boolean;
   setNodesView(active: boolean): void;
+  viewMode(): string;
+  setViewMode(mode: string): void;
+  sourceIsConnected(sourceId: string): boolean;
   setRelationshipLabel(relationshipId: string, label: string): Promise<void>;
   relationshipLabel(relationshipId: string): string;
   addPageToCategory(categoryId: string, pageId: string): Promise<void>;

@@ -129,6 +129,12 @@ interface ItoTestApi {
   nodesViewActive(): boolean;
   /** Activate/deactivate the Nodes view (presentation only, FEAT-004). */
   setNodesView(active: boolean): void;
+  /** The top-level Files/Nodes view mode (§3.3, FEAT-005). */
+  viewMode(): string;
+  /** Switch the top-level Files/Nodes view (session view state, no record). */
+  setViewMode(mode: string): void;
+  /** Whether a source participates in the network (false = N06 placeholder). */
+  sourceIsConnected(sourceId: string): boolean;
   /** Set a relationship's label (connecting-page surface). */
   setRelationshipLabel(relationshipId: string, label: string): Promise<void>;
   /** The durable label of a relationship. */
@@ -388,6 +394,16 @@ export function installTestApi(wb: Workbench, bump: () => void): void {
     setNodesView(active) {
       wb.setNodesViewActive(active);
       bump();
+    },
+    viewMode() {
+      return wb.viewMode();
+    },
+    setViewMode(mode) {
+      wb.setViewMode(mode as "files" | "nodes");
+      bump();
+    },
+    sourceIsConnected(sourceId) {
+      return wb.sourceIsConnected(sourceId);
     },
     async setRelationshipLabel(relationshipId, label) {
       await wb.setRelationshipLabel(relationshipId as RelationshipId, label);

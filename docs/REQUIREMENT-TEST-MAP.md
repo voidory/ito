@@ -166,6 +166,25 @@ a real Workbench).
 | §3.2   | `.category-squircle-fill` multiply blend + `#watercolor-turbulent-edge` filter; dotted-dashed border | e2e + unit | `src/app/network.css`; `src/app/nodesCanvas.render.test.ts` | implemented (e2e deferred §9) |
 | §3.1   | Clicking a hub opens the connecting-page label surface                | e2e        | `e2e/concept-network.spec.ts` | implemented (e2e deferred §9) |
 
+## M2 Files / Nodes view switch (FEAT-005, spec §3.3)
+
+FEAT-005 adds the top-level Files/Nodes switch. The Workbench owns a session
+`viewMode` (default `files`, no durable record); the shell renders a visible
+`view-switch`; `categoryScope` is shared across the switch and filters the Nodes
+canvas (no scope = global network; a scope = that category's squircle + its
+overlapping network, via the pure `filterGraphToScope`). N06-M2: the Nodes view
+for an UNCONNECTED PDF shows a transient `node-placeholder` that persists
+nothing. Rows are covered by the real-browser `e2e/view-switch.spec.ts` (runs in
+the publishing environment; sandbox cannot run Chromium — see
+`docs/MILESTONE-MATRIX.md` §9) AND, for headless proof, by
+`src/app/workbench.view.test.ts` and `src/app/nodesCanvas.render.test.ts`.
+
+| ID     | Behaviour                                                             | Test kind  | Test / location | Status |
+| ------ | --------------------------------------------------------------------- | ---------- | --------------- | ------ |
+| §3.3   | `view-switch` toggles Files (Library) <-> Nodes (canvas); viewMode round-trips; opening a PDF from Files still launches the Reader | e2e + unit | `e2e/view-switch.spec.ts`; `src/app/workbench.view.test.ts` | implemented (e2e deferred §9) |
+| §3.3   | `categoryScope` shared across the switch; Nodes with a scope shows only that category's squircle + overlapping network | e2e + unit | `e2e/view-switch.spec.ts`; `src/app/workbench.view.test.ts`; `src/app/nodesCanvas.render.test.ts` | implemented (e2e deferred §9) |
+| N06-M2 | Nodes view for an unconnected PDF renders a transient "Not connected yet" placeholder; clicking creates ZERO graph records (no DB write) | e2e + unit | `e2e/view-switch.spec.ts`; `src/app/workbench.view.test.ts`; `src/app/nodesCanvas.render.test.ts` | implemented (e2e deferred §9) |
+
 ## Non-functional (N01–N08)
 
 | ID  | Requirement (summary)                        | Milestone | Status      |

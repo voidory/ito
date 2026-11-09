@@ -207,6 +207,13 @@ export interface PassageEvidenceLine {
   readonly quotedText: string;
 }
 
+/**
+ * The top-level app view (spec §3.3): the category-organized Files library vs
+ * the Nodes concept-network canvas. This is SESSION VIEW STATE (relates D19) —
+ * preserved across in-session transitions, writing NO durable record.
+ */
+export type ViewMode = "files" | "nodes";
+
 /** Immutable snapshot of workbench state the UI renders from. */
 export interface WorkbenchState {
   readonly brainId: BrainId;
@@ -226,6 +233,12 @@ export interface WorkbenchState {
   readonly suppressMotion: boolean;
   /** Whether the Nodes (concept-network) view is active (transient, FEAT-004). */
   readonly nodesViewActive: boolean;
+  /**
+   * The top-level Files/Nodes view (§3.3). Session view state; default 'files'.
+   * This is the formal FEAT-005 switch that supersedes the transient
+   * `nodesViewActive` flag (which now derives from it).
+   */
+  readonly viewMode: ViewMode;
   /** The integrated-workspace layout (pane widths + line visibility). */
   readonly workspaceLayout: WorkspaceLayout;
   /**
@@ -325,7 +338,7 @@ export class Workbench {
   private openSubjectPageId: PageId | null = null;
   private highlightsTabOpen = false;
   private suppressMotion = false;
-  private nodesView = false;
+  private view: ViewMode = "files";
   private workspaceLayout: WorkspaceLayout = DEFAULT_WORKSPACE_LAYOUT;
   private activeCategoryScope: string | null = null;
   private saveError: SaveError | null = null;
@@ -371,7 +384,8 @@ export class Workbench {
       openSubjectPageId: this.openSubjectPageId,
       highlightsTabOpen: this.highlightsTabOpen,
       suppressMotion: this.suppressMotion,
-      nodesViewActive: this.nodesView,
+      nodesViewActive: this.view === "nodes",
+      viewMode: this.view,
       workspaceLayout: this.workspaceLayout,
       categoryScope: this.activeCategoryScope,
       saveError: this.saveError,
@@ -511,18 +525,32 @@ export class Workbench {
   }
 
   /**
-   * Whether the Nodes (concept-network) view is active vs the Files/reader view.
-   * TRANSIENT in M2: the full Files/Nodes view switch is formalized + persisted
-   * in FEAT-005; FEAT-004 only needs a minimal, reachable mount, so this is a
-   * presentation-only in-memory flag (never persisted, never a record change).
+   * The top-level Files/Nodes view (§3.3, FEAT-005). SESSION VIEW STATE: it is
+   * preserved across in-session transitions and writes NO durable record
+   * (relates D19). Default 'files'.
    */
-  nodesViewActive(): boolean {
-    return this.nodesView;
+  viewMode(): ViewMode {
+    return this.view;
   }
 
-  /** Toggle the Nodes view (presentation only, transient — see above). */
+  /** Switch the top-level Files/Nodes view. View state only — no record write. */
+  setViewMode(mode: ViewMode): void {
+    this.view = mode;
+  }
+
+  /**
+   * Whether the Nodes (concept-network) view is active vs the Files view. This
+   * now DERIVES from the formal FEAT-005 `viewMode` — FEAT-004 introduced a
+   * transient flag which FEAT-005 superseded with the proper view switch, so
+   * the two stay in lockstep and the earlier callers keep working.
+   */
+  nodesViewActive(): boolean {
+    return this.view === "nodes";
+  }
+
+  /** Toggle the Nodes view by setting the formal viewMode (view state only). */
   setNodesViewActive(active: boolean): void {
-    this.nodesView = active;
+    this.view = active ? "nodes" : "files";
   }
 
   /**
@@ -1516,6 +1544,23 @@ export class Workbench {
     const source = this.data.sources.find((s) => s.id === (sourceId as SourceId));
     const title = source ? `${source.title} — not connected yet` : "Not connected yet";
     return { sourceId, title, transient: true };
+  }
+
+  /**
+   * Whether a Source PARTICIPATES in the concept network (N06). A source is
+   * "connected" once one of its annotations is cited into a subject page (an
+   * EvidenceInstance pointing at a Page), which is what makes a node/relationship
+   * exist for it. A freshly-imported, never-cited PDF is UNCONNECTED, and the
+   * Nodes view shows the transient "not connected yet" placeholder for it.
+   * Pure read — never mutates data.
+   */
+  sourceIsConnected(sourceId: string): boolean {
+    const id = sourceId as SourceId;
+    const annotationIds = new Set(
+      this.data.annotations.filter((a) => a.sourceId === id).map((a) => a.id),
+    );
+    if (annotationIds.size === 0) return false;
+    return this.data.evidenceInstances.some((ev) => annotationIds.has(ev.annotationId));
   }
 
   // -- persistence ----------------------------------------------------------

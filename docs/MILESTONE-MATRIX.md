@@ -226,6 +226,33 @@ against a real Workbench (`src/app/nodesCanvas.render.test.ts`).
 | (§3.2)  | Category squircle `.category-squircle-fill` uses mix-blend-mode: multiply + `#watercolor-turbulent-edge`; dotted-dashed border | implemented (e2e deferred §9) | e2e + unit  | `src/app/network.css`; `src/app/nodesCanvas.render.test.ts` "watercolor fill class", "filter once in defs" |
 | (§3.1)  | Clicking a hub opens the connecting-page label surface                | implemented (e2e deferred §9) | e2e        | `e2e/concept-network.spec.ts` "clicking a hub opens the connecting-page label surface" |
 
+## 8d. M2 Files / Nodes view switch (FEAT-005, spec §3.3)
+
+FEAT-005 formalizes the top-level Files/Nodes view switch. The Workbench owns a
+`viewMode: 'files' | 'nodes'` (session view state, default `files`, no durable
+record — `setViewMode`/`viewMode()`); the transient FEAT-004 `nodesViewActive`
+flag now DERIVES from it so the two stay in lockstep. The app shell renders a
+visible `view-switch` (`view-files`/`view-nodes` buttons); `files` shows the
+Library (opening a PDF still launches the Reader), `nodes` mounts NodesCanvas.
+`state.categoryScope` is a single source of truth shared across the switch: no
+scope = the global network; a scope = only that category's squircle + its
+local/overlapping network (overlap = categories sharing a member page), filtered
+off the LIVE graph by the pure `filterGraphToScope`. N06-M2: opening Nodes for
+an UNCONNECTED PDF (a Source with no cited annotation → no participating Page)
+renders a TRANSIENT `node-placeholder` (`data-transient="true"`) bearing the PDF
+title from `wb.nodePlaceholderFor(sourceId)`; clicking it or leaving the view
+creates/persists NOTHING. The Playwright spec `e2e/view-switch.spec.ts` proves
+the rendering/interaction in the publishing environment; the headless logic is
+proven in the sandbox by `src/app/workbench.view.test.ts` (view-mode round-trip,
+shared scope, N06 zero records, scope filter) and `src/app/nodesCanvas.render.test.ts`
+(jsdom render of the scope filter + the N06 placeholder against a real Workbench).
+
+| ID      | Requirement (summary)                                                | Status      | Kind        | Covering test |
+| ------- | -------------------------------------------------------------------- | ----------- | ----------- | ------------- |
+| (§3.3)  | Shell `view-switch` toggles Files (Library) <-> Nodes (NodesCanvas); viewMode round-trips; opening a PDF from Files still launches the Reader | implemented (e2e deferred §9) | e2e + unit  | `e2e/view-switch.spec.ts` "view switch toggles …", "opening a PDF … Reader"; `src/app/workbench.view.test.ts` "round-trips setViewMode …" |
+| (§3.3)  | `categoryScope` shared across the switch; Nodes with a scope shows only that category's squircle + overlapping network | implemented (e2e deferred §9) | e2e + unit  | `e2e/view-switch.spec.ts` "a category selected in Files carries into Nodes …"; `src/app/workbench.view.test.ts` "category-scope graph filter …"; `src/app/nodesCanvas.render.test.ts` "with a category scope …" |
+| N06-M2  | Nodes view for an unconnected PDF renders a transient "Not connected yet" placeholder; clicking creates ZERO Page/Relationship/Category records (no DB write) | implemented (e2e deferred §9) | e2e + unit  | `e2e/view-switch.spec.ts` "N06: … placeholder … persists nothing"; `src/app/workbench.view.test.ts` "nodePlaceholderFor creates ZERO … records"; `src/app/nodesCanvas.render.test.ts` "FEAT-005/N06: renders the transient … placeholder" |
+
 ## 9. Sandbox verification note (M2)
 
 The Playwright Chromium binary CANNOT be downloaded in the build sandbox (the

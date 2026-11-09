@@ -45,9 +45,9 @@ export function App(): JSX.Element {
     [wb, bump],
   );
 
-  const onToggleNodesView = useCallback(
-    (active: boolean) => {
-      wb?.setNodesViewActive(active);
+  const onSetViewMode = useCallback(
+    (mode: "files" | "nodes") => {
+      wb?.setViewMode(mode);
       bump();
     },
     [wb, bump],
@@ -121,33 +121,22 @@ export function App(): JSX.Element {
         {boot.detail}
       </span>
       {wb && state ? (
-        state.nodesViewActive ? (
-          <div
-            data-testid="nodes-view"
-            style={{ position: "fixed", inset: 0, display: "flex", flexDirection: "column" }}
-          >
-            <div style={{ padding: "0.5rem", borderBottom: "1px solid #e5e2dc" }}>
-              <button
-                data-testid="exit-nodes-view"
-                onClick={() => onToggleNodesView(false)}
-              >
-                ← Files
-              </button>
-            </div>
-            <div style={{ flex: 1, minHeight: 0 }}>
-              <NodesCanvas wb={wb} suppressMotion={state.suppressMotion} bump={bump} />
-            </div>
-          </div>
-        ) : state.openSourceIds.length === 0 ? (
-          <>
-            <div style={{ padding: "0.5rem 1rem" }}>
-              <button
-                data-testid="open-nodes-view"
-                onClick={() => onToggleNodesView(true)}
-              >
-                Nodes
-              </button>
-            </div>
+        <>
+          {/*
+            Top-level Files/Nodes view switch (§3.3, FEAT-005). Always visible in
+            the shell header so either view is one click away; categoryScope is
+            shared between them (it lives on the Workbench, carried across).
+          */}
+          <ViewSwitch viewMode={state.viewMode} onSetViewMode={onSetViewMode} />
+          {state.viewMode === "nodes" ? (
+            <NodesView
+              wb={wb}
+              categoryScope={state.categoryScope}
+              openSourceIds={state.openSourceIds}
+              suppressMotion={state.suppressMotion}
+              bump={bump}
+            />
+          ) : state.openSourceIds.length === 0 ? (
             <Library
               wb={wb}
               categoryScope={state.categoryScope}
@@ -164,26 +153,125 @@ export function App(): JSX.Element {
                 bump();
               }}
             />
-          </>
-        ) : (
-          <Reader
-            wb={wb}
-            openSourceIds={state.openSourceIds}
-            openSubjectPageId={state.openSubjectPageId}
-            suppressMotion={state.suppressMotion}
-            highlightsTabOpen={state.highlightsTabOpen}
-            onToggleTab={onToggleTab}
-            onToggleMotion={onToggleMotion}
-            onBackToLibrary={() => {
-              wb.closeWorkspace();
-              bump();
-            }}
-            bump={bump}
-          />
-        )
+          ) : (
+            <Reader
+              wb={wb}
+              openSourceIds={state.openSourceIds}
+              openSubjectPageId={state.openSubjectPageId}
+              suppressMotion={state.suppressMotion}
+              highlightsTabOpen={state.highlightsTabOpen}
+              onToggleTab={onToggleTab}
+              onToggleMotion={onToggleMotion}
+              onBackToLibrary={() => {
+                wb.closeWorkspace();
+                bump();
+              }}
+              bump={bump}
+            />
+          )}
+        </>
       ) : (
         <p style={{ padding: "2rem" }}>Loading workbench…</p>
       )}
+    </div>
+  );
+}
+
+/**
+ * The top-level Files/Nodes view toggle (§3.3, FEAT-005). Presentation-only —
+ * it drives `wb.setViewMode` which writes no durable record. Rendered in the
+ * shell header so it is always reachable and testable.
+ */
+function ViewSwitch({
+  viewMode,
+  onSetViewMode,
+}: {
+  viewMode: "files" | "nodes";
+  onSetViewMode: (mode: "files" | "nodes") => void;
+}): JSX.Element {
+  return (
+    <div
+      data-testid="view-switch"
+      data-view-mode={viewMode}
+      role="tablist"
+      aria-label="View"
+      style={{
+        display: "flex",
+        gap: "0.25rem",
+        padding: "0.5rem 1rem",
+        borderBottom: "1px solid #e5e2dc",
+      }}
+    >
+      <button
+        data-testid="view-files"
+        role="tab"
+        aria-selected={viewMode === "files"}
+        data-active={viewMode === "files"}
+        onClick={() => onSetViewMode("files")}
+      >
+        Files
+      </button>
+      <button
+        data-testid="view-nodes"
+        role="tab"
+        aria-selected={viewMode === "nodes"}
+        data-active={viewMode === "nodes"}
+        onClick={() => onSetViewMode("nodes")}
+      >
+        Nodes
+      </button>
+    </div>
+  );
+}
+
+/**
+ * The Nodes view container (§3.3, FEAT-005). Shows the concept-network canvas.
+ *
+ * N06-M2: when exactly one source is open and it does NOT yet participate in
+ * the network (no cited annotation → no node/relationship), it renders a
+ * TRANSIENT "Not connected yet" placeholder sourced from
+ * `wb.nodePlaceholderFor(sourceId)`. The placeholder creates NOTHING — clicking
+ * it or leaving the view simply discards it (ephemeral UI only).
+ *
+ * The live `categoryScope` is passed into NodesCanvas so selecting a category
+ * in Files carries into Nodes: no scope = the global network; a scope = only
+ * that category's squircle + its local/overlapping network.
+ */
+function NodesView({
+  wb,
+  categoryScope,
+  openSourceIds,
+  suppressMotion,
+  bump,
+}: {
+  wb: NonNullable<ReturnType<typeof useWorkbench>["wb"]>;
+  categoryScope: string | null;
+  openSourceIds: readonly SourceId[];
+  suppressMotion: boolean;
+  bump: () => void;
+}): JSX.Element {
+  // A single open, unconnected source drives the N06 placeholder. "Open
+  // together" (2+) or a connected source shows the real canvas.
+  const soloSourceId = openSourceIds.length === 1 ? openSourceIds[0]! : null;
+  const placeholder =
+    soloSourceId && !wb.sourceIsConnected(soloSourceId)
+      ? wb.nodePlaceholderFor(soloSourceId)
+      : null;
+
+  return (
+    <div
+      data-testid="nodes-view"
+      style={{ position: "fixed", inset: 0, top: "3rem", display: "flex", flexDirection: "column" }}
+    >
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <NodesCanvas
+          wb={wb}
+          categoryScope={categoryScope}
+          placeholder={placeholder}
+          suppressMotion={suppressMotion}
+          bump={bump}
+        />
+      </div>
     </div>
   );
 }
