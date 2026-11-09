@@ -582,6 +582,8 @@ export class Workbench {
    * the adapter at `open()` so offloaded status survives a reopen.
    */
   private offloadedAssetIds = new Set<string>();
+  /** See enableAutoHistory(). */
+  private autoHistory = false;
   /**
    * The in-memory staged import held between `stageImport` and
    * `commitStagedImport` (A19). NEVER mutates the live store; it is a parsed +
@@ -1486,6 +1488,7 @@ export class Workbench {
     relationships[idx] = updated;
     this.data = { ...this.data, relationships };
     await this.persist();
+    await this.logChange("relationship", "relationship-label", `Labelled a connection “${label}”`, [relationshipId]);
   }
 
   /**
@@ -1832,6 +1835,7 @@ export class Workbench {
     const idx = this.data.annotations.findIndex((a) => a.id === id);
     if (idx < 0) return;
     const prev = this.data.annotations[idx]!;
+    if (prev.comment === comment) return;
     const updated: Annotation = {
       ...prev,
       comment,
@@ -1841,6 +1845,7 @@ export class Workbench {
     annotations[idx] = updated;
     this.data = { ...this.data, annotations };
     await this.persist();
+    await this.logChange("annotation-comment", "annotation-comment", comment.trim() === "" ? "Cleared a highlight comment" : `Commented on a highlight: ${comment.trim().slice(0, 80)}`, [id]);
   }
 
   /** Delete an annotation and its style. Associating/citing never calls this. */
@@ -2003,6 +2008,7 @@ export class Workbench {
     };
     this.data = { ...this.data, pages: [...this.data.pages, page] };
     await this.persist();
+    await this.logChange("other", "page-created", `Created page “${title}”`, [page.id]);
     return page;
   }
 
@@ -2275,6 +2281,7 @@ export class Workbench {
       evidenceInstances: [...this.data.evidenceInstances, evidence],
     };
     await this.persist();
+    await this.logChange("quote-insert", "quote-insert", `Quoted “${evidence.quotedText.slice(0, 80)}” into a page`, [destinationPageId, annotationId]);
     return evidence;
   }
 
@@ -2416,6 +2423,7 @@ export class Workbench {
       subjectAssociations: [...this.data.subjectAssociations, assoc],
     };
     await this.persist();
+    await this.logChange("tentative-association", "association-created", "Tentatively linked a highlight to a page", [annotationId, destinationPageId]);
     return assoc;
   }
 
@@ -2497,6 +2505,7 @@ export class Workbench {
       evidenceInstances: this.data.evidenceInstances.filter((e) => e.id !== evidenceId),
     };
     await this.persist();
+    await this.logChange("quote-remove", "quote-remove", "Removed a quote from a page", [evidenceId]);
   }
 
   // -- derived views --------------------------------------------------------
@@ -2591,6 +2600,7 @@ export class Workbench {
     };
     this.data = { ...this.data, categories: [...this.data.categories, category] };
     await this.persist();
+    await this.logChange("category", "category-created", `Created category “${name}”`, [category.id]);
     return category;
   }
 
@@ -2611,6 +2621,7 @@ export class Workbench {
     categories[idx] = updated;
     this.data = { ...this.data, categories };
     await this.persist();
+    await this.logChange("category", "category-member-added", "Added a page to a category", [categoryId, pageId]);
   }
 
   /** Remove a page from a category's membership. Never deletes the Page. */
@@ -2627,6 +2638,7 @@ export class Workbench {
     categories[idx] = updated;
     this.data = { ...this.data, categories };
     await this.persist();
+    await this.logChange("category", "category-member-removed", "Removed a page from a category", [categoryId, pageId]);
   }
 
   /**
@@ -2676,6 +2688,7 @@ export class Workbench {
       relationships: [...this.data.relationships, relationship],
     };
     await this.persist();
+    await this.logChange("relationship", "relationship-created", "Connected pages", [relationship.id, ...endpointPageIds]);
     return relationship;
   }
 
@@ -3206,6 +3219,31 @@ export class Workbench {
       afterSnapshot: { pageId: pending.pageId, documentJson: pending.afterDocumentJson },
       summary: `Edited page ${pending.pageId}`,
     });
+  }
+
+  /**
+   * Record a user-meaningful change in History (H02). Thin wrapper over
+   * recordStructuralRevision so every mutator logs the same way. Kept AFTER the
+   * mutator's own persist so the change is durable before it is narrated.
+   */
+  private async logChange(
+    kind: RevisionKind,
+    label: string,
+    summary: string,
+    affectedObjectIds: readonly string[],
+  ): Promise<void> {
+    if (!this.autoHistory) return;
+    await this.recordStructuralRevision({ kind, label, summary, affectedObjectIds });
+  }
+
+  /**
+   * Turn on automatic History logging for user-meaningful mutations (pages,
+   * quotes, comments, categories, connections, associations). Off by default so a
+   * Workbench driven directly (tests, tooling) records exactly the revisions it
+   * asks for; the app shell turns it on.
+   */
+  enableAutoHistory(on = true): void {
+    this.autoHistory = on;
   }
 
   /**

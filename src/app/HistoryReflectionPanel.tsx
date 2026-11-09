@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { Revision } from "../model";
 import { Workbench } from "./workbench";
+import { HistoryTimeline, bucketByDay } from "./history/HistoryTimeline";
 
 /**
  * M7 (H03, H04, D14) the Linked History & Multi-Span Reflection panel.
@@ -107,6 +108,41 @@ export function HistoryReflectionPanel({
   const spanEnd = savedSpan?.end ?? selectionKeys[selectionKeys.length - 1] ?? "";
   const isMultiDay = Boolean(spanStart && spanEnd && spanStart !== spanEnd);
 
+  // Timeline: per-day buckets over ALL revisions; a day is "selected" when every
+  // one of its changes is picked. Selecting days (click or drag) picks all of
+  // their changes, and the reflection's date period follows automatically.
+  const timelineDays = useMemo(() => bucketByDay(revisions, dateKeyOf), [revisions]);
+  const selectedDayKeys = useMemo(
+    () =>
+      new Set(
+        timelineDays
+          .filter((d) => d.ids.length > 0 && d.ids.every((id) => selected[id]))
+          .map((d) => d.key),
+      ),
+    [timelineDays, selected],
+  );
+  const onSelectDays = (keys: readonly string[], mode: "replace" | "toggle"): void => {
+    const idsFor = (k: string): readonly string[] =>
+      timelineDays.find((d) => d.key === k)?.ids ?? [];
+    if (mode === "replace") {
+      const next: Record<string, boolean> = {};
+      for (const k of keys) for (const id of idsFor(k)) next[id] = true;
+      setSelected(next);
+      setSavedSpan(null);
+      return;
+    }
+    setSelected((prev) => {
+      const next = { ...prev };
+      for (const k of keys) {
+        const ids = idsFor(k);
+        const allOn = ids.every((id) => prev[id]);
+        for (const id of ids) next[id] = !allOn;
+      }
+      return next;
+    });
+    setSavedSpan(null);
+  };
+
   // FIX-HISTORY-FULL-LAYOUT (§3.4): empty-state when the brain has no revisions
   // recorded at all yet (distinct from "none in the current date range").
   const hasAnyRevisions = revisions.length > 0;
@@ -130,6 +166,16 @@ export function HistoryReflectionPanel({
           change is recorded here so you can review a day or a date range and
           weave a multi-span reflection across them.
         </p>
+      )}
+
+      {hasAnyRevisions && (
+        <div className="ito-history-timeline-row">
+          <HistoryTimeline
+            days={timelineDays}
+            selectedDayKeys={selectedDayKeys}
+            onSelectDays={onSelectDays}
+          />
+        </div>
       )}
 
       <div className="daily-review-left">
@@ -239,7 +285,12 @@ export function HistoryReflectionPanel({
         </p>
         {isMultiDay && (
           <p data-testid="reflection-date-span" style={styles.span}>
-            {spanStart} &rarr; {spanEnd}
+            Period: {spanStart} &rarr; {spanEnd}
+          </p>
+        )}
+        {spanStart && !isMultiDay && (
+          <p data-testid="reflection-period" style={styles.span}>
+            Period: {spanStart}
           </p>
         )}
         <textarea

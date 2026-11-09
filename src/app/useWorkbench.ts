@@ -49,6 +49,7 @@ export function useWorkbench(adapter?: StorageAdapter): UseWorkbench {
     (adapter ? Workbench.open(adapter) : openDefaultWorkbench())
       .then((wb) => {
         if (cancelled) return;
+        wb.enableAutoHistory();
         wbRef.current = wb;
         setState(wb.snapshot());
       })

@@ -1162,3 +1162,155 @@ label[data-testid="open-restore-input"]:active {
   text-transform: uppercase;
   color: var(--ito-muted);
 }
+
+/* --- History: horizontal timeline of sheets --------------------------- */
+[data-testid="daily-review-panel"] .ito-history-timeline-row {
+  grid-column: 1 / -1;
+}
+
+.ito-timeline-wrap {
+  background: var(--ito-bg-elevated);
+  border: 1px solid var(--ito-border);
+  border-radius: var(--ito-radius-md);
+  box-shadow: var(--ito-shadow-sm);
+}
+
+.ito-timeline {
+  position: relative;
+  overflow-x: auto;
+  overflow-y: hidden;
+  user-select: none;
+  touch-action: pan-x;
+  cursor: crosshair;
+}
+
+.ito-timeline-inner {
+  position: relative;
+  height: 128px;
+}
+
+.ito-timeline-axis {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  top: 74px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--ito-border), var(--ito-accent), var(--ito-border));
+  opacity: 0.7;
+}
+
+.ito-timeline-tick {
+  position: absolute;
+  top: 70px;
+  width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: none;
+}
+
+.ito-timeline-tick::before {
+  content: "";
+  width: 1px;
+  height: 10px;
+  background: var(--ito-border);
+}
+
+.ito-timeline-daynum {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--ito-muted);
+}
+
+.ito-timeline-month {
+  margin-top: 2px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ito-ink);
+  white-space: nowrap;
+}
+
+.ito-timeline-sheet {
+  position: absolute;
+  top: 18px;
+  width: 52px;
+  margin-left: -26px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  cursor: pointer;
+  transition: transform var(--ito-motion-fast) var(--ito-motion-ease);
+}
+
+.ito-timeline-sheet:hover {
+  transform: translateY(-3px) rotate(-1.5deg);
+  box-shadow: none;
+}
+
+.ito-timeline-sheet:focus-visible {
+  outline: 2px solid var(--ito-accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.ito-sheet {
+  overflow: visible;
+  filter: drop-shadow(0 2px 3px rgba(30, 35, 42, 0.18));
+}
+
+.ito-sheet-body {
+  fill: #fffdf7;
+  stroke: var(--ito-border);
+  stroke-width: 1.2;
+}
+
+.ito-sheet-body[data-selected="true"] {
+  fill: var(--ito-accent-soft);
+  stroke: var(--ito-accent);
+  stroke-width: 1.6;
+}
+
+.ito-sheet-fold {
+  fill: none;
+  stroke: var(--ito-border);
+  stroke-width: 1.2;
+}
+
+.ito-sheet-lines {
+  fill: none;
+  stroke: var(--ito-muted);
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  opacity: 0.55;
+}
+
+.ito-timeline-count {
+  position: absolute;
+  top: -4px;
+  right: 2px;
+  min-width: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+  color: var(--ito-accent-ink);
+  background: var(--ito-accent);
+  border-radius: 8px;
+}
+
+.ito-timeline-band {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  background: var(--ito-accent-soft);
+  border: 1px dashed var(--ito-accent);
+  border-radius: var(--ito-radius-md);
+  pointer-events: none;
+}

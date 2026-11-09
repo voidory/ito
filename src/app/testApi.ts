@@ -349,6 +349,8 @@ interface ItoTestApi {
   // -- M7 linked history, checkpoints & reflection (H01-H07, D13, D14) ------
   /** Commit any buffered coalesced prose-edit revision immediately (H01). */
   flushPendingRevision(): Promise<void>;
+  /** Test-only: record a structural revision stamped at a given ISO time. */
+  recordRevisionAt(isoTime: string, summary: string): Promise<string>;
   /** The recorded revisions (oldest first) as serializable rows. */
   revisions(): {
     id: string;
@@ -385,6 +387,8 @@ interface ItoTestApi {
     startDateKey: string;
     endDateKey: string;
   }>;
+  /** Saved reflections, oldest first (test read-back of the stored period). */
+  reflections(): { id: string; startDateKey: string; endDateKey: string }[];
   /** Attach/replace a per-change comment on a revision (H04). */
   addRevisionComment(revId: string, text: string): Promise<void>;
   // -- M6 zotero / website / area (A15, A24, D01, D10, D11) ------------------
@@ -1012,9 +1016,26 @@ export function installTestApi(wb: Workbench, bump: () => void): void {
         categories: d.categories.length,
       };
     },
+    reflections() {
+      return wb.reflections().map((r) => ({
+        id: r.id,
+        startDateKey: r.startDateKey,
+        endDateKey: r.endDateKey,
+      }));
+    },
     async flushPendingRevision() {
       await wb.flushPendingRevision();
       bump();
+    },
+    async recordRevisionAt(isoTime, summary) {
+      const rev = await wb.recordStructuralRevision({
+        kind: "other",
+        label: "test-revision",
+        summary,
+        now: isoTime,
+      });
+      bump();
+      return rev.id;
     },
     revisions() {
       return wb.revisions().map((r) => ({

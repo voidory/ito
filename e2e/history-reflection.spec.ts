@@ -157,3 +157,63 @@ test("the overhead probe reports the expected numeric fields (H07)", async ({ pa
   expect(typeof overhead.replayDurationMs).toBe("number");
   expect(overhead.revisionCount).toBeGreaterThan(0);
 });
+
+async function seedAcrossDays(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    await window.__ito.recordRevisionAt("2026-11-02T10:00:00Z", "Drafted the intro");
+    await window.__ito.recordRevisionAt("2026-11-02T15:00:00Z", "Added a quote");
+    await window.__ito.recordRevisionAt("2026-11-05T09:00:00Z", "Linked two pages");
+    await window.__ito.recordRevisionAt("2026-11-09T12:00:00Z", "Reworked the argument");
+  });
+}
+
+test("the timeline shows a sheet per day with changes and clicking one selects that day", async ({ page }) => {
+  await bootLibrary(page);
+  await seedAcrossDays(page);
+  await page.getByTestId("view-history").click();
+
+  const sheets = page.getByTestId("timeline-sheet");
+  await expect(sheets).toHaveCount(3);
+  await expect(sheets.nth(0)).toHaveAttribute("data-count", "2");
+
+  await sheets.nth(0).click();
+  await expect(sheets.nth(0)).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("reflection-selection-count")).toContainText("2 revision");
+  // The reflection period follows the selection automatically.
+  await expect(page.getByTestId("reflection-period")).toHaveText("Period: 2026-11-02");
+
+  // Clicking again deselects.
+  await sheets.nth(0).click();
+  await expect(page.getByTestId("reflection-selection-count")).toContainText("0 revision");
+});
+
+test("dragging across the timeline selects a period and sets the reflection's date range", async ({ page }) => {
+  await bootLibrary(page);
+  await seedAcrossDays(page);
+  await page.getByTestId("view-history").click();
+
+  const sheets = page.getByTestId("timeline-sheet");
+  await expect(sheets).toHaveCount(3);
+  const first = (await sheets.nth(0).boundingBox())!;
+  const second = (await sheets.nth(1).boundingBox())!;
+  const y = first.y + first.height + 22; // on the axis, below the sheets
+
+  await page.mouse.move(first.x + first.width / 2, y);
+  await page.mouse.down();
+  await page.mouse.move(second.x + second.width / 2, y, { steps: 10 });
+  await expect(page.getByTestId("timeline-drag-band")).toBeVisible();
+  await page.mouse.up();
+
+  await expect(sheets.nth(0)).toHaveAttribute("aria-pressed", "true");
+  await expect(sheets.nth(1)).toHaveAttribute("aria-pressed", "true");
+  await expect(sheets.nth(2)).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByTestId("reflection-selection-count")).toContainText("3 revision");
+  await expect(page.getByTestId("reflection-date-span")).toHaveText("Period: 2026-11-02 → 2026-11-05");
+
+  // Saving the reflection stores that period.
+  await page.getByTestId("reflection-editor").fill("Early drafting to the first linking");
+  await page.getByTestId("reflection-save").click();
+  const saved = await page.evaluate(() => window.__ito.reflections().at(-1));
+  expect(saved?.startDateKey).toBe("2026-11-02");
+  expect(saved?.endDateKey).toBe("2026-11-05");
+});

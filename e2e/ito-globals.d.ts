@@ -186,6 +186,8 @@ interface ItoTestApi {
   // -- M7 linked history, checkpoints & reflection (H01-H07, D13, D14) ------
   /** Commit any buffered coalesced prose-edit revision immediately (H01). */
   flushPendingRevision(): Promise<void>;
+  reflections(): { id: string; startDateKey: string; endDateKey: string }[];
+  recordRevisionAt(isoTime: string, summary: string): Promise<string>;
   /** The recorded revisions (oldest first) as serializable rows. */
   revisions(): {
     id: string;
