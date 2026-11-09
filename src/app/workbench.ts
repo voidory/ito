@@ -754,11 +754,12 @@ export class Workbench {
           versionHash,
           // pageCount 0: the batch queue is PURE / DOM-free and cannot run
           // pdf.js to count pages. The queue's primary role is HYDRATING
-          // existing Sources (which already carry the real pageCount); a
-          // freshly CREATED source is backfilled with the true page count when
-          // it is first opened in the Reader (which does run pdf.js). Threading
-          // pdf.js into this pure queue would couple it to the DOM and defeat
-          // its unit-testability, so 0 is the deliberate placeholder here.
+          // existing Sources (which already carry the real pageCount from their
+          // original importSource); only a freshly CREATED (unmatched) source
+          // lands with 0, and it keeps 0 until the PDF is re-imported through
+          // importSource (App.tsx passes doc.numPages there). Threading pdf.js
+          // into this pure queue would couple it to the DOM and defeat its
+          // unit-testability, so 0 is the deliberate placeholder here.
           pageCount: 0,
           importedAt: new Date().toISOString(),
           category: "Uncategorized",
