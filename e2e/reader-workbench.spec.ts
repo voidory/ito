@@ -133,6 +133,47 @@ test("R11: OS prefers-reduced-motion suppresses the commit animation but keeps t
   await expect(frag).toHaveAttribute("data-animated", "false");
 });
 
+test("reader overflow menu escapes the toolbar scroll container", async ({ page }) => {
+  await openFirstDocument(page);
+
+  const toolbar = page.getByTestId("reader-toolbar");
+  const button = page.getByTestId("pane-overflow-menu-btn");
+  await button.click();
+
+  const menu = page.getByTestId("pane-overflow-menu");
+  await expect(menu).toBeVisible();
+
+  const geometry = await page.evaluate(() => {
+    const toolbar = document.querySelector<HTMLElement>('[data-testid="reader-toolbar"]');
+    const menu = document.querySelector<HTMLElement>('[data-testid="pane-overflow-menu"]');
+    const layer = document.querySelector<HTMLElement>('[data-testid="ito-popover-layer"]');
+    if (!toolbar || !menu || !layer) return null;
+    const toolbarRect = toolbar.getBoundingClientRect();
+    const menuRect = menu.getBoundingClientRect();
+    const layerRect = layer.getBoundingClientRect();
+    return {
+      toolbar: { top: toolbarRect.top, bottom: toolbarRect.bottom, height: toolbarRect.height },
+      menu: { top: menuRect.top, bottom: menuRect.bottom, left: menuRect.left, right: menuRect.right },
+      layerPosition: getComputedStyle(layer).position,
+      menuParent: menu.parentElement?.parentElement?.tagName,
+      menuWithinToolbar: toolbar.contains(menu),
+    };
+  });
+
+  expect(geometry).not.toBeNull();
+  expect(geometry!.menuWithinToolbar).toBe(false);
+  expect(geometry!.layerPosition).toBe("fixed");
+  expect(geometry!.menu.top).toBeGreaterThanOrEqual(geometry!.toolbar.bottom);
+  expect(geometry!.menu.left).toBeGreaterThanOrEqual(0);
+  expect(geometry!.menu.right).toBeLessThanOrEqual(page.viewportSize()!.width);
+
+  // A wheel gesture over the reader must not vertically scroll the toolbar.
+  const toolbarBefore = await toolbar.evaluate((el) => el.scrollTop);
+  await page.mouse.wheel(0, 500);
+  await expect.poll(() => toolbar.evaluate((el) => el.scrollTop)).toBe(toolbarBefore);
+  await expect(menu).toBeHidden();
+});
+
 test("R11: the in-app suppress-motion setting also removes the animation", async ({
   page,
 }) => {

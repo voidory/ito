@@ -783,12 +783,8 @@ label[data-testid="open-restore-input"]:active {
   display: inline-flex;
 }
 
-.ito-reader-toolbar .ito-overflow-menu {
-  position: absolute;
-  top: 100%;
-  right: 0;
-  z-index: 1004;
-}
+/* The overflow menu is portaled to the shared fixed layer. Keeping it out of
+   the toolbar's scroll container prevents clipping and accidental toolbar scroll. */
 
 /* FEAT-002 reader-shell statics lifted out of Reader.tsx inline styles. */
 .ito-open-together {

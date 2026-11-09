@@ -70,14 +70,17 @@ export function spanUnderPoint(
 export function glyphCaretAtPoint(layer: HTMLElement, x: number, y: number): CaretPoint | null {
   const span = spanUnderPoint(layer, x, y);
   if (!span) return null;
-  const caret = rawCaretFromPoint(x, y);
+  const style = getComputedStyle(span);
+  const transformed = style.transform !== "none" || style.writingMode.startsWith("vertical");
+  const caret = transformed ? null : rawCaretFromPoint(x, y);
   if (caret && caret.node.nodeType === Node.TEXT_NODE && span.contains(caret.node)) {
     return { node: caret.node as Text, offset: caret.offset };
   }
-  // Some browser engines cannot resolve a caret reliably inside transformed
-  // PDF.js spans. Resolve it from per-character client geometry instead. The
-  // baseline axis comes from the span's transform, so 90°/270° text advances
-  // along Y rather than incorrectly comparing the pointer's X coordinate.
+  // Browser caret APIs can report a plausible but visually wrong caret inside
+  // CSS-transformed PDF.js spans. For rotated pages, resolve the caret from the
+  // actual per-character client geometry instead of trusting that coordinate
+  // mapping. This is what keeps 90°/270° selection aligned with the visible
+  // glyph baseline.
   const text = firstTextNode(span);
   if (!text) return null;
   return { node: text, offset: textOffsetAtPoint(span, text, x, y) };

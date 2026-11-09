@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { IconButton, Menu, type MenuItem } from "../ui/primitives";
+import { useEffect, useState } from "react";
+import { IconButton, Menu, Popover, type AnchorRect, type MenuItem } from "../ui/primitives";
 import { HIGHLIGHT_COLORS, type HighlightColor } from "../workbench";
 import { swatch } from "./AnnotationOverlays";
 
@@ -154,10 +154,10 @@ export function ReaderToolbar({
   onSwitchPaper?: (() => void) | undefined;
   onImportPdf: () => void;
 }): JSX.Element {
-  const [overflowOpen, setOverflowOpen] = useState(false);
+  const [overflowAnchor, setOverflowAnchor] = useState<AnchorRect | null>(null);
   const [pageDraft, setPageDraft] = useState("");
 
-  const overflowItems: MenuItem[] = [
+  useEffect(() => {\n    if (!overflowAnchor) return;\n    const closeOnScroll = () => setOverflowAnchor(null);\n    window.addEventListener("scroll", closeOnScroll, { capture: true, passive: true });\n    window.addEventListener("resize", closeOnScroll, { passive: true });\n    return () => {\n      window.removeEventListener("scroll", closeOnScroll, { capture: true });\n      window.removeEventListener("resize", closeOnScroll);\n    };\n  }, [overflowAnchor]);\n\n  const overflowItems: MenuItem[] = [
     {
       id: "suppress-motion",
       label: suppressMotion ? "Show motion" : "Suppress motion",
@@ -310,20 +310,40 @@ export function ReaderToolbar({
           label="More actions"
           data-testid="pane-overflow-menu-btn"
           aria-haspopup="menu"
-          aria-expanded={overflowOpen}
-          onClick={() => setOverflowOpen((v) => !v)}
+          aria-expanded={Boolean(overflowAnchor)}
+          onClick={(e) => {
+            if (overflowAnchor) {
+              setOverflowAnchor(null);
+              return;
+            }
+            const rect = e.currentTarget.getBoundingClientRect();
+            setOverflowAnchor({
+              left: rect.left,
+              top: rect.top,
+              right: rect.right,
+              bottom: rect.bottom,
+              width: rect.width,
+            });
+          }}
         >
           {Icons.overflow}
         </IconButton>
-        {overflowOpen && (
-          <div className="ito-overflow-menu">
+        {overflowAnchor && (
+          <Popover
+            anchor={overflowAnchor}
+            width={220}
+            role="menu"
+            ariaLabel="Reader actions"
+            testId="pane-overflow-menu-popover"
+            onClose={() => setOverflowAnchor(null)}
+          >
             <Menu
               items={overflowItems}
               ariaLabel="Reader actions"
               testId="pane-overflow-menu"
-              onClose={() => setOverflowOpen(false)}
+              onClose={() => setOverflowAnchor(null)}
             />
-          </div>
+          </Popover>
         )}
       </span>
     </header>
