@@ -91,16 +91,41 @@ function firstTextNode(el: Node): Text | null {
   return walker.nextNode() as Text | null;
 }
 
-function textBaselineAxis(span: HTMLElement): { x: number; y: number } {
+function textBaselineAxis(span: HTMLElement, text: Text): { x: number; y: number } {
+  // Infer the baseline from the actual, post-transform character geometry.
+  // getComputedStyle(span).transform is only the span's local CSS transform;
+  // it does not include transforms inherited from ancestors (or other layout
+  // transforms applied by the browser). The first/last character rect centres
+  // are already in viewport coordinates, the same space as pointer events.
+  let first: { x: number; y: number } | null = null;
+  let last: { x: number; y: number } | null = null;
+  for (let i = 0; i < text.data.length; i++) {
+    const range = document.createRange();
+    range.setStart(text, i);
+    range.setEnd(text, i + 1);
+    const rect = range.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) continue;
+    const center = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    first ??= center;
+    last = center;
+  }
+  if (first && last) {
+    const dx = last.x - first.x;
+    const dy = last.y - first.y;
+    const length = Math.hypot(dx, dy);
+    if (length > 1e-6) return { x: dx / length, y: dy / length };
+  }
+
+  // A one-character run has no measurable progression. Retain a CSS-transform
+  // fallback for that degenerate case, then use writing-mode defaults.
   const style = getComputedStyle(span);
   if (style.transform !== "none" && typeof DOMMatrixReadOnly !== "undefined") {
     try {
-      // A CSS matrix maps the text run's local X/baseline axis to (a, b).
       const matrix = new DOMMatrixReadOnly(style.transform);
       const length = Math.hypot(matrix.a, matrix.b);
       if (length > 1e-6) return { x: matrix.a / length, y: matrix.b / length };
     } catch {
-      // Fall through to writing-mode defaults on engines without DOMMatrix parsing.
+      // Fall through to writing-mode defaults.
     }
   }
   return style.writingMode.startsWith("vertical")
@@ -114,7 +139,7 @@ function distanceToInterval(value: number, min: number, max: number): number {
 
 /** Resolve a text-node offset using the visual geometry of each character. */
 function textOffsetAtPoint(span: HTMLElement, text: Text, x: number, y: number): number {
-  const axis = textBaselineAxis(span);
+  const axis = textBaselineAxis(span, text);
   const normal = { x: -axis.y, y: axis.x };
   const pointAlong = x * axis.x + y * axis.y;
   const pointAcross = x * normal.x + y * normal.y;
