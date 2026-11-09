@@ -255,7 +255,7 @@ table above, exactly as the M2.5 section reuses its own spec letters.) The first
 REAL schema bump lands here (SCHEMA_VERSION 1 -> 2) with a pure stepwise
 migration runner; all new fields are additive + optional + v1-safe. Each row
 names the REAL covering Vitest cases (sandbox-provable) and the
-`e2e/backup-recovery.spec.ts` cases (host-run in the publishing environment — see
+`e2e/backup-recovery.spec.ts` cases (host-run in the publishing environment - see
 `docs/MILESTONE-MATRIX.md` §9; the spec is proven to COMPILE + be DISCOVERED here
 via `npx playwright test --list`, which lists the A17/A18/A19/D02 cases).
 

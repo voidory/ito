@@ -76,6 +76,37 @@ describe("Workbench.enqueuePdfBinaries (D09)", () => {
     expect(wb.rawData().sources).toHaveLength(0);
   });
 
+  it("retains every created Source + assetIndex entry for a batch of >= 2 new PDFs at concurrency 2", async () => {
+    // Three DISTINCT new PDFs ingested concurrently. Under the old
+    // read-modify-write hydrator two "created" callbacks captured the same
+    // `this.data` snapshot across their `await writeAsset`, and the later
+    // reassignment clobbered the earlier one, dropping a Source + assetIndex
+    // entry. The fix accumulates created records and applies them atomically.
+    const batch = [
+      { name: "a.pdf", bytes: pdf(1, 1, 1) },
+      { name: "b.pdf", bytes: pdf(2, 2, 2) },
+      { name: "c.pdf", bytes: pdf(3, 3, 3) },
+    ];
+    const results = await wb.enqueuePdfBinaries(batch, { concurrency: 2 });
+    expect(results.map((r) => r.status)).toEqual(["created", "created", "created"]);
+
+    const data = wb.rawData();
+    // Every created Source and its assetIndex entry must survive.
+    expect(data.sources).toHaveLength(3);
+    expect(data.manifest.assetIndex).toHaveLength(3);
+
+    // Each created source's binary is cached and the versionHash matches.
+    for (const file of batch) {
+      const hash = await sha256Hex(file.bytes);
+      const source = data.sources.find((s) => s.versionHash === hash);
+      expect(source).toBeDefined();
+      expect(wb.sourceBinaryStatus(source!.id)).toBe("cached");
+      expect(
+        data.manifest.assetIndex.some((e) => e.assetId === source!.assetId),
+      ).toBe(true);
+    }
+  });
+
   it("processes a mixed batch (create + hydrate + reject) preserving input order", async () => {
     const existingBytes = pdf(7, 7, 7);
     const existing = await wb.importSource({

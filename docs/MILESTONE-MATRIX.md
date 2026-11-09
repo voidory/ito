@@ -56,7 +56,7 @@ A13 explanatory-page promotion + A14 master|member category-links),
 multi-PDF N06, N04/N05 reference-directed locating, search),
 `e2e/three-d.spec.ts` (M2 §3.4 3D dimensional shift — density reward),
 `e2e/workspace.spec.ts` (M1 integrated three-pane workspace + context-preserving
-transitions), `e2e/backup-recovery.spec.ts` (M3 backup/recovery — A17/A18/A19/D02).
+transitions), `e2e/backup-recovery.spec.ts` (M3 backup/recovery - A17/A18/A19/D02).
 The e2e count grew 43 → 50 at M2.5 (+3 in `concept-network.spec.ts`, +4 in
 `view-switch.spec.ts`) and 50 → 54 at M3 (+4 in `backup-recovery.spec.ts`).
 

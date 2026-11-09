@@ -277,11 +277,9 @@ function mapAssetsBySource(
 ): {
   byAssetId: Map<string, Uint8Array>;
   absent: Set<string>;
-  mismatched: Set<string>;
 } {
   const byAssetId = new Map<string, Uint8Array>();
   const absent = new Set<string>();
-  const mismatched = new Set<string>();
   for (const source of data.sources) {
     const entry = assetEntryName(source.id, source.versionHash);
     const bytes = assets.get(entry);
@@ -291,7 +289,7 @@ function mapAssetsBySource(
       absent.add(source.id);
     }
   }
-  return { byAssetId, absent, mismatched };
+  return { byAssetId, absent };
 }
 
 /**
@@ -299,26 +297,31 @@ function mapAssetsBySource(
  * bundled binary checksum MISMATCHED becomes 'mismatched'; a source whose
  * binary is ABSENT becomes 'binary-offloaded'. Annotations whose source is
  * fine keep their stored resolution.
+ *
+ * `mismatched` maps sourceId -> the ACTUAL sha256 digest of the imported bytes
+ * (computed upstream in commitStagedImport). The resolution records the stored
+ * `Source.versionHash` as `expectedVersionHash` and that recomputed digest as
+ * `actualVersionHash`, so a drifted binary reports the two distinct hashes
+ * rather than collapsing both to the stored value.
  */
 function applyBinaryResolutions(
   data: BrainData,
   absent: ReadonlySet<string>,
-  mismatched: ReadonlySet<string>,
+  mismatched: ReadonlyMap<string, string>,
 ): BrainData {
   if (absent.size === 0 && mismatched.size === 0) return data;
+  const sourceById = new Map(data.sources.map((s) => [s.id as string, s]));
   const annotations: Annotation[] = data.annotations.map((ann) => {
-    if (mismatched.has(ann.sourceId)) {
-      const expected =
-        ann.scope.kind === "text"
-          ? ann.scope.anchor.sourceVersionHash
-          : ann.scope.anchor.sourceVersionHash;
+    const actual = mismatched.get(ann.sourceId);
+    if (actual !== undefined) {
+      const expected = sourceById.get(ann.sourceId as string)?.versionHash;
       return {
         ...ann,
         resolution: {
           kind: "mismatched",
           reason: "imported binary checksum did not match the stored versionHash",
-          expectedVersionHash: expected,
-          actualVersionHash: expected,
+          expectedVersionHash: expected ?? ann.scope.anchor.sourceVersionHash,
+          actualVersionHash: actual,
         },
       } as Annotation;
     }
@@ -435,16 +438,20 @@ export async function commitStagedImport(
   // to find the mismatched set (recomputed here so a lenient commit without a
   // prior checksum finding still resolves correctly).
   const { byAssetId, absent } = mapAssetsBySource(migrated, staged.assets);
-  const mismatched = new Set<string>();
+  // sourceId -> ACTUAL recomputed digest of the imported bytes (the drift hash
+  // we surface as actualVersionHash, distinct from the stored versionHash).
+  const mismatched = new Map<string, string>();
   for (const source of migrated.sources) {
     const bytes = byAssetId.get(source.assetId);
     if (!bytes) continue;
     const digest = await sha256Hex(bytes);
     if (digest !== source.versionHash) {
-      mismatched.add(source.id);
+      mismatched.set(source.id, digest);
       // A mismatched binary must not be written as if it were the real one.
       byAssetId.delete(source.assetId);
-      absent.add(source.id);
+      // Not added to `absent`: that would mask the drift as 'binary-offloaded'.
+      // applyBinaryResolutions checks `mismatched` first, so the annotation is
+      // correctly reported as 'mismatched' with both hashes.
     }
   }
 

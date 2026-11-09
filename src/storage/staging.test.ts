@@ -276,9 +276,18 @@ describe("staging — Try Import Anyway (lenient coercion)", () => {
     const lenient = await commitStagedImport(staged, { lenient: true });
     expect(lenient.committed).toBe(true);
     if (lenient.committed) {
-      expect(lenient.data.annotations[0]!.resolution.kind).toBe("mismatched");
+      const resolution = lenient.data.annotations[0]!.resolution;
+      expect(resolution.kind).toBe("mismatched");
       // The mismatched binary must NOT be written as the real asset.
       expect(lenient.assets.get(src.assetId)).toBeUndefined();
+      // The drift detail must record the stored hash (expected) and the ACTUAL
+      // recomputed digest of the imported bytes as two DISTINCT values. The old
+      // buggy code set both to the stored versionHash, which this asserts against.
+      if (resolution.kind === "mismatched") {
+        expect(resolution.expectedVersionHash).toBe(src.versionHash);
+        expect(resolution.actualVersionHash).toBe(await sha256Hex(wrongBytes));
+        expect(resolution.actualVersionHash).not.toBe(resolution.expectedVersionHash);
+      }
     }
   });
 

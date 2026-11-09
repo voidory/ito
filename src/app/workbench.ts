@@ -32,6 +32,7 @@ import {
   type AnnotationId,
   type AnnotationStyleRecord,
   type AnchorResolution,
+  type AssetIndexEntry,
   type BrainData,
   type BrainId,
   type BrainManifest,
@@ -721,7 +722,15 @@ export class Workbench {
   ): Promise<
     { sourceId: string; status: "hydrated" | "created" | "rejected"; reason?: string }[]
   > {
-    let createdAny = false;
+    // Accumulate every CREATED source + assetIndex entry here instead of
+    // reassigning `this.data` inside each callback. With concurrency >= 2 two
+    // concurrent "created" callbacks would otherwise each read the same
+    // `this.data` snapshot across their `await writeAsset`, so the second
+    // reassignment would clobber the first and drop a Source + assetIndex entry.
+    // Writing the bytes is concurrency-safe (each uses a distinct assetId); we
+    // apply the data mutations atomically ONCE after the queue drains.
+    const createdSources: Source[] = [];
+    const createdAssetEntries: AssetIndexEntry[] = [];
 
     const results = await ingestPdfBinaries(
       files,
@@ -743,34 +752,41 @@ export class Workbench {
           title: name,
           assetId,
           versionHash,
+          // pageCount 0: the batch queue is PURE / DOM-free and cannot run
+          // pdf.js to count pages. The queue's primary role is HYDRATING
+          // existing Sources (which already carry the real pageCount); a
+          // freshly CREATED source is backfilled with the true page count when
+          // it is first opened in the Reader (which does run pdf.js). Threading
+          // pdf.js into this pure queue would couple it to the DOM and defeat
+          // its unit-testability, so 0 is the deliberate placeholder here.
           pageCount: 0,
           importedAt: new Date().toISOString(),
           category: "Uncategorized",
         };
         await this.storage.writeAsset(this.data.manifest.brainId, assetId, bytes);
-        this.data = {
-          ...this.data,
-          sources: [...this.data.sources, source],
-          manifest: {
-            ...this.data.manifest,
-            assetIndex: [
-              ...this.data.manifest.assetIndex,
-              {
-                assetId,
-                contentType: "application/pdf",
-                byteLength: bytes.byteLength,
-                contentHash: versionHash,
-              },
-            ],
-          },
-        };
-        createdAny = true;
+        createdSources.push(source);
+        createdAssetEntries.push({
+          assetId,
+          contentType: "application/pdf",
+          byteLength: bytes.byteLength,
+          contentHash: versionHash,
+        });
         return { status: "created", sourceId: source.id };
       },
       options,
     );
 
-    if (createdAny) await this.persist();
+    if (createdSources.length > 0) {
+      this.data = {
+        ...this.data,
+        sources: [...this.data.sources, ...createdSources],
+        manifest: {
+          ...this.data.manifest,
+          assetIndex: [...this.data.manifest.assetIndex, ...createdAssetEntries],
+        },
+      };
+      await this.persist();
+    }
     return results.map((r) =>
       r.reason === undefined
         ? { sourceId: r.sourceId, status: r.status }
