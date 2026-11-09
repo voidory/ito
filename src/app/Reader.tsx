@@ -534,16 +534,10 @@ export function Reader({
             ...styles.main,
             flexDirection: narrow ? "column" : "row",
             flexWrap: "nowrap",
-            // Closed tab = centred + expanded reading column (only when a single
-            // source reads solo with no subject sharing the workspace).
-            maxWidth:
-              highlightsTabOpen || subjectOpen || paneSlots.length > 1
-                ? "none"
-                : "60rem",
-            margin:
-              highlightsTabOpen || subjectOpen || paneSlots.length > 1
-                ? "0"
-                : "0 auto",
+            // The reading area always fills the space left by whichever side
+            // panels are open; pages re-fit to it (see the fit-to-pane effect).
+            maxWidth: "none",
+            margin: 0,
           }}
         >
           {narrow && (
@@ -941,6 +935,10 @@ function SourcePane({
     if (!scroll) return;
     let frame = 0;
     const BASE_SCALE = 1.3;
+    // Fit-width may scale PAST the base render scale so a wide pane is filled
+    // instead of leaving dead gutters; capped so a huge monitor does not render
+    // an absurdly large canvas.
+    const FIT_MAX = 2.6;
     const refit = (): void => {
       const pages = pagesRef.current;
       if (pages.length === 0) return;
@@ -958,7 +956,7 @@ function SourcePane({
         parseFloat(style.paddingLeft || "0") + parseFloat(style.paddingRight || "0");
       const avail = scroll.clientWidth - padding;
       if (avail <= 0) return;
-      const target = Math.min(BASE_SCALE, Math.max(0.4, avail / intrinsicWidth));
+      const target = Math.min(FIT_MAX, Math.max(0.4, avail / intrinsicWidth));
       if (Math.abs(target - fittedScaleRef.current) < 0.02) return;
       fittedScaleRef.current = target;
       // Compose the fit target with the CURRENT user zoom so a resize tick

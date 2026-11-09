@@ -70,6 +70,11 @@ select {
 
 /* The warm paper backdrop + ink text applied app-wide. */
 body {
+  /* Set on <body> (not only the app root) so portaled surfaces — popovers,
+     menus, the comment box — inherit the same sans stack instead of falling
+     back to the browser serif default. */
+  font-family: var(--ito-font, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
+  font-size: 14px;
   background: var(--ito-bg-paper);
   color: var(--ito-ink);
 }
@@ -796,4 +801,249 @@ label[data-testid="open-restore-input"]:active {
 .ito-find-active {
   background: rgba(255, 150, 0, 0.7);
   outline: 1px solid #ff7a00;
+}
+
+/* --- Reader: fill the available space, drop the per-page caption ------ */
+/* The page number lives in the toolbar; the per-page caption is redundant. */
+.pdf-page-header {
+  display: none;
+}
+
+.pdf-page {
+  margin: 0 auto;
+}
+
+/* Single-document reading: the toolbar already shows the title, so the pane
+   header collapses to a slim, right-aligned control strip. */
+[data-pane-count="1"] .ito-pane-title {
+  display: none;
+}
+
+[data-pane-count="1"] .ito-pane-header {
+  justify-content: flex-end;
+  min-height: 0;
+}
+
+.ito-page-canvas {
+  padding-top: 0;
+}
+
+/* --- Reader context menu ---------------------------------------------- */
+.ito-ctx-menu {
+  z-index: var(--ito-z-popover);
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  background: var(--ito-bg-elevated);
+  border: 1px solid var(--ito-border);
+  border-radius: var(--ito-radius-md);
+  box-shadow: var(--ito-shadow-lg);
+  font-size: 13px;
+  animation: ito-pop-in var(--ito-motion-fast) var(--ito-motion-ease);
+}
+
+.ito-ctx-menu-picker {
+  padding: 10px;
+}
+
+.ito-ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  text-align: left;
+  color: var(--ito-ink);
+  background: transparent;
+  border: 0;
+  border-radius: var(--ito-radius-sm);
+  box-shadow: none;
+  transform: none;
+  cursor: pointer;
+}
+
+.ito-ctx-item:hover,
+.ito-ctx-item:focus-visible {
+  background: var(--ito-accent-soft);
+  box-shadow: none;
+  transform: none;
+  outline: none;
+}
+
+.ito-ctx-item-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--ito-muted);
+}
+
+.ito-ctx-item-label {
+  flex: 1;
+  white-space: nowrap;
+}
+
+.ito-ctx-item-kbd {
+  font: inherit;
+  font-size: 11px;
+  color: var(--ito-muted);
+  padding: 1px 6px;
+  border: 1px solid var(--ito-border);
+  border-radius: 4px;
+  background: var(--ito-bg-paper);
+}
+
+.ito-ctx-item-danger,
+.ito-ctx-item-danger .ito-ctx-item-icon {
+  color: #b3261e;
+}
+
+.ito-ctx-item-danger:hover {
+  background: rgba(179, 38, 30, 0.1);
+}
+
+.ito-ctx-sep {
+  height: 1px;
+  margin: 5px 4px;
+  background: var(--ito-border);
+}
+
+.ito-ctx-colors {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+}
+
+.ito-ctx-section-label {
+  color: var(--ito-muted);
+  font-size: 12px;
+}
+
+/* --- Selection popup + annotation popover: one visual language -------- */
+[data-testid="selection-toolbar"] {
+  flex-wrap: nowrap !important;
+  animation: ito-pop-in var(--ito-motion-fast) var(--ito-motion-ease);
+}
+
+[data-testid="selection-toolbar"] button:not(.ito-color-dot) {
+  padding: 4px 10px;
+  font-size: 13px;
+  box-shadow: none;
+  border-color: transparent;
+  background: transparent;
+}
+
+[data-testid="selection-toolbar"] button:not(.ito-color-dot):hover {
+  background: var(--ito-accent-soft);
+  transform: none;
+}
+
+[data-testid="highlight-edit-popover"] {
+  padding: 10px !important;
+  gap: 8px;
+  animation: ito-pop-in var(--ito-motion-fast) var(--ito-motion-ease);
+}
+
+[data-testid="highlight-edit-popover"] textarea {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  padding: 8px;
+  border: 1px solid var(--ito-border);
+  border-radius: var(--ito-radius-sm);
+  background: var(--ito-bg-paper);
+}
+
+/* --- Annotation popover: one panel, no stacked surfaces --------------- */
+.ito-annot-popover {
+  display: flex !important;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ito-annot-popover-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ito-annot-popover-colors {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+}
+
+.ito-annot-popover-kind {
+  padding: 3px 10px;
+  font-size: 12px;
+  border-radius: var(--ito-radius-pill);
+  box-shadow: none;
+}
+
+.ito-annot-popover-x {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  line-height: 1;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ito-muted);
+}
+
+.ito-comment-embedded {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ito-comment-embedded [data-testid="range-label"] {
+  font-size: 12px;
+  color: var(--ito-muted);
+}
+
+.ito-comment-embedded > div:last-child {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.ito-comment-embedded button {
+  padding: 3px 12px;
+  font-size: 12px;
+  box-shadow: none;
+}
+
+.ito-comment-embedded [data-testid="comment-save"] {
+  background: var(--ito-accent);
+  border-color: var(--ito-accent);
+  color: var(--ito-accent-ink);
+}
+
+.ito-annot-popover-actions {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--ito-border);
+  padding-top: 6px;
+}
+
+.ito-annot-popover-foot {
+  display: flex;
+  gap: 12px;
+  border-top: 1px solid var(--ito-border);
+  padding-top: 8px;
+}
+
+.ito-annot-danger {
+  padding: 0;
+  font-size: 12px;
+  color: #b3261e;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.ito-annot-danger:hover {
+  text-decoration: underline;
+  transform: none;
+  box-shadow: none;
 }
