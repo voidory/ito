@@ -871,12 +871,17 @@ export class Workbench {
    * "area"`) with an EMPTY comment unless provided, and NO node/page/category.
    * The area is citable into Subject Pages via the ordinary evidence path
    * (insertEvidenceIntoPage). Persists once. Throws for an unknown source.
+   *
+   * FEAT-002 (2.4): the optional `imageDataUrl` carries the cropped figure
+   * image (PNG data URL, or an SVG fallback in jsdom) and is stored on the area
+   * anchor so the figure thumbnail renders everywhere the annotation is shown.
    */
   async commitAreaAnnotation(
     sourceId: SourceId,
     pageIndex: number,
     rect: NormalizedRect,
     comment?: string,
+    imageDataUrl?: string,
   ): Promise<AnnotationView> {
     const source = this.data.sources.find((s) => s.id === sourceId);
     if (!source) throw new Error("commitAreaAnnotation: unknown source");
@@ -891,6 +896,9 @@ export class Workbench {
           sourceVersionHash: source.versionHash,
           pageIndex,
           rect,
+          // FEAT-002 (2.4): persist the cropped figure image on the anchor so
+          // the thumbnail survives save/reopen without the live PDF render.
+          ...(imageDataUrl != null ? { imageDataUrl } : {}),
         },
       },
       resolution: { kind: "resolved" },

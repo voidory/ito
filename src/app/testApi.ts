@@ -408,6 +408,7 @@ interface ItoTestApi {
     pageIndex: number,
     rect: NormalizedRect,
     comment?: string,
+    imageDataUrl?: string,
   ): Promise<string>;
   // -- §3.3 interactive 2D canvas -------------------------------------------
   /** Persist a node's dragged OFFSET (D19); records NO history revision. */
@@ -1102,12 +1103,13 @@ export function installTestApi(wb: Workbench, bump: () => void): void {
         availabilityStatus: source.availabilityStatus ?? null,
       };
     },
-    async commitAreaAnnotation(sourceId, pageIndex, rect, comment) {
+    async commitAreaAnnotation(sourceId, pageIndex, rect, comment, imageDataUrl) {
       const view = await wb.commitAreaAnnotation(
         sourceId as SourceId,
         pageIndex,
         rect,
         comment,
+        imageDataUrl,
       );
       bump();
       return view.annotation.id;

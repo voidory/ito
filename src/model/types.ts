@@ -186,6 +186,15 @@ export interface AreaAnchor {
   readonly sourceVersionHash: SourceVersionHash;
   readonly pageIndex: number;
   readonly rect: NormalizedRect;
+  /**
+   * FEAT-002 (2.4) Zotero-style figure cropper: an optional PNG (or SVG
+   * fallback) data URL of the exact page-canvas pixel region the user dragged a
+   * box over. Captured at commit time so the figure thumbnail renders in the
+   * highlights drawer, the 1-click popover, and in a citing SubjectEditor
+   * without re-rendering the live PDF. Optional so existing area anchors that
+   * predate the cropper still typecheck.
+   */
+  readonly imageDataUrl?: string;
 }
 
 /**

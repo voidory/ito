@@ -15,7 +15,12 @@
  */
 
 import { afterEach, describe, expect, it } from "vitest";
-import { renderHighlightOverlay } from "./highlight";
+import {
+  cropCanvasRegionToDataUrl,
+  hitTestAnnotations,
+  renderHighlightOverlay,
+  type HitTestTarget,
+} from "./highlight";
 
 let pageWrapper: HTMLElement | null = null;
 
@@ -123,5 +128,77 @@ describe("renderHighlightOverlay - stage alignment (3.1)", () => {
     renderHighlightOverlay(stage, opts);
     renderHighlightOverlay(stage, opts);
     expect(stage.querySelectorAll('[data-annotation-id="ann-3"]')).toHaveLength(1);
+  });
+});
+
+describe("FEAT-002 hitTestAnnotations (2.2)", () => {
+  const targets: HitTestTarget[] = [
+    { id: "a", rects: [{ x: 0.1, y: 0.1, width: 0.2, height: 0.05 }] },
+    { id: "b", rects: [{ x: 0.5, y: 0.5, width: 0.3, height: 0.1 }] },
+  ];
+
+  it("returns the id of the annotation whose rect contains the normalized point", () => {
+    expect(hitTestAnnotations(targets, 0.15, 0.12)).toBe("a");
+    expect(hitTestAnnotations(targets, 0.6, 0.55)).toBe("b");
+  });
+
+  it("returns null when the point is outside every rect", () => {
+    expect(hitTestAnnotations(targets, 0.95, 0.95)).toBeNull();
+  });
+
+  it("matches the FIRST target in order when rects overlap", () => {
+    const overlapping: HitTestTarget[] = [
+      { id: "top", rects: [{ x: 0, y: 0, width: 1, height: 1 }] },
+      { id: "under", rects: [{ x: 0, y: 0, width: 1, height: 1 }] },
+    ];
+    expect(hitTestAnnotations(overlapping, 0.5, 0.5)).toBe("top");
+  });
+
+  it("applies a small tolerance so clicks on thin boxes register", () => {
+    const thin: HitTestTarget[] = [
+      { id: "thin", rects: [{ x: 0.2, y: 0.5, width: 0.3, height: 0 }] },
+    ];
+    expect(hitTestAnnotations(thin, 0.3, 0.5)).toBe("thin");
+  });
+});
+
+describe("FEAT-002 cropCanvasRegionToDataUrl (2.4)", () => {
+  it("returns a deterministic SVG data URL fallback when the 2d context is null (jsdom)", () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 200;
+    canvas.height = 100;
+    const url = cropCanvasRegionToDataUrl(canvas, { x: 0.1, y: 0.1, width: 0.5, height: 0.5 });
+    expect(url.startsWith("data:image/svg+xml,")).toBe(true);
+    // The SVG encodes the cropped pixel size (0.5 * 200 = 100, 0.5 * 100 = 50).
+    expect(decodeURIComponent(url)).toContain("figure 100x50");
+  });
+
+  it("returns an SVG fallback for a null/zero-size canvas", () => {
+    const url = cropCanvasRegionToDataUrl(null, { x: 0, y: 0, width: 1, height: 1 });
+    expect(url.startsWith("data:image/svg+xml,")).toBe(true);
+  });
+
+  it("uses a real 2d crop + toDataURL when getContext returns a context", () => {
+    const out = document.createElement("canvas");
+    // Stub a 2d context + toDataURL so the non-jsdom path is exercised.
+    const ctx = { drawImage: () => undefined } as unknown as CanvasRenderingContext2D;
+    const original = HTMLCanvasElement.prototype.getContext;
+    const originalToDataUrl = HTMLCanvasElement.prototype.toDataURL;
+    // Only stub for canvases created inside the helper: patch the prototype.
+    HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, kind: string) {
+      return kind === "2d" ? ctx : null;
+    } as typeof HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.toDataURL = () => "data:image/png;base64,AAAA";
+    try {
+      const src = document.createElement("canvas");
+      src.width = 100;
+      src.height = 100;
+      const url = cropCanvasRegionToDataUrl(src, { x: 0, y: 0, width: 0.5, height: 0.5 });
+      expect(url).toBe("data:image/png;base64,AAAA");
+    } finally {
+      HTMLCanvasElement.prototype.getContext = original;
+      HTMLCanvasElement.prototype.toDataURL = originalToDataUrl;
+      out.remove();
+    }
   });
 });

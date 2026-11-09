@@ -212,3 +212,107 @@ function cssEscape(value: string): string {
   }
   return value.replace(/["\\]/g, "\\$&");
 }
+
+// ---------------------------------------------------------------------------
+// FEAT-002 (2.2) coordinate hit-testing on the page stage
+// ---------------------------------------------------------------------------
+
+/**
+ * A single hit-testable annotation rectangle on a page. The rects are
+ * NORMALIZED (0..1) relative to the pdf-page-stage box, so a pointer event's
+ * normalized stage coordinate can be tested against them without touching the
+ * DOM overlay geometry (which stays pointer-events:none during drags).
+ */
+export interface HitTestTarget {
+  readonly id: string;
+  readonly rects: readonly NormalizedRect[];
+}
+
+/**
+ * Test a normalized stage point (nx, ny in 0..1) against a list of annotation
+ * targets and return the id of the FIRST target whose any rect contains the
+ * point (last-painted-on-top order is the caller's responsibility; callers pass
+ * targets in the order they want matched). Returns null when nothing is hit.
+ *
+ * A small tolerance pads each rect so clicks on thin underline/line-fragment
+ * boxes still register. Deterministic and DOM-free so it unit-tests cleanly.
+ */
+export function hitTestAnnotations(
+  targets: readonly HitTestTarget[],
+  nx: number,
+  ny: number,
+  tolerance = 0.004,
+): string | null {
+  for (const target of targets) {
+    for (const r of target.rects) {
+      if (
+        nx >= r.x - tolerance &&
+        nx <= r.x + r.width + tolerance &&
+        ny >= r.y - tolerance &&
+        ny <= r.y + r.height + tolerance
+      ) {
+        return target.id;
+      }
+    }
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// FEAT-002 (2.4) Zotero-style figure cropper
+// ---------------------------------------------------------------------------
+
+/**
+ * Crop the exact pixel region described by a NORMALIZED rect (0..1 relative to
+ * the page) out of a rendered page `<canvas>` into a PNG data URL, using an
+ * offscreen canvas `drawImage` + `toDataURL("image/png")`.
+ *
+ * In jsdom `getContext("2d")` returns null (there is no 2d backend), so this
+ * returns a DETERMINISTIC inline SVG data URL fallback that encodes the crop's
+ * pixel size. Tests therefore never require a real 2d canvas; callers always
+ * receive a usable data URL for the annotation's imageDataUrl.
+ */
+export function cropCanvasRegionToDataUrl(
+  canvas: HTMLCanvasElement | null | undefined,
+  normRect: NormalizedRect,
+): string {
+  const srcW = canvas?.width ?? 0;
+  const srcH = canvas?.height ?? 0;
+  const sx = Math.max(0, Math.round(normRect.x * srcW));
+  const sy = Math.max(0, Math.round(normRect.y * srcH));
+  const sw = Math.max(1, Math.round(normRect.width * srcW));
+  const sh = Math.max(1, Math.round(normRect.height * srcH));
+
+  if (canvas && srcW > 0 && srcH > 0) {
+    try {
+      const out = document.createElement("canvas");
+      out.width = sw;
+      out.height = sh;
+      const ctx = out.getContext("2d");
+      if (ctx) {
+        ctx.drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh);
+        return out.toDataURL("image/png");
+      }
+    } catch {
+      // Fall through to the deterministic SVG fallback below.
+    }
+  }
+
+  return svgFallbackDataUrl(sw, sh);
+}
+
+/**
+ * A deterministic inline SVG data URL used when a real 2d canvas crop is not
+ * available (jsdom). It encodes the cropped pixel size so the stored
+ * imageDataUrl is stable and renderable as an <img> src.
+ */
+function svgFallbackDataUrl(width: number, height: number): string {
+  const w = Math.max(1, Math.round(width));
+  const h = Math.max(1, Math.round(height));
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">` +
+    `<rect width="${w}" height="${h}" fill="#f8f5ee" stroke="#2c4a6f" stroke-width="2"/>` +
+    `<text x="${w / 2}" y="${h / 2}" font-size="12" fill="#2c4a6f" text-anchor="middle" dominant-baseline="middle">figure ${w}x${h}</text>` +
+    `</svg>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}

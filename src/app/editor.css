@@ -41,6 +41,56 @@
   padding: 0;
 }
 
+/*
+ * FEAT-002 (2.3a) dynamic on-theme watercolor text selection. The native
+ * ::selection paint over the transparent text layer uses a soft translucent
+ * tint matching the active highlight palette so selecting glyphs feels organic
+ * and on-theme rather than the stark browser-blue block. The live preview pills
+ * (rendered on the fixed layer during a drag) are soft-rounded + translucent.
+ */
+.textLayer ::selection {
+  background: rgba(255, 221, 87, 0.4);
+}
+.textLayer ::-moz-selection {
+  background: rgba(255, 221, 87, 0.4);
+}
+
+.ito-selection-live-preview {
+  /* A soft, organic watercolor pill; motion-free so it is always safe. */
+  box-shadow: 0 1px 4px rgba(44, 74, 111, 0.15);
+}
+
+/* FEAT-002 (2.4a) area-select mode shows a crosshair + disables text select. */
+.ito-area-select-active,
+.ito-area-select-active .pdf-page-stage {
+  cursor: crosshair;
+}
+.ito-area-select-active .textLayer {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* FEAT-002 (2.2a) the selected highlight's fragments get an accent outline. */
+.ito-highlight[data-selected="true"] .ito-highlight-fragment,
+.ito-highlight[data-selected="true"] .ito-highlight-area {
+  outline: 2px solid var(--ito-accent, #2c4a6f);
+  outline-offset: 1px;
+}
+
+/*
+ * FEAT-002 (2.2.1) keep highlight fragments pointer-transparent DURING a
+ * pointer drag so a text selection can always start or pass THROUGH already
+ * highlighted text. Outside a drag the fragments remain hit-testable so a
+ * direct click still lands on them; 1-click edit + right-click are resolved by
+ * coordinate hit-testing on the stage regardless.
+ */
+[data-pointer-dragging="true"] .ito-highlight-fragment {
+  pointer-events: none;
+}
+.ito-area-select-active .ito-highlight-fragment {
+  pointer-events: none;
+}
+
 /* A copied-in annotation comment: clearly marked, never ordinary writing. */
 p.copied-comment {
   border-left: 3px solid #1a56db;

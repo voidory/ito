@@ -134,7 +134,19 @@ export function SubjectEditor({
     const view = new EditorView(host, {
       state,
       nodeViews: {
-        evidence: (node) => new EvidenceNodeView(node.attrs as unknown as EvidenceAttrs, onFollowSource),
+        evidence: (node) =>
+          new EvidenceNodeView(
+            node.attrs as unknown as EvidenceAttrs,
+            onFollowSource,
+            // FEAT-002 (2.4c): resolve a cited area annotation's cropped figure
+            // image so the chip can render its thumbnail.
+            (annotationId) => {
+              const ann = wb.rawData().annotations.find((a) => a.id === annotationId);
+              return ann && ann.scope.kind === "area"
+                ? ann.scope.anchor.imageDataUrl ?? null
+                : null;
+            },
+          ),
       },
       dispatchTransaction(tr) {
         const next = view.state.apply(tr);
@@ -350,6 +362,7 @@ class EvidenceNodeView {
   constructor(
     attrs: EvidenceAttrs,
     private readonly onFollow: (evidenceId: string) => void,
+    resolveFigure?: (annotationId: string) => string | null,
   ) {
     const chip = document.createElement("span");
     chip.className = "evidence-chip";
@@ -359,6 +372,21 @@ class EvidenceNodeView {
     chip.setAttribute("data-annotation-id", attrs.annotationId);
     chip.setAttribute("data-mode", attrs.mode);
     chip.contentEditable = "false";
+
+    // FEAT-002 (2.4c): when the cited annotation is an area/figure annotation
+    // with a captured crop, show its thumbnail inside the chip.
+    const figureUrl = resolveFigure?.(attrs.annotationId) ?? null;
+    if (figureUrl) {
+      const img = document.createElement("img");
+      img.setAttribute("data-testid", "area-figure-preview");
+      img.src = figureUrl;
+      img.alt = "Cited figure";
+      img.style.maxHeight = "3rem";
+      img.style.maxWidth = "100%";
+      img.style.display = "block";
+      img.style.marginBottom = "0.2rem";
+      chip.appendChild(img);
+    }
 
     const quote = document.createElement("span");
     quote.className = "evidence-quote";

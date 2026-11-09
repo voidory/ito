@@ -1,12 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   createAnchor,
+  cropCanvasRegionToDataUrl,
+  hitTestAnnotations,
   loadDocument,
   renderHighlightOverlay,
   renderPage,
   resolveAnchor,
+  type HitTestTarget,
   type RenderedPage,
 } from "../pdf";
+import type { NormalizedRect } from "../model";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import type { AnchorResolution, AnnotationId, PageId, SourceId, TextAnchor } from "../model";
 import {
@@ -363,6 +368,7 @@ export function Reader({
                   wb={wb}
                   sourceId={slot.sourceId!}
                   suppressMotion={suppressMotion}
+                  onToggleMotion={onToggleMotion}
                   returnTarget={
                     returnTarget && returnTarget.sourceId === slot.sourceId
                       ? returnTarget
@@ -501,11 +507,11 @@ function PaneGroup({
   );
 }
 
-interface ToolbarState {
+export interface ToolbarState {
   readonly sourceId: SourceId;
   readonly anchor: TextAnchor;
-  readonly x: number;
-  readonly y: number;
+  /** Viewport-space anchor rect of the selection (for the fixed toolbar). */
+  readonly rect: AnchorRect;
 }
 
 export interface MenuState {
@@ -515,10 +521,108 @@ export interface MenuState {
   readonly y: number;
 }
 
+/**
+ * FEAT-002 (2.1) a viewport-space rectangle used to anchor the fixed-position
+ * selection toolbar and highlight edit popover. When a real
+ * getBoundingClientRect is unavailable (jsdom returns width 0) the caller falls
+ * back to the pointer clientX/clientY, which still yields a sensible anchor.
+ */
+export interface AnchorRect {
+  readonly left: number;
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+  readonly width: number;
+}
+
+/**
+ * FEAT-002 (2.2a/2.2b) the anchored highlight edit popover + right-click
+ * context menu state. Both are rendered on a FIXED viewport layer outside the
+ * .pane-scroll so they are never clipped (2.1).
+ */
+export interface EditPopoverState {
+  readonly annotationId: AnnotationId;
+  readonly sourceId: SourceId;
+  readonly rect: AnchorRect;
+}
+
+export type ContextMenuState =
+  | {
+      readonly variant: "annotation";
+      readonly annotationId: AnnotationId;
+      readonly sourceId: SourceId;
+      readonly x: number;
+      readonly y: number;
+    }
+  | {
+      readonly variant: "page";
+      readonly sourceId: SourceId;
+      readonly x: number;
+      readonly y: number;
+    };
+
+/** FEAT-002 (2.4b) the live rubber-band box while dragging an area selection. */
+interface AreaDragState {
+  readonly pageIndex: number;
+  /** Normalized (0..1) rect relative to the originating pdf-page-stage. */
+  readonly rect: NormalizedRect;
+}
+
+/**
+ * FEAT-002 (2.1) clamp an anchor rect into viewport-space fixed coordinates for
+ * a floating surface of a given width. The formulas are exactly those in the
+ * handoff: the surface is centred over the anchor and clamped 12px from each
+ * viewport edge, and sits above the anchor when there is room (anchorTop > 64)
+ * otherwise just below it.
+ */
+export function clampFixedAnchor(
+  rect: AnchorRect,
+  surfaceWidth: number,
+): { left: number; top: number } {
+  const viewportWidth = (typeof window !== "undefined" && window.innerWidth) || 1024;
+  const anchorCenterX = rect.left + rect.width / 2;
+  const left = Math.max(
+    12,
+    Math.min(anchorCenterX - surfaceWidth / 2, viewportWidth - surfaceWidth - 12),
+  );
+  const top = rect.top > 64 ? rect.top - 48 : rect.bottom + 12;
+  return { left, top };
+}
+
+/**
+ * Derive an AnchorRect from a DOMRect, falling back to the pointer position
+ * when the rect has zero width (jsdom's getBoundingClientRect commonly returns
+ * zeros). A small synthetic box is built around the pointer so the clamp math
+ * still centres the surface near where the user clicked.
+ */
+export function anchorRectFrom(
+  rect: DOMRect | null,
+  pointerX: number,
+  pointerY: number,
+): AnchorRect {
+  if (rect && rect.width > 0) {
+    return {
+      left: rect.left,
+      top: rect.top,
+      right: rect.right,
+      bottom: rect.bottom,
+      width: rect.width,
+    };
+  }
+  return {
+    left: pointerX,
+    top: pointerY,
+    right: pointerX,
+    bottom: pointerY,
+    width: 0,
+  };
+}
+
 function SourcePane({
   wb,
   sourceId,
   suppressMotion,
+  onToggleMotion,
   returnTarget,
   openSourceIds,
   onScroll,
@@ -528,13 +632,17 @@ function SourcePane({
   wb: Workbench;
   sourceId: SourceId;
   suppressMotion: boolean;
+  onToggleMotion: (suppress: boolean) => void;
   returnTarget: ReturnTarget | null;
   openSourceIds: readonly SourceId[];
   onScroll: () => void;
   registerScroll: (el: HTMLElement | null) => void;
   bump: () => void;
 }): JSX.Element {
+  const onToggleMotionForPane = onToggleMotion;
+  const linesVisibleForPane = wb.snapshot().workspaceLayout.linesVisible;
   const mountRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLElement | null>(null);
   const pagesRef = useRef<RenderedPage[]>([]);
   const docRef = useRef<PDFDocumentProxy | null>(null);
   const [ready, setReady] = useState(false);
@@ -544,6 +652,27 @@ function SourcePane({
   const [rangeStart, setRangeStart] = useState(0);
   const [rangeEnd, setRangeEnd] = useState(0);
   const [openComment, setOpenComment] = useState<AnnotationId | null>(null);
+  // FEAT-002 (2.2a) the 1-click highlight edit popover, anchored fixed.
+  const [editPopover, setEditPopover] = useState<EditPopoverState | null>(null);
+  const [selectedAnnotationId, setSelectedAnnotationId] = useState<AnnotationId | null>(null);
+  // FEAT-002 (2.2b) the right-click context menu (annotation or page variant).
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  // FEAT-002 (2.2c) the compact header overflow menu.
+  const [overflowOpen, setOverflowOpen] = useState(false);
+  // FEAT-002 (2.4) Zotero-style area-select / figure cropper mode + live box.
+  const [areaSelectActive, setAreaSelectActive] = useState(false);
+  const [areaDrag, setAreaDrag] = useState<AreaDragState | null>(null);
+  const areaDragRef = useRef<{ pageIndex: number; startX: number; startY: number } | null>(null);
+  // FEAT-002 (2.3) the page whose text selection is active (locks other pages).
+  const [activeSelectionPage, setActiveSelectionPage] = useState<number | null>(null);
+  // FEAT-002 (2.3a) live watercolor selection preview pills (viewport rects).
+  const [livePreview, setLivePreview] = useState<{ color: string; rects: AnchorRect[] } | null>(
+    null,
+  );
+  // FEAT-002 (2.5) native PDF zoom scale (50%..300%), locked 1:1 across layers.
+  const BASE_ZOOM = 1.3;
+  const [zoom, setZoom] = useState(1);
+  const zoomRef = useRef(1);
   // M6 (D01): per-page PDF scope status (scanned / encrypted) surfaced below.
   const [scopeStatus, setScopeStatus] = useState<string | null>(null);
   // M6 (A15, D11): the website snapshot HTML text, when this source is a
@@ -553,6 +682,7 @@ function SourcePane({
   const source = wb.rawData().sources.find((s) => s.id === sourceId);
   const isWebsite = source?.kind === "website" || source?.type === "website";
 
+  const selectedRef = useRef<AnnotationId | null>(null);
   const redrawOverlays = useCallback(() => {
     const views = wb.annotationsForSource(sourceId);
     for (const page of pagesRef.current) {
@@ -562,6 +692,15 @@ function SourcePane({
     }
     for (const view of views) {
       drawAnnotation(view, pagesRef.current, suppressMotion, false);
+    }
+    // FEAT-002 (2.2a) re-apply the active accent outline after a redraw removed
+    // and recreated the fragments.
+    const sel = selectedRef.current;
+    const mount = mountRef.current;
+    if (sel && mount) {
+      mount
+        .querySelectorAll(`.ito-highlight[data-annotation-id="${cssEscapeId(sel)}"]`)
+        .forEach((el) => el.setAttribute("data-selected", "true"));
     }
   }, [wb, sourceId, suppressMotion]);
 
@@ -742,38 +881,47 @@ function SourcePane({
   }, [ready, returnTarget, wb, sourceId, suppressMotion]);
 
   // Capture a text selection inside this pane's text layers → portable anchor.
-  const onMouseUp = useCallback(() => {
-    if (rangeMode) return;
-    const selection = window.getSelection();
-    if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
-      setToolbar(null);
-      return;
-    }
-    const range = selection.getRangeAt(0);
-    // Find which rendered page contains the selection.
-    const page = pagesRef.current.find((p) =>
-      p.textLayer.contains(range.commonAncestorContainer),
-    );
-    if (!page || !source) {
-      setToolbar(null);
-      return;
-    }
-    const pageIndex = Number(page.container.dataset.pageIndex ?? "0");
-    try {
-      const anchor = createAnchor({
-        docId: sourceId,
-        sourceVersionHash: source.versionHash,
-        pageIndex,
-        selection,
-        pageBox: page.pageBox(),
-        pageText: page.pageText,
-      });
-      const rect = range.getBoundingClientRect();
-      setToolbar({ sourceId, anchor, x: rect.left, y: rect.bottom });
-    } catch {
-      setToolbar(null);
-    }
-  }, [rangeMode, source, sourceId]);
+  // FEAT-002 (2.1): the toolbar is anchored to the selection's viewport rect so
+  // it renders on the fixed layer near the text (never clipped by pane-scroll).
+  const onMouseUp = useCallback(
+    (e?: React.MouseEvent) => {
+      if (rangeMode || areaSelectActive) return;
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+        setToolbar(null);
+        return;
+      }
+      const range = selection.getRangeAt(0);
+      // Find which rendered page contains the selection.
+      const page = pagesRef.current.find((p) =>
+        p.textLayer.contains(range.commonAncestorContainer),
+      );
+      if (!page || !source) {
+        setToolbar(null);
+        return;
+      }
+      const pageIndex = Number(page.container.dataset.pageIndex ?? "0");
+      try {
+        const anchor = createAnchor({
+          docId: sourceId,
+          sourceVersionHash: source.versionHash,
+          pageIndex,
+          selection,
+          pageBox: page.pageBox(),
+          pageText: page.pageText,
+        });
+        const rect = anchorRectFrom(
+          range.getBoundingClientRect(),
+          e?.clientX ?? 0,
+          e?.clientY ?? 0,
+        );
+        setToolbar({ sourceId, anchor, rect });
+      } catch {
+        setToolbar(null);
+      }
+    },
+    [rangeMode, areaSelectActive, source, sourceId],
+  );
 
   const commitHighlight = useCallback(
     async (style: AnnotationStyle) => {
@@ -798,42 +946,350 @@ function SourcePane({
     bump();
   }, [wb, sourceId, rangeStart, rangeEnd, redrawOverlays, bump]);
 
-  // M6 (D01): commit a rectangular AREA annotation. For scanned/image PDFs
-  // (no selectable text) this is the citable alternative to a text highlight.
-  // A default centered rect on the first page is used; the box is draggable in
-  // FEAT-003's richer interaction, but the citable record is created here.
-  const commitArea = useCallback(async () => {
-    const rect = { x: 0.2, y: 0.2, width: 0.6, height: 0.15 };
-    await wb.commitAreaAnnotation(sourceId, 0, rect);
-    redrawOverlays();
-    bump();
-  }, [wb, sourceId, redrawOverlays, bump]);
+  // FEAT-002 (2.2) build the hit-test targets for a page: each annotation on
+  // that page as a set of NORMALIZED (0..1) rects relative to the stage. Last
+  // annotation wins when overlapping (most-recently-committed on top), so we
+  // iterate in reverse. Text -> anchor.rects, area -> [rect], range -> full
+  // page (so a right-click anywhere on a ranged page targets it).
+  const hitTargetsForPage = useCallback(
+    (pageIndex: number): HitTestTarget[] => {
+      const views = wb.annotationsForSource(sourceId);
+      const targets: HitTestTarget[] = [];
+      for (const view of views) {
+        const scope = view.annotation.scope;
+        if (scope.kind === "text" && scope.anchor.pageIndex === pageIndex) {
+          targets.push({ id: view.annotation.id, rects: scope.anchor.rects });
+        } else if (scope.kind === "area" && scope.anchor.pageIndex === pageIndex) {
+          targets.push({ id: view.annotation.id, rects: [scope.anchor.rect] });
+        } else if (
+          scope.kind === "pages" &&
+          pageIndex >= scope.anchor.startPageIndex &&
+          pageIndex <= scope.anchor.endPageIndex
+        ) {
+          targets.push({
+            id: view.annotation.id,
+            rects: [{ x: 0, y: 0, width: 1, height: 1 }],
+          });
+        }
+      }
+      return targets.reverse();
+    },
+    [wb, sourceId],
+  );
 
-  // Reveal a comment when an annotation overlay is clicked (quiet-by-default).
+  // Convert a pointer event into (stage, pageIndex, normalized nx/ny) if the
+  // event lands inside a rendered page stage. jsdom returns a zero-sized rect,
+  // in which case normalized coordinates collapse to 0 (still deterministic).
+  const stageHitAt = useCallback(
+    (clientX: number, clientY: number): { pageIndex: number; nx: number; ny: number } | null => {
+      for (const page of pagesRef.current) {
+        const box = page.stage.getBoundingClientRect();
+        const inside =
+          box.width > 0 &&
+          box.height > 0 &&
+          clientX >= box.left &&
+          clientX <= box.right &&
+          clientY >= box.top &&
+          clientY <= box.bottom;
+        if (!inside) continue;
+        const pageIndex = Number(page.container.dataset.pageIndex ?? "0");
+        return {
+          pageIndex,
+          nx: (clientX - box.left) / box.width,
+          ny: (clientY - box.top) / box.height,
+        };
+      }
+      return null;
+    },
+    [],
+  );
+
+  // FEAT-002 (2.2a) 1-click a highlight: select it and open the anchored edit
+  // popover. Only when the selection is collapsed (a drag selection never
+  // triggers it). The popover anchors above the pointer.
+  const onStageClick = useCallback(
+    (clientX: number, clientY: number, target: HTMLElement | null) => {
+      const sel = window.getSelection();
+      if (sel && sel.isCollapsed === false) return; // a text selection drag
+      const hit = stageHitAt(clientX, clientY);
+      if (!hit) return;
+      const id = hitTestAnnotations(hitTargetsForPage(hit.pageIndex), hit.nx, hit.ny);
+      if (!id) return;
+      const rect = anchorRectFrom(
+        target?.getBoundingClientRect() ?? null,
+        clientX,
+        clientY,
+      );
+      setSelectedAnnotationId(id as AnnotationId);
+      setToolbar(null);
+      setContextMenu(null);
+      setEditPopover({ annotationId: id as AnnotationId, sourceId, rect });
+    },
+    [stageHitAt, hitTargetsForPage, sourceId],
+  );
+
+  // FEAT-002 (2.2b) right-click: annotation variant over a hit, page variant
+  // otherwise. Always preventDefault so the browser menu never appears.
+  const onStageContextMenu = useCallback(
+    (clientX: number, clientY: number): void => {
+      const hit = stageHitAt(clientX, clientY);
+      if (hit) {
+        const id = hitTestAnnotations(hitTargetsForPage(hit.pageIndex), hit.nx, hit.ny);
+        if (id) {
+          setSelectedAnnotationId(id as AnnotationId);
+          setContextMenu({
+            variant: "annotation",
+            annotationId: id as AnnotationId,
+            sourceId,
+            x: clientX,
+            y: clientY,
+          });
+          return;
+        }
+      }
+      setContextMenu({ variant: "page", sourceId, x: clientX, y: clientY });
+    },
+    [stageHitAt, hitTargetsForPage, sourceId],
+  );
+
+  // FEAT-002 (2.4b) commit an area annotation from a dragged normalized rect,
+  // cropping the exact page-canvas region into a PNG (SVG fallback in jsdom).
+  const commitAreaFromDrag = useCallback(
+    async (pageIndex: number, rect: NormalizedRect) => {
+      const page = pagesRef.current.find(
+        (p) => Number(p.container.dataset.pageIndex ?? "-1") === pageIndex,
+      );
+      const imageDataUrl = cropCanvasRegionToDataUrl(page?.canvas ?? null, rect);
+      await wb.commitAreaAnnotation(sourceId, pageIndex, rect, undefined, imageDataUrl);
+      setAreaSelectActive(false);
+      setAreaDrag(null);
+      areaDragRef.current = null;
+      redrawOverlays();
+      bump();
+    },
+    [wb, sourceId, redrawOverlays, bump],
+  );
+
+  // Reveal the edit popover when an annotation overlay is clicked, and the
+  // context menu on right-click, via COORDINATE hit-testing on the stage (the
+  // text layer sits on top of the fragments, so DOM-target closest() never
+  // reaches them). Fragments stay pointer-events:none so a drag selection can
+  // always start / pass through highlighted text (2.2.1).
   useEffect(() => {
     if (!ready) return;
     const mount = mountRef.current;
     if (!mount) return;
-    const handler = (ev: Event) => {
-      const el = (ev.target as HTMLElement).closest(".ito-highlight") as HTMLElement | null;
-      if (!el) return;
-      const id = el.dataset.annotationId as AnnotationId | undefined;
-      if (id) setOpenComment(id);
+    const clickHandler = (ev: MouseEvent) => {
+      onStageClick(ev.clientX, ev.clientY, ev.target as HTMLElement | null);
     };
     const ctxHandler = (ev: MouseEvent) => {
-      const el = (ev.target as HTMLElement).closest(".ito-highlight") as HTMLElement | null;
-      if (!el) return;
       ev.preventDefault();
-      const id = el.dataset.annotationId as AnnotationId | undefined;
-      if (id) setMenu({ annotationId: id, sourceId, x: ev.clientX, y: ev.clientY });
+      onStageContextMenu(ev.clientX, ev.clientY);
     };
-    mount.addEventListener("click", handler);
+    mount.addEventListener("click", clickHandler);
     mount.addEventListener("contextmenu", ctxHandler);
     return () => {
-      mount.removeEventListener("click", handler);
+      mount.removeEventListener("click", clickHandler);
       mount.removeEventListener("contextmenu", ctxHandler);
     };
-  }, [ready, sourceId]);
+  }, [ready, onStageClick, onStageContextMenu]);
+
+  // FEAT-002 (2.4b) area-select rubber-band drag on the stage. Active only in
+  // area-select mode; a >8px drag crops + commits on pointerup.
+  const onAreaPointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      if (!areaSelectActive) return;
+      const hit = stageHitAt(e.clientX, e.clientY);
+      if (!hit) return;
+      e.preventDefault();
+      areaDragRef.current = { pageIndex: hit.pageIndex, startX: hit.nx, startY: hit.ny };
+      setAreaDrag({
+        pageIndex: hit.pageIndex,
+        rect: { x: hit.nx, y: hit.ny, width: 0, height: 0 },
+      });
+    },
+    [areaSelectActive, stageHitAt],
+  );
+
+  const onAreaPointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      const start = areaDragRef.current;
+      if (!areaSelectActive || !start) return;
+      const page = pagesRef.current.find(
+        (p) => Number(p.container.dataset.pageIndex ?? "-1") === start.pageIndex,
+      );
+      if (!page) return;
+      const box = page.stage.getBoundingClientRect();
+      const nx = box.width > 0 ? (e.clientX - box.left) / box.width : start.startX;
+      const ny = box.height > 0 ? (e.clientY - box.top) / box.height : start.startY;
+      const x = Math.min(start.startX, nx);
+      const y = Math.min(start.startY, ny);
+      const width = Math.abs(nx - start.startX);
+      const height = Math.abs(ny - start.startY);
+      setAreaDrag({ pageIndex: start.pageIndex, rect: { x, y, width, height } });
+    },
+    [areaSelectActive],
+  );
+
+  const onAreaPointerUp = useCallback(
+    (e: React.PointerEvent) => {
+      const start = areaDragRef.current;
+      if (!areaSelectActive || !start) return;
+      const page = pagesRef.current.find(
+        (p) => Number(p.container.dataset.pageIndex ?? "-1") === start.pageIndex,
+      );
+      const box = page?.stage.getBoundingClientRect();
+      const nx = box && box.width > 0 ? (e.clientX - box.left) / box.width : start.startX;
+      const ny = box && box.height > 0 ? (e.clientY - box.top) / box.height : start.startY;
+      const x = Math.min(start.startX, nx);
+      const y = Math.min(start.startY, ny);
+      const width = Math.abs(nx - start.startX);
+      const height = Math.abs(ny - start.startY);
+      // Pixel threshold: drag must exceed 8px in BOTH axes. Convert the 8px
+      // threshold into normalized space using the stage box when available.
+      const pxW = box && box.width > 0 ? width * box.width : width;
+      const pxH = box && box.height > 0 ? height * box.height : height;
+      if (pxW > 8 && pxH > 8) {
+        void commitAreaFromDrag(start.pageIndex, { x, y, width, height });
+      } else {
+        setAreaDrag(null);
+        areaDragRef.current = null;
+      }
+    },
+    [areaSelectActive, commitAreaFromDrag],
+  );
+
+  // FEAT-002 (2.2a) paint an active accent outline on the fragments of the
+  // selected annotation, and clear it from every other annotation. Driven by
+  // selectedAnnotationId; runs after overlays are (re)drawn.
+  useEffect(() => {
+    const mount = mountRef.current;
+    if (!mount) return;
+    mount
+      .querySelectorAll('.ito-highlight[data-selected="true"]')
+      .forEach((el) => el.removeAttribute("data-selected"));
+    if (!selectedAnnotationId) return;
+    mount
+      .querySelectorAll(`.ito-highlight[data-annotation-id="${cssEscapeId(selectedAnnotationId)}"]`)
+      .forEach((el) => el.setAttribute("data-selected", "true"));
+  }, [selectedAnnotationId, ready]);
+
+  // Keep a ref mirror of the selected id so redrawOverlays (which rebuilds
+  // fragments) can re-apply the outline without re-subscribing.
+  useEffect(() => {
+    selectedRef.current = selectedAnnotationId;
+  }, [selectedAnnotationId]);
+
+  // FEAT-002 (2.3) page-locked selection: when a pointer goes down inside a
+  // page stage, record that page as the active selection page until pointerup.
+  // While active, user-select is disabled on every OTHER page + the headers so
+  // a drag near the last character never loops into the next page's textLayer.
+  useEffect(() => {
+    const mount = mountRef.current;
+    if (!mount) return;
+    const onDown = (ev: PointerEvent) => {
+      if (areaSelectActive) return;
+      const hit = stageHitAt(ev.clientX, ev.clientY);
+      if (hit) {
+        setActiveSelectionPage(hit.pageIndex);
+        // FEAT-002 (2.2.1): mark a drag so fragments go pointer-transparent and
+        // the selection can pass through highlighted text.
+        mount.setAttribute("data-pointer-dragging", "true");
+      }
+    };
+    const onUp = () => {
+      setActiveSelectionPage(null);
+      mount.removeAttribute("data-pointer-dragging");
+    };
+    mount.addEventListener("pointerdown", onDown);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      mount.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [areaSelectActive, stageHitAt]);
+
+  // Apply / clear the per-page user-select lock as activeSelectionPage changes.
+  useEffect(() => {
+    for (const page of pagesRef.current) {
+      const pi = Number(page.container.dataset.pageIndex ?? "-1");
+      const locked = activeSelectionPage != null && pi !== activeSelectionPage;
+      page.stage.style.userSelect = locked ? "none" : "";
+      (page.stage.style as unknown as Record<string, string>)["webkitUserSelect"] = locked
+        ? "none"
+        : "";
+    }
+  }, [activeSelectionPage]);
+
+  // FEAT-002 (2.3a) live watercolor selection preview pills: while a
+  // non-collapsed selection lives inside a page stage, mirror its client rects
+  // on the fixed layer as soft, on-theme pills tinted with the active color.
+  useEffect(() => {
+    const onSelectionChange = (): void => {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
+        setLivePreview(null);
+        return;
+      }
+      const range = sel.getRangeAt(0);
+      const page = pagesRef.current.find((p) =>
+        p.textLayer.contains(range.commonAncestorContainer),
+      );
+      if (!page) {
+        setLivePreview(null);
+        return;
+      }
+      const rects = Array.from(range.getClientRects())
+        .filter((r) => r.width > 0 && r.height > 0)
+        .map((r) => ({
+          left: r.left,
+          top: r.top,
+          right: r.right,
+          bottom: r.bottom,
+          width: r.width,
+        }));
+      if (rects.length === 0) {
+        setLivePreview(null);
+        return;
+      }
+      setLivePreview({ color: swatch("yellow"), rects });
+    };
+    document.addEventListener("selectionchange", onSelectionChange);
+    return () => document.removeEventListener("selectionchange", onSelectionChange);
+  }, []);
+
+  // FEAT-002 (2.5) apply the zoom scale: re-render every page at BASE_ZOOM *
+  // zoom so canvas, text layer and overlays all stay locked 1:1. Skipped for
+  // websites (no pdf.js pages).
+  useEffect(() => {
+    if (!ready || isWebsite) return;
+    zoomRef.current = zoom;
+    const pages = pagesRef.current;
+    if (pages.length === 0) return;
+    void (async () => {
+      for (const page of pages) {
+        await page.rerender(BASE_ZOOM * zoom);
+      }
+      redrawOverlays();
+    })();
+  }, [zoom, ready, isWebsite, redrawOverlays]);
+
+  // FEAT-002 (2.5a) native NON-PASSIVE wheel listener on .pane-scroll: Ctrl /
+  // Cmd + wheel preventDefaults (so the browser tab never zooms) and steps the
+  // PDF zoom smoothly between 50% and 300%. Attached imperatively so passive
+  // defaults do not block preventDefault.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const handler = (ev: WheelEvent): void => {
+      if (!(ev.ctrlKey || ev.metaKey)) return;
+      ev.preventDefault();
+      const step = ev.deltaY < 0 ? 0.1 : -0.1;
+      setZoom((z) => clampZoom(z + step));
+    };
+    el.addEventListener("wheel", handler, { passive: false });
+    return () => el.removeEventListener("wheel", handler);
+  }, [ready]);
 
   // Other sources (not currently open in any pane) the user can switch THIS
   // pane to — keeps the same subject while a reader pane shows a third paper
@@ -853,8 +1309,7 @@ function SourcePane({
         <strong className="ito-pane-title" title={source?.title ?? ""}>
           {source?.title ?? "…"}
         </strong>
-        <span className="ito-pane-actions">
-
+        <span className="ito-pane-actions" style={{ display: "flex", alignItems: "center", gap: "4px" }}>
           {isWebsite && (
             <span
               data-testid="website-availability-badge"
@@ -866,6 +1321,62 @@ function SourcePane({
               Snapshot cached
             </span>
           )}
+          {/* FEAT-002 (2.5) compact PDF zoom pill: steps 50%..300%, locked 1:1. */}
+          {!isWebsite && (
+            <span data-testid="pdf-zoom-pill" style={styles.zoomPill}>
+              <button
+                data-testid="pdf-zoom-out"
+                aria-label="Zoom out"
+                onClick={() => setZoom((z) => clampZoom(z - 0.1))}
+              >
+                −
+              </button>
+              <button
+                data-testid="pdf-zoom-reset"
+                aria-label="Reset zoom"
+                onClick={() => setZoom(1)}
+              >
+                {Math.round(zoom * 100)}%
+              </button>
+              <button
+                data-testid="pdf-zoom-in"
+                aria-label="Zoom in"
+                onClick={() => setZoom((z) => clampZoom(z + 0.1))}
+              >
+                +
+              </button>
+            </span>
+          )}
+          {/* FEAT-002 (2.4a) Zotero-style dashed-box area-select icon toggle. It
+              toggles area-select mode and NEVER spawns a rectangle. */}
+          {!isWebsite && (
+            <button
+              data-testid="toggle-area-select"
+              aria-label="Select figure or area"
+              aria-pressed={areaSelectActive}
+              title="Select figure or area"
+              onClick={() => {
+                setAreaSelectActive((v) => !v);
+                setAreaDrag(null);
+                areaDragRef.current = null;
+              }}
+              style={{ fontFamily: "monospace" }}
+            >
+              ⬚
+            </button>
+          )}
+          {/* FEAT-002 (2.2c) the canonical header actions are now COMPACT (the
+              verbose text labels moved into the overflow + right-click menus),
+              but the data-testids stay directly reachable so existing render +
+              e2e tests keep working. */}
+          <button
+            data-testid="start-range"
+            onClick={() => setRangeMode((v) => !v)}
+            aria-pressed={rangeMode}
+            title="Comment on page range"
+          >
+            ¶
+          </button>
           {switchable.length > 0 && (
             <select
               data-testid="switch-paper"
@@ -886,22 +1397,109 @@ function SourcePane({
               ))}
             </select>
           )}
-          <button
-            data-testid="start-range"
-            onClick={() => setRangeMode((v) => !v)}
-            aria-pressed={rangeMode}
-          >
-            Comment on page range
-          </button>
+          {/* 2.4a keeps the legacy add-area-annotation testid reachable as the
+              menu-equivalent of the icon toggle (it enters area-select mode and
+              never spawns a rectangle). */}
           {!isWebsite && (
             <button
               data-testid="add-area-annotation"
-              onClick={() => void commitArea()}
-              title="Add an area annotation on the first page"
+              onClick={() => setAreaSelectActive(true)}
+              title="Select a figure or area (Zotero box)"
+              style={{ display: "none" }}
             >
-              Mark area
+              Select Figure / Area
             </button>
           )}
+          {/* FEAT-002 (2.2c) single compact overflow menu that ALSO exposes the
+              relocated actions (every action reachable from here too). */}
+          <span style={{ position: "relative", display: "inline-flex" }}>
+            <button
+              data-testid="pane-overflow-menu-btn"
+              aria-label="More actions"
+              aria-haspopup="menu"
+              aria-expanded={overflowOpen}
+              onClick={() => setOverflowOpen((v) => !v)}
+            >
+              ⋯
+            </button>
+            {overflowOpen && (
+              <div
+                data-testid="pane-overflow-menu"
+                role="menu"
+                aria-label="Pane actions"
+                style={styles.overflowMenu}
+              >
+                <button
+                  data-testid="overflow-start-range"
+                  role="menuitem"
+                  onClick={() => {
+                    setRangeMode((v) => !v);
+                    setOverflowOpen(false);
+                  }}
+                >
+                  Comment on Page Range…
+                </button>
+                {!isWebsite && (
+                  <button
+                    data-testid="overflow-area-select"
+                    role="menuitem"
+                    onClick={() => {
+                      setAreaSelectActive(true);
+                      setOverflowOpen(false);
+                    }}
+                  >
+                    Select Figure / Area (Zotero Box)
+                  </button>
+                )}
+                {switchable.length > 0 && (
+                  <select
+                    data-testid="overflow-switch-paper"
+                    aria-label="Switch this pane to another paper (overflow)"
+                    value=""
+                    onChange={(e) => {
+                      const to = e.target.value;
+                      if (!to) return;
+                      wb.switchReaderPane(sourceId, to as SourceId);
+                      setOverflowOpen(false);
+                      bump();
+                    }}
+                  >
+                    <option value="">Switch Paper…</option>
+                    {switchable.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.title}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <label role="menuitem" style={{ fontSize: "0.82rem", display: "flex", gap: "0.3rem" }}>
+                  <input
+                    type="checkbox"
+                    data-testid="overflow-toggle-lines"
+                    checked={linesVisibleForPane}
+                    onChange={(e) => {
+                      wb.setLinesVisible(e.target.checked);
+                      setOverflowOpen(false);
+                      bump();
+                    }}
+                  />
+                  Toggle Source Lines
+                </label>
+                <label role="menuitem" style={{ fontSize: "0.82rem", display: "flex", gap: "0.3rem" }}>
+                  <input
+                    type="checkbox"
+                    data-testid="overflow-suppress-motion"
+                    checked={suppressMotion}
+                    onChange={(e) => {
+                      onToggleMotionForPane(e.target.checked);
+                      setOverflowOpen(false);
+                    }}
+                  />
+                  Toggle Motion Suppression
+                </label>
+              </div>
+            )}
+          </span>
         </span>
       </div>
 
@@ -948,7 +1546,10 @@ function SourcePane({
       )}
 
       <div
-        ref={(el) => registerScroll(el)}
+        ref={(el) => {
+          scrollRef.current = el;
+          registerScroll(el);
+        }}
         data-testid="pane-scroll"
         data-source-id={sourceId}
         style={styles.paneScroll}
@@ -957,8 +1558,13 @@ function SourcePane({
         <div
           ref={mountRef}
           data-testid="pdf-mount"
-          style={styles.mount}
+          data-area-select={areaSelectActive ? "true" : "false"}
+          className={areaSelectActive ? "ito-area-select-active" : undefined}
+          style={{ ...styles.mount, cursor: areaSelectActive ? "crosshair" : undefined }}
           onMouseUp={onMouseUp}
+          onPointerDown={onAreaPointerDown}
+          onPointerMove={onAreaPointerMove}
+          onPointerUp={onAreaPointerUp}
         >
           {isWebsite && websiteHtml != null && (
             <div
@@ -968,24 +1574,73 @@ function SourcePane({
               dangerouslySetInnerHTML={{ __html: sanitizeSnapshotHtml(websiteHtml) }}
             />
           )}
+          {/* FEAT-002 (2.4b) the live rubber-band area-select box. Positioned
+              over the originating page stage via normalized percentages. */}
+          {areaDrag && (
+            <AreaDragPreview areaDrag={areaDrag} pagesRef={pagesRef} mountRef={mountRef} />
+          )}
         </div>
       </div>
 
-      {toolbar && (
-        <SelectionToolbar
-          toolbar={toolbar}
-          onCommit={commitHighlight}
-          onDismiss={() => setToolbar(null)}
-        />
-      )}
+      {/* FEAT-002 (2.1) fixed viewport layer rendered via a portal OUTSIDE the
+          .pane-scroll (overflow:auto) subtree, so the selection toolbar and the
+          highlight edit popover are never clipped. */}
+      <ReaderFixedLayer>
+        {toolbar && (
+          <SelectionToolbar
+            toolbar={toolbar}
+            onCommit={commitHighlight}
+            onDismiss={() => setToolbar(null)}
+          />
+        )}
+        {editPopover && (
+          <HighlightEditPopover
+            wb={wb}
+            popover={editPopover}
+            onClose={() => {
+              setEditPopover(null);
+              setSelectedAnnotationId(null);
+            }}
+            bump={bump}
+          />
+        )}
+        {contextMenu && (
+          <ReaderContextMenu
+            wb={wb}
+            menu={contextMenu}
+            onClose={() => setContextMenu(null)}
+            onEditComment={(annotationId, x, y) => {
+              setContextMenu(null);
+              setEditPopover({
+                annotationId,
+                sourceId,
+                rect: anchorRectFrom(null, x, y),
+              });
+            }}
+            onPageAction={(action) => {
+              setContextMenu(null);
+              if (action === "range") setRangeMode(true);
+              else if (action === "area") setAreaSelectActive(true);
+              else if (action === "lines") {
+                wb.setLinesVisible(!linesVisibleForPane);
+                bump();
+              } else if (action === "motion") onToggleMotionForPane(!suppressMotion);
+            }}
+            bump={bump}
+          />
+        )}
+        {livePreview && <LiveSelectionPreview preview={livePreview} />}
+      </ReaderFixedLayer>
 
       {openComment && (
-        <CommentSurface
-          wb={wb}
-          annotationId={openComment}
-          onClose={() => setOpenComment(null)}
-          bump={bump}
-        />
+        <ReaderFixedLayer>
+          <CommentSurface
+            wb={wb}
+            annotationId={openComment}
+            onClose={() => setOpenComment(null)}
+            bump={bump}
+          />
+        </ReaderFixedLayer>
       )}
 
       {menu && (
@@ -1004,7 +1659,7 @@ function SourcePane({
  * Compact selection controls (R01). ONLY highlight/underline + color — no
  * comment editor, node picker, category selector, or subject page.
  */
-function SelectionToolbar({
+export function SelectionToolbar({
   toolbar,
   onCommit,
   onDismiss,
@@ -1014,15 +1669,18 @@ function SelectionToolbar({
   onDismiss: () => void;
 }): JSX.Element {
   const [color, setColor] = useState<HighlightColor>("yellow");
+  // FEAT-002 (2.1) fixed-position + clamped near the selection anchor rect.
+  const TOOLBAR_WIDTH = 260;
+  const { left, top } = clampFixedAnchor(toolbar.rect, TOOLBAR_WIDTH);
   return (
     <div
       data-testid="selection-toolbar"
       role="toolbar"
       aria-label="Highlight controls"
       style={{
-        ...styles.floating,
-        left: Math.max(8, toolbar.x),
-        top: toolbar.y + window.scrollY + 6,
+        ...styles.fixedFloating,
+        left,
+        top,
       }}
     >
       <button
@@ -1058,6 +1716,400 @@ function SelectionToolbar({
       <button data-testid="dismiss-toolbar" aria-label="Dismiss" onClick={onDismiss}>
         ×
       </button>
+    </div>
+  );
+}
+
+/**
+ * FEAT-002 (2.1) a fixed viewport layer rendered into document.body via a
+ * portal so its children escape the .pane-scroll (overflow:auto) clipping. In
+ * jsdom document.body exists, so the portal renders inline under the test root.
+ */
+function ReaderFixedLayer({ children }: { children: React.ReactNode }): JSX.Element | null {
+  if (typeof document === "undefined") return <>{children}</>;
+  return createPortal(
+    <div data-testid="reader-fixed-layer" style={styles.fixedLayer}>
+      {children}
+    </div>,
+    document.body,
+  );
+}
+
+/**
+ * FEAT-002 (2.4b) the live rubber-band area-select box, positioned over the
+ * originating page stage. The stage offset relative to the pdf-mount is read so
+ * the box sits over the dragged region even on later pages.
+ */
+function AreaDragPreview({
+  areaDrag,
+  pagesRef,
+  mountRef,
+}: {
+  areaDrag: AreaDragState;
+  pagesRef: React.MutableRefObject<RenderedPage[]>;
+  mountRef: React.RefObject<HTMLDivElement>;
+}): JSX.Element {
+  const page = pagesRef.current.find(
+    (p) => Number(p.container.dataset.pageIndex ?? "-1") === areaDrag.pageIndex,
+  );
+  const mount = mountRef.current;
+  let left = 0;
+  let top = 0;
+  let width = 0;
+  let height = 0;
+  if (page && mount) {
+    const stageBox = page.stage.getBoundingClientRect();
+    const mountBox = mount.getBoundingClientRect();
+    const offsetX = stageBox.left - mountBox.left;
+    const offsetY = stageBox.top - mountBox.top;
+    left = offsetX + areaDrag.rect.x * stageBox.width;
+    top = offsetY + areaDrag.rect.y * stageBox.height;
+    width = areaDrag.rect.width * stageBox.width;
+    height = areaDrag.rect.height * stageBox.height;
+  }
+  return (
+    <div
+      data-testid="area-drag-preview"
+      className="ito-area-drag-preview"
+      style={{
+        position: "absolute",
+        left,
+        top,
+        width,
+        height,
+        border: "2px dashed var(--ito-accent, #2c4a6f)",
+        background: "rgba(44, 74, 111, 0.12)",
+        borderRadius: "4px",
+        pointerEvents: "none",
+        zIndex: 20,
+      }}
+    />
+  );
+}
+
+/**
+ * FEAT-002 (2.3a) the live watercolor selection preview: soft-rounded,
+ * translucent pills mirrored over the current selection's client rects on the
+ * fixed layer, tinted with the active highlight color so selecting text feels
+ * dynamic and on-theme. Presentation only; pointer-events:none.
+ */
+export function LiveSelectionPreview({
+  preview,
+}: {
+  preview: { color: string; rects: AnchorRect[] };
+}): JSX.Element {
+  return (
+    <div data-testid="live-selection-preview" aria-hidden="true">
+      {preview.rects.map((r, i) => (
+        <div
+          key={i}
+          className="ito-selection-live-preview"
+          style={{
+            position: "fixed",
+            left: r.left,
+            top: r.top,
+            width: r.width,
+            height: r.bottom - r.top,
+            background: preview.color,
+            opacity: 0.35,
+            borderRadius: "6px",
+            pointerEvents: "none",
+            zIndex: 999,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * FEAT-002 (2.2a) the anchored 1-click highlight EDIT popover. It embeds the
+ * quiet CommentSurface (so comment-input / comment-save keep working) plus
+ * color swatches, a highlight/underline toggle, the Associate / Insert into
+ * Subject actions, Show in Nodes, and both Delete options. Rendered on the
+ * fixed layer and clamped near the clicked highlight's anchor rect.
+ */
+export function HighlightEditPopover({
+  wb,
+  popover,
+  onClose,
+  bump,
+}: {
+  wb: Workbench;
+  popover: EditPopoverState;
+  onClose: () => void;
+  bump: () => void;
+}): JSX.Element {
+  const POPOVER_WIDTH = 300;
+  const { left, top } = clampFixedAnchor(popover.rect, POPOVER_WIDTH);
+  const view = wb.viewFor(popover.annotationId);
+  const imageDataUrl =
+    view && view.annotation.scope.kind === "area"
+      ? view.annotation.scope.anchor.imageDataUrl
+      : undefined;
+  const [menuMode, setMenuMode] = useState<null | "associate" | "insert">(null);
+
+  const setColor = async (color: HighlightColor): Promise<void> => {
+    const kind = view?.style.kind ?? "highlight";
+    await wb.setAnnotationStyle(popover.annotationId, { kind, color });
+    bump();
+  };
+  const toggleStyle = async (): Promise<void> => {
+    const kind = view?.style.kind === "underline" ? "highlight" : "underline";
+    const color = view?.style.color ?? "yellow";
+    await wb.setAnnotationStyle(popover.annotationId, { kind, color });
+    bump();
+  };
+
+  return (
+    <div
+      data-testid="highlight-edit-popover"
+      data-annotation-id={popover.annotationId}
+      role="dialog"
+      aria-label="Edit highlight"
+      style={{ ...styles.fixedFloating, left, top, width: POPOVER_WIDTH, display: "block" }}
+    >
+      {imageDataUrl && (
+        <img
+          data-testid="area-figure-preview"
+          src={imageDataUrl}
+          alt="Captured figure"
+          style={styles.figurePreview}
+        />
+      )}
+      {/* Comment input + Save (reuses comment-surface / comment-input / save). */}
+      <CommentSurface
+        wb={wb}
+        annotationId={popover.annotationId}
+        onClose={onClose}
+        bump={bump}
+      />
+      {/* Color swatches + highlight/underline toggle. */}
+      <div data-testid="color-controls" style={{ display: "flex", gap: "0.25rem", marginTop: "0.4rem" }}>
+        {HIGHLIGHT_COLORS.map((c) => (
+          <button
+            key={c}
+            data-testid={`color-${c}`}
+            aria-label={`Color ${c}`}
+            onClick={() => void setColor(c)}
+            style={{
+              width: 18,
+              height: 18,
+              borderRadius: "50%",
+              border: view?.style.color === c ? "2px solid #333" : "1px solid #bbb",
+              background: swatch(c),
+            }}
+          />
+        ))}
+        <button data-testid="toggle-style-kind" onClick={() => void toggleStyle()}>
+          {view?.style.kind === "underline" ? "Underline" : "Highlight"}
+        </button>
+      </div>
+      {/* Associate / Insert into Subject + Show in Nodes. */}
+      {!menuMode && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.2rem", marginTop: "0.4rem" }}>
+          <button
+            data-testid="popover-associate-insert"
+            onClick={() => setMenuMode("associate")}
+          >
+            Associate / Insert into Subject…
+          </button>
+          <ShowInNodes wb={wb} annotationId={popover.annotationId} bump={bump} />
+        </div>
+      )}
+      {menuMode && (
+        <AssociationMenu
+          wb={wb}
+          menu={{
+            annotationId: popover.annotationId,
+            sourceId: popover.sourceId,
+            x: 0,
+            y: 0,
+          }}
+          embedded
+          onClose={() => {
+            setMenuMode(null);
+            onClose();
+          }}
+          bump={bump}
+        />
+      )}
+      {/* Delete options. */}
+      <div style={{ display: "flex", gap: "0.3rem", marginTop: "0.4rem" }}>
+        <button
+          data-testid="delete-highlight-only"
+          onClick={async () => {
+            await wb.deleteAnnotationOnly(popover.annotationId);
+            bump();
+            onClose();
+          }}
+        >
+          Delete Highlight Only
+        </button>
+        <button
+          data-testid="delete-highlight-and-quotes"
+          onClick={async () => {
+            await wb.deleteAnnotationAndQuotes(popover.annotationId);
+            bump();
+            onClose();
+          }}
+        >
+          Delete Highlight &amp; Quotes
+        </button>
+      </div>
+      <button data-testid="popover-close" aria-label="Close" onClick={onClose} style={{ marginTop: "0.3rem" }}>
+        Close
+      </button>
+    </div>
+  );
+}
+
+/**
+ * FEAT-002 (2.2b) the right-click context menu. Two variants: an annotation
+ * menu (Edit Comment, Color Swatches, Associate, Insert Quote, Show in Nodes,
+ * Delete Only, Delete & Quotes) and a page menu (Comment on Page Range, Select
+ * Figure / Area, Switch Paper, Toggle Source Lines, Toggle Motion Suppression).
+ * Opens at the pointer on the fixed layer.
+ */
+export function ReaderContextMenu({
+  wb,
+  menu,
+  onClose,
+  onEditComment,
+  onPageAction,
+  bump,
+}: {
+  wb: Workbench;
+  menu: ContextMenuState;
+  onClose: () => void;
+  onEditComment: (annotationId: AnnotationId, x: number, y: number) => void;
+  onPageAction: (action: "range" | "area" | "switch" | "lines" | "motion") => void;
+  bump: () => void;
+}): JSX.Element {
+  const [picking, setPicking] = useState<null | "associate" | "insert">(null);
+  const clampLeft = Math.max(
+    12,
+    Math.min(menu.x, ((typeof window !== "undefined" && window.innerWidth) || 1024) - 230),
+  );
+  const style: React.CSSProperties = { ...styles.fixedFloating, left: clampLeft, top: menu.y, width: 220, display: "flex", flexDirection: "column", gap: "0.15rem" };
+
+  if (menu.variant === "page") {
+    return (
+      <div data-testid="reader-context-menu" data-variant="page" role="menu" aria-label="Page actions" style={style}>
+        <button data-testid="ctx-comment-range" role="menuitem" onClick={() => onPageAction("range")}>
+          Comment on Page Range…
+        </button>
+        <button data-testid="ctx-select-area" role="menuitem" onClick={() => onPageAction("area")}>
+          Select Figure / Area (Zotero Box)
+        </button>
+        <button data-testid="ctx-switch-paper" role="menuitem" onClick={() => onPageAction("switch")}>
+          Switch Paper…
+        </button>
+        <button data-testid="ctx-toggle-lines" role="menuitem" onClick={() => onPageAction("lines")}>
+          Toggle Source Lines
+        </button>
+        <button data-testid="ctx-toggle-motion" role="menuitem" onClick={() => onPageAction("motion")}>
+          Toggle Motion Suppression
+        </button>
+        <button data-testid="ctx-close" role="menuitem" onClick={onClose}>
+          Cancel
+        </button>
+      </div>
+    );
+  }
+
+  if (picking) {
+    return (
+      <div data-testid="reader-context-menu" data-variant="annotation" role="menu" style={style}>
+        <AssociationMenu
+          wb={wb}
+          menu={{ annotationId: menu.annotationId, sourceId: menu.sourceId, x: 0, y: 0 }}
+          embedded
+          onClose={onClose}
+          bump={bump}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div data-testid="reader-context-menu" data-variant="annotation" role="menu" aria-label="Annotation actions" style={style}>
+      <button
+        data-testid="ctx-edit-comment"
+        role="menuitem"
+        onClick={() => onEditComment(menu.annotationId, menu.x, menu.y)}
+      >
+        Edit Comment
+      </button>
+      <ContextColorSwatches wb={wb} annotationId={menu.annotationId} bump={bump} />
+      <button data-testid="ctx-associate" role="menuitem" onClick={() => setPicking("associate")}>
+        Associate with Subject
+      </button>
+      <button data-testid="ctx-insert" role="menuitem" onClick={() => setPicking("insert")}>
+        Insert Quote into Subject
+      </button>
+      <ShowInNodes wb={wb} annotationId={menu.annotationId} bump={bump} />
+      <button
+        data-testid="delete-highlight-only"
+        role="menuitem"
+        onClick={async () => {
+          await wb.deleteAnnotationOnly(menu.annotationId);
+          bump();
+          onClose();
+        }}
+      >
+        Delete Highlight Only
+      </button>
+      <button
+        data-testid="delete-highlight-and-quotes"
+        role="menuitem"
+        onClick={async () => {
+          await wb.deleteAnnotationAndQuotes(menu.annotationId);
+          bump();
+          onClose();
+        }}
+      >
+        Delete Highlight &amp; Quotes
+      </button>
+      <button data-testid="ctx-close" role="menuitem" onClick={onClose}>
+        Cancel
+      </button>
+    </div>
+  );
+}
+
+/** Inline color swatches used inside the annotation context menu (2.2b). */
+function ContextColorSwatches({
+  wb,
+  annotationId,
+  bump,
+}: {
+  wb: Workbench;
+  annotationId: AnnotationId;
+  bump: () => void;
+}): JSX.Element {
+  const view = wb.viewFor(annotationId);
+  return (
+    <div data-testid="color-controls" role="group" aria-label="Color swatches" style={{ display: "flex", gap: "0.25rem" }}>
+      {HIGHLIGHT_COLORS.map((c) => (
+        <button
+          key={c}
+          data-testid={`color-${c}`}
+          aria-label={`Color ${c}`}
+          onClick={async () => {
+            const kind = view?.style.kind ?? "highlight";
+            await wb.setAnnotationStyle(annotationId, { kind, color: c });
+            bump();
+          }}
+          style={{
+            width: 18,
+            height: 18,
+            borderRadius: "50%",
+            border: view?.style.color === c ? "2px solid #333" : "1px solid #bbb",
+            background: swatch(c),
+          }}
+        />
+      ))}
     </div>
   );
 }
@@ -1149,11 +2201,18 @@ export function AssociationMenu({
   menu,
   onClose,
   bump,
+  embedded,
 }: {
   wb: Workbench;
   menu: MenuState;
   onClose: () => void;
   bump: () => void;
+  /**
+   * FEAT-002 (2.2a/2.2b): when embedded inside the fixed edit popover or the
+   * context menu, render in normal flow (no absolute x/y positioning) so it
+   * stacks within the host surface instead of floating at menu.x/menu.y.
+   */
+  embedded?: boolean;
 }): JSX.Element {
   const [picking, setPicking] = useState<null | "associate" | "insert">(null);
   const [creating, setCreating] = useState(false);
@@ -1203,7 +2262,11 @@ export function AssociationMenu({
       data-testid="association-menu"
       role="menu"
       aria-label="Annotation actions"
-      style={{ ...styles.floating, left: menu.x, top: menu.y + window.scrollY }}
+      style={
+        embedded
+          ? { position: "static", display: "flex", flexDirection: "column", gap: "0.25rem" }
+          : { ...styles.floating, left: menu.x, top: menu.y + window.scrollY }
+      }
     >
       {!picking && !creating && (
         <>
@@ -1413,6 +2476,15 @@ function HighlightRow({
         <span data-testid="range-badge" style={styles.rangeBadge}>
           range
         </span>
+      )}
+      {/* FEAT-002 (2.4c) the captured figure thumbnail for an area annotation. */}
+      {view.annotation.scope.kind === "area" && view.annotation.scope.anchor.imageDataUrl && (
+        <img
+          data-testid="area-figure-preview"
+          src={view.annotation.scope.anchor.imageDataUrl}
+          alt="Captured figure"
+          style={{ width: 40, height: 40, objectFit: "cover", borderRadius: "4px", border: "1px solid #ddd" }}
+        />
       )}
       <span style={{ flex: 1, fontSize: "0.85rem" }}>{label}</span>
       {view.references.some((r) => r.status === "tentative") && (
@@ -1677,6 +2749,23 @@ export function drawAnnotation(
 
 function swatch(c: HighlightColor): string {
   return { yellow: "#ffdd57", green: "#82dc96", blue: "#82beff", pink: "#ff96c8" }[c];
+}
+
+/** FEAT-002 (2.5) zoom bounds: step the PDF scale between 50% and 300%. */
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 3;
+export function clampZoom(z: number): number {
+  // Round to avoid float drift (e.g. 1.0000000002) so the pill shows crisp %.
+  const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 100) / 100));
+  return next;
+}
+
+/** Escape an annotation id for use in a CSS attribute selector. */
+function cssEscapeId(value: string): string {
+  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
+    return CSS.escape(value);
+  }
+  return value.replace(/["\\]/g, "\\$&");
 }
 
 /**
@@ -1965,6 +3054,61 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: "8px",
     boxShadow: "0 4px 16px rgba(0,0,0,0.15)",
     flexWrap: "wrap",
+  },
+  // FEAT-002 (2.1) the fixed viewport layer + fixed-position floating surfaces.
+  // The layer itself is a zero-size fixed anchor; children set their own fixed
+  // coordinates so nothing is clipped by the pane-scroll overflow.
+  fixedLayer: {
+    position: "fixed",
+    left: 0,
+    top: 0,
+    width: 0,
+    height: 0,
+    zIndex: 1000,
+  },
+  fixedFloating: {
+    position: "fixed",
+    zIndex: 1000,
+    display: "flex",
+    gap: "0.4rem",
+    alignItems: "center",
+    padding: "0.35rem 0.5rem",
+    background: "#fff",
+    border: "1px solid #ccc",
+    borderRadius: "8px",
+    boxShadow: "0 4px 16px rgba(0,0,0,0.15)",
+    flexWrap: "wrap",
+  },
+  overflowMenu: {
+    position: "absolute",
+    zIndex: 1004,
+    top: "100%",
+    right: 0,
+    minWidth: "14rem",
+    display: "flex",
+    flexDirection: "column",
+    gap: "0.25rem",
+    padding: "0.4rem",
+    background: "#fff",
+    border: "1px solid #ccc",
+    borderRadius: "8px",
+    boxShadow: "0 6px 24px rgba(0,0,0,0.2)",
+  },
+  zoomPill: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "2px",
+    border: "1px solid var(--ito-border, #ccc)",
+    borderRadius: "999px",
+    padding: "0 2px",
+  },
+  figurePreview: {
+    display: "block",
+    maxWidth: "100%",
+    maxHeight: "8rem",
+    marginBottom: "0.4rem",
+    border: "1px solid #ddd",
+    borderRadius: "4px",
   },
   commentSurface: {
     position: "absolute",

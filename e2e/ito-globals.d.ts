@@ -241,6 +241,7 @@ interface ItoTestApi {
     pageIndex: number,
     rect: { x: number; y: number; width: number; height: number },
     comment?: string,
+    imageDataUrl?: string,
   ): Promise<string>;
   // -- §3.3 interactive 2D canvas -------------------------------------------
   /** Persist a node's dragged OFFSET (D19); records NO history revision. */
