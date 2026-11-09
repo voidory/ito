@@ -143,6 +143,56 @@ describe("m8 Library import affordances", () => {
     await waitFor(() => wb.rawData().sources.length === 1);
     expect(wb.rawData().sources[0]!.title).toBe("dropped");
   });
+
+  it("imports EXACTLY ONCE when the dropzone is nested under the .app-shell drop guard", async () => {
+    // Regression guard (review 2026-11-09): in production the Library dropzone
+    // is a DOM descendant of the `.app-shell` root, which ALSO wires the
+    // full-window onDragOver/onDrop safety net. React synthetic events bubble,
+    // so without the dropzone calling stopPropagation a single drop ON the
+    // dropzone would fire BOTH the dropzone handler AND the shell handler and
+    // import the same file twice (two Source records for one PDF, since
+    // wb.importSource does not dedupe). This mounts BOTH handlers active and
+    // nested exactly as production does, drops one PDF on the dropzone, and
+    // asserts exactly ONE source is created. Neither the standalone-dropzone
+    // test above nor the bare-div shell test below nests the two, so only this
+    // test catches the double-import.
+    const wb = await Workbench.open(new InMemoryStorageAdapter());
+    const shellWithLibrary = createElement(
+      "div",
+      {
+        className: "app-shell",
+        "data-testid": "app-shell",
+        onDragOver: shellDragOverHandler,
+        onDrop: (e: ReactDragEvent<HTMLDivElement>) => shellDropHandler(e, wb, () => undefined),
+      },
+      libraryEl(wb),
+    );
+    const el = await render(shellWithLibrary);
+    const zone = el.querySelector('[data-testid="library-pdf-dropzone"]') as HTMLElement;
+    expect(zone).not.toBeNull();
+    // Sanity: the dropzone really is a descendant of the shell root (so a bubbled
+    // event would otherwise reach the shell handler).
+    const shellRoot = el.querySelector('[data-testid="app-shell"]') as HTMLElement;
+    expect(shellRoot.contains(zone)).toBe(true);
+
+    const file = pdfFile(PDF_BYTES, "nested.pdf");
+    const dataTransfer = { files: [file], dropEffect: "" } as unknown as DataTransfer;
+    const drop = new Event("drop", { bubbles: true, cancelable: true }) as unknown as DragEvent;
+    Object.defineProperty(drop, "dataTransfer", { value: dataTransfer, configurable: true });
+    await act(async () => {
+      zone.dispatchEvent(drop);
+    });
+    // The dropzone preventDefaults so the tab never navigates away.
+    expect(drop.defaultPrevented).toBe(true);
+    // Both async import paths (dropzone + any bubbled shell handler) are given
+    // time to settle; still exactly ONE source must exist.
+    await waitFor(() => wb.rawData().sources.length >= 1);
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(wb.rawData().sources.length).toBe(1);
+    expect(wb.rawData().sources[0]!.title).toBe("nested");
+  });
 });
 
 describe("m8 full-window drop guard on the .app-shell root", () => {

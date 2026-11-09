@@ -278,14 +278,25 @@ export function Library({
       // the tab away (the browser's default for a dropped file), so every drag
       // event preventDefaults. On drop we import each PDF via the same hash +
       // numPages + wb.importSource path the button uses.
+      //
+      // stopPropagation is REQUIRED here: this dropzone is a DOM descendant of
+      // the `.app-shell` root, which also wires onDragOver/onDrop as the
+      // full-window safety net. React synthetic events bubble, so without
+      // stopping propagation a drop ON this dropzone would also fire the shell
+      // handler and import the SAME file twice (one dropped PDF becoming two
+      // Source records, since wb.importSource does not dedupe). Stopping
+      // propagation keeps a dropzone drop a single import while the shell
+      // handler still guards drops anywhere ELSE in the shell.
       onDragOver={(e) => {
         e.preventDefault();
+        e.stopPropagation();
         e.dataTransfer.dropEffect = "copy";
         if (!dragging) setDragging(true);
       }}
       onDragLeave={() => setDragging(false)}
       onDrop={(e) => {
         e.preventDefault();
+        e.stopPropagation();
         setDragging(false);
         void importFiles(e.dataTransfer.files);
       }}
