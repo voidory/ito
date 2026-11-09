@@ -45,6 +45,13 @@ export interface PdfImportMetadata {
   readonly pageCount: number;
   readonly authors: string | undefined;
   readonly year: string | undefined;
+  /**
+   * M12 (FEAT-001) best-effort per-page text (first 60 pages) via pdf.js
+   * `getTextContent()`, used to compute the canonicalId + textShingles identity
+   * signals so an import can re-hydrate an existing source slot. Empty in jsdom
+   * (no worker); the Reader backfills it later via updateSourceMetadata.
+   */
+  readonly pageTexts: readonly string[];
 }
 
 /**
@@ -73,10 +80,46 @@ export async function readPdfMetadata(bytes: Uint8Array): Promise<PdfImportMetad
     } catch {
       // getMetadata unavailable: fall through with page count only.
     }
-    return { pageCount, authors, year };
+    const pageTexts = await extractPageTexts(doc as unknown as PdfLikeDoc);
+    return { pageCount, authors, year, pageTexts };
   } catch {
-    return { pageCount: 1, authors: undefined, year: undefined };
+    return { pageCount: 1, authors: undefined, year: undefined, pageTexts: [] };
   }
+}
+
+/**
+ * M12 (FEAT-001) best-effort per-page text (first 60 pages) via pdf.js
+ * `getTextContent()`. Joins item strings and preserves end-of-line flags so the
+ * fingerprint engine can strip running headers per line. Never throws; returns
+ * `[]` for a scanned PDF or when pdf.js text extraction is unavailable.
+ */
+interface PdfLikeDoc {
+  numPages: number;
+  getPage: (n: number) => Promise<{
+    getTextContent: () => Promise<{ items: ReadonlyArray<{ str?: string; hasEOL?: boolean }> }>;
+  }>;
+}
+
+async function extractPageTexts(doc: PdfLikeDoc): Promise<string[]> {
+  const out: string[] = [];
+  const limit = Math.min(doc.numPages, 60);
+  for (let p = 1; p <= limit; p++) {
+    try {
+      const page = await doc.getPage(p);
+      const content = await page.getTextContent();
+      const parts: string[] = [];
+      for (const item of content.items) {
+        if (typeof item.str === "string") {
+          parts.push(item.str);
+          if (item.hasEOL) parts.push("\n");
+        }
+      }
+      out.push(parts.join(" "));
+    } catch {
+      out.push("");
+    }
+  }
+  return out;
 }
 
 /**
@@ -112,6 +155,12 @@ export async function importPdfFile(
     pageCount: meta.pageCount,
     authors: meta.authors,
     year: meta.year,
+    // M12 (FEAT-001): route through the identity engine so a re-import /
+    // cover-sheet / revised draft re-hydrates the existing slot. Page texts
+    // feed the canonicalId + textShingles signals; `reconcile` engages the
+    // engine even when text extraction was unavailable (exact-bytes match).
+    reconcile: true,
+    ...(meta.pageTexts.length > 0 ? { pageTexts: meta.pageTexts } : {}),
   });
 }
 

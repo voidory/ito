@@ -130,9 +130,11 @@ test("rotated PDF selection follows visible glyph geometry at 90 and 270 degrees
       if (!length) return null;
       const axis = { x: dx / length, y: dy / length };
       const normal = { x: -axis.y, y: axis.x };
-      const project = (r: DOMRect) => [
-        [r.left, r.top], [r.right, r.top], [r.left, r.bottom], [r.right, r.bottom],
-      ].map(([x, y]) => x * axis.x + y * axis.y);
+      const project = (r: DOMRect) => (
+        [
+          [r.left, r.top], [r.right, r.top], [r.left, r.bottom], [r.right, r.bottom],
+        ] as Array<[number, number]>
+      ).map(([x, y]) => x * axis.x + y * axis.y);
       const firstAlong = project(first);
       const lastAlong = project(last);
       const across = firstCenter.x * normal.x + firstCenter.y * normal.y;

@@ -256,12 +256,29 @@ export function SourcePane({
       // FEAT-002: also backfill authors/year from the live pdf.js metadata when
       // they were not captured at ingest (jsdom has no worker, so import-time
       // extraction returns undefined and the real values are filled in here).
-      if (source && (source.pageCount === 0 || source.authors == null || source.year == null)) {
+      // M12 (FEAT-001): also backfill the universal identity signals
+      // (docStem / canonicalId / textShingles) once the live text layer is
+      // available, so a loaded PDF can later re-hydrate its slot on re-import.
+      const needsIdentity =
+        source != null &&
+        (source.canonicalId == null ||
+          source.docStem == null ||
+          source.textShingles == null ||
+          source.textShingles.length < 4);
+      if (
+        source &&
+        (source.pageCount === 0 ||
+          source.authors == null ||
+          source.year == null ||
+          needsIdentity)
+      ) {
         const meta = await readLiveMetadata(doc);
+        const pageTexts = needsIdentity ? await extractPageTexts(doc) : undefined;
         void wb.updateSourceMetadata(sourceId, {
           pageCount: source.pageCount === 0 ? doc.numPages : undefined,
           authors: meta.authors,
           year: meta.year,
+          ...(pageTexts != null ? { pageTexts } : {}),
         });
       }
       setReady(true);
@@ -1306,6 +1323,36 @@ function yearFromPdfDate(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const m = value.match(/D:(\d{4})/) ?? value.match(/(\d{4})/);
   return m ? m[1] : undefined;
+}
+
+/**
+ * M12 (FEAT-001) best-effort per-page text extraction via pdf.js
+ * `getTextContent()`. Joins each item's `str`; preserves newlines where pdf.js
+ * flags an end-of-line so the fingerprint engine can strip running headers by
+ * line. Scans at most the first 60 pages (enough for canonicalId + a robust
+ * MinHash sample) so a huge textbook does not stall the reader. Never throws;
+ * returns `[]` when text extraction is unavailable (e.g. a scanned PDF).
+ */
+async function extractPageTexts(doc: PDFDocumentProxy): Promise<string[]> {
+  const out: string[] = [];
+  const limit = Math.min(doc.numPages, 60);
+  for (let p = 1; p <= limit; p++) {
+    try {
+      const page = await doc.getPage(p);
+      const content = await page.getTextContent();
+      const parts: string[] = [];
+      for (const item of content.items as Array<{ str?: string; hasEOL?: boolean }>) {
+        if (typeof item.str === "string") {
+          parts.push(item.str);
+          if (item.hasEOL) parts.push("\n");
+        }
+      }
+      out.push(parts.join(" "));
+    } catch {
+      out.push("");
+    }
+  }
+  return out;
 }
 
 /**

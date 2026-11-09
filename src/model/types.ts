@@ -183,6 +183,37 @@ export interface Source {
    * UI). Optional/additive — stored as a string to stay regex-friendly.
    */
   readonly year?: string;
+  /**
+   * M12 (FEAT-001) deterministic 64-bit FNV-1a hex digest (16 hex chars) of the
+   * raw PDF `Uint8Array` bytes. The STRONGEST identity signal: two sources with
+   * the same `contentHash` are byte-identical (Tier-1 match). Optional/additive
+   * so existing serialized sources (which never carried it) load unchanged, and
+   * `exactOptionalPropertyTypes: true`-safe (`string | undefined`).
+   */
+  readonly contentHash?: string | undefined;
+  /**
+   * M12 (FEAT-001) normalized canonical publication identifier scanned from the
+   * PDF text / metadata, e.g. `"doi:10.1000/xyz"` or `"isbn:9781234567890"`.
+   * Two sources sharing a `canonicalId` are the same work regardless of layout
+   * drift (Tier-2 match). Optional/additive and exactOptional-safe.
+   */
+  readonly canonicalId?: string | undefined;
+  /**
+   * M12 (FEAT-001) normalized document stem + sequence token derived from the
+   * title/filename, e.g. `"ch2101_lab::seq=lab:1"` or `"ch2101_lab"`. Lets a
+   * revised university doc (`Lab1_draft` -> `Lab1_final`) re-hydrate the same
+   * slot while a different sequence (`Lab1` vs `Lab2`) is hard-vetoed.
+   * Optional/additive and exactOptional-safe.
+   */
+  readonly docStem?: string | undefined;
+  /**
+   * M12 (FEAT-001) up to 24 deterministic 64-bit FNV-1a hex hashes: 16 MinHash
+   * 5-word shingles + 8 normalized-sentence hashes. Used for the fuzzy Tier-3
+   * (textbook / cross-source paper) and Tier-4 (revised draft) matches via
+   * Jaccard overlap. A scanned/empty PDF yields `< 4` shingles and is excluded
+   * from fuzzy matching. Optional/additive and exactOptional-safe.
+   */
+  readonly textShingles?: readonly string[] | undefined;
 }
 
 // ---------------------------------------------------------------------------

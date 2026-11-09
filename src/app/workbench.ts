@@ -68,6 +68,14 @@ import {
   type TextAnchor,
 } from "../model";
 import {
+  computeByteHash,
+  computeTextShingles,
+  extractCanonicalId,
+  extractDocStem,
+  matchExistingSource,
+  parseDocStem,
+} from "../pdf/fingerprint";
+import {
   deriveHubBlendColor,
   neighborhood as computeNeighborhood,
   search as runSearch,
@@ -112,6 +120,16 @@ import {
 /** An empty subject-page composition: one empty paragraph (never null). */
 function emptyDocJson(): DocumentJson {
   return { type: "doc", content: [{ type: "paragraph" }] };
+}
+
+/**
+ * M12 (FEAT-001) normalize a quote / page text for re-anchoring comparison:
+ * lowercase and collapse all whitespace (incl. newlines) to single spaces, then
+ * trim. DOM-independent and deterministic so a highlight's stored quote matches
+ * the freshly extracted page text regardless of line-wrap/zoom differences.
+ */
+function normalizeForMatch(text: string): string {
+  return (text ?? "").toLowerCase().replace(/\s+/g, " ").trim();
 }
 
 /**
@@ -747,10 +765,63 @@ export class Workbench {
     /** FEAT-002 optional PDF metadata extracted via pdf.js getMetadata(). */
     authors?: string | undefined;
     year?: string | undefined;
+    /**
+     * M12 (FEAT-001) optional page texts extracted via pdf.js
+     * `getTextContent()`, used to compute the canonicalId + textShingles
+     * identity signals. Omitted in jsdom (no worker); the Reader backfills them
+     * later via `reconcileOrAttachSource` / `updateSourceMetadata`.
+     */
+    pageTexts?: readonly string[] | undefined;
+    /** M12 optional metadata string (joined pdf.js info) to scan for a DOI/ISBN. */
+    metaStr?: string | undefined;
+    /**
+     * M12 when `true`, bypass identity reconciliation and ALWAYS create a new
+     * Source (used by internal callers that have already reconciled).
+     */
+    skipReconcile?: boolean | undefined;
+    /**
+     * M12 when `true`, force routing through the identity engine even without
+     * page texts (used by the real local-PDF import path so a re-import of the
+     * exact same bytes re-hydrates its slot). Defaults to reconciling only when
+     * `pageTexts` is supplied, so legacy callers that import synthetic fixture
+     * bytes keep getting DISTINCT sources (M10 back-compat).
+     */
+    reconcile?: boolean | undefined;
   }): Promise<Source> {
+    // M12 (FEAT-001): route through the universal identity engine so a
+    // re-import / cover-sheet / revised draft re-hydrates an existing slot
+    // instead of silently duplicating the Source. Only engage when a real
+    // identity signal is present (page texts) or a caller explicitly opts in,
+    // so the many legacy tests that import identical synthetic fixture bytes
+    // under distinct titles still produce distinct sources.
+    const shouldReconcile =
+      params.skipReconcile !== true &&
+      (params.reconcile === true || (params.pageTexts?.length ?? 0) > 0);
+    if (shouldReconcile) {
+      const reconciled = await this.reconcileOrAttachSource({
+        title: params.title,
+        bytes: params.bytes,
+        versionHash: params.versionHash,
+        pageCount: params.pageCount,
+        ...(params.category != null ? { category: params.category } : {}),
+        ...(params.authors != null ? { authors: params.authors } : {}),
+        ...(params.year != null ? { year: params.year } : {}),
+        ...(params.pageTexts != null ? { pageTexts: params.pageTexts } : {}),
+        ...(params.metaStr != null ? { metaStr: params.metaStr } : {}),
+      });
+      return reconciled.source;
+    }
     const assetId = newAssetId();
     const authors = params.authors?.trim();
     const year = params.year?.trim();
+    const contentHash = computeByteHash(params.bytes);
+    const { docStem } = extractDocStem(params.title);
+    const pageTexts = params.pageTexts ?? [];
+    const canonicalId =
+      pageTexts.length > 0 || params.metaStr
+        ? extractCanonicalId(pageTexts, params.metaStr)
+        : undefined;
+    const textShingles = pageTexts.length > 0 ? computeTextShingles(pageTexts) : undefined;
     const source: Source = {
       id: newSourceId(),
       kind: "pdf",
@@ -762,6 +833,10 @@ export class Workbench {
       category: params.category ?? "Uncategorized",
       ...(authors ? { authors } : {}),
       ...(year ? { year } : {}),
+      contentHash,
+      docStem,
+      ...(canonicalId != null ? { canonicalId } : {}),
+      ...(textShingles != null ? { textShingles } : {}),
     };
     await this.storage.writeAsset(this.data.manifest.brainId, assetId, params.bytes);
     this.data = {
@@ -782,6 +857,337 @@ export class Workbench {
     };
     await this.persist();
     return source;
+  }
+
+  /**
+   * M12 (FEAT-001) Universal PDF identity reconciliation + slot re-hydration.
+   *
+   * Computes the incoming PDF's identity signature (contentHash from bytes,
+   * docStem from title, canonicalId + textShingles from page texts) and runs
+   * {@link matchExistingSource} against every existing PDF Source. On a match it
+   * RE-HYDRATES that existing `Source.id` in place — restores the binary, bumps
+   * versionHash/contentHash/canonicalId/docStem/textShingles/pageCount, backfills
+   * authors/year, clears the offloaded flag — and NEVER appends a duplicate. On
+   * no match it falls through to a fresh `importSource` (skipReconcile).
+   *
+   * When the matched source's text changed (versionHash/contentHash differ or
+   * the page count changed) and `pageTexts` is supplied, it re-anchors every
+   * text/range/area annotation on that source (uniform page shift + individual
+   * paragraph move) so highlights survive a prepended cover page or a revised
+   * draft. Pure/synchronous fingerprinting; one persist at the end.
+   */
+  async reconcileOrAttachSource(params: {
+    title: string;
+    bytes: Uint8Array;
+    versionHash: string;
+    pageCount: number;
+    category?: string | undefined;
+    authors?: string | undefined;
+    year?: string | undefined;
+    pageTexts?: readonly string[] | undefined;
+    metaStr?: string | undefined;
+  }): Promise<{ source: Source; matched: boolean }> {
+    const contentHash = computeByteHash(params.bytes);
+    const { stem, seqToken, docStem } = extractDocStem(params.title);
+    const pageTexts = params.pageTexts ?? [];
+    const canonicalId =
+      pageTexts.length > 0 || params.metaStr
+        ? extractCanonicalId(pageTexts, params.metaStr)
+        : undefined;
+    const textShingles = pageTexts.length > 0 ? computeTextShingles(pageTexts) : undefined;
+
+    const incoming = {
+      contentHash,
+      stem,
+      seqToken,
+      ...(canonicalId != null ? { canonicalId } : {}),
+      ...(textShingles != null ? { textShingles } : {}),
+    };
+
+    // Find the first existing PDF source that the identity engine accepts.
+    let matchIdx = -1;
+    for (let i = 0; i < this.data.sources.length; i++) {
+      const cand = this.data.sources[i]!;
+      if (cand.kind !== "pdf") continue;
+      const parsed = parseDocStem(cand.docStem);
+      const decision = matchExistingSource(incoming, {
+        ...(cand.contentHash != null ? { contentHash: cand.contentHash } : {}),
+        ...(cand.canonicalId != null ? { canonicalId: cand.canonicalId } : {}),
+        stem: parsed.stem,
+        seqToken: parsed.seqToken,
+        ...(cand.textShingles != null ? { textShingles: cand.textShingles } : {}),
+        binaryOffloaded: this.offloadedAssetIds.has(cand.assetId),
+      });
+      if (decision.matched) {
+        matchIdx = i;
+        break;
+      }
+    }
+
+    if (matchIdx < 0) {
+      // No existing slot: create a brand-new Source with its signature baked in.
+      const source = await this.importSource({
+        title: params.title,
+        bytes: params.bytes,
+        versionHash: params.versionHash,
+        pageCount: params.pageCount,
+        skipReconcile: true,
+        ...(params.category != null ? { category: params.category } : {}),
+        ...(params.authors != null ? { authors: params.authors } : {}),
+        ...(params.year != null ? { year: params.year } : {}),
+        ...(params.pageTexts != null ? { pageTexts: params.pageTexts } : {}),
+        ...(params.metaStr != null ? { metaStr: params.metaStr } : {}),
+      });
+      return { source, matched: false };
+    }
+
+    // ---- Re-hydrate the existing slot in place ----------------------------
+    const existing = this.data.sources[matchIdx]!;
+    const prevPageCount = existing.pageCount;
+
+    // Restore the binary under the EXISTING assetId (re-hydration, not a new id).
+    await this.storage.writeAsset(
+      this.data.manifest.brainId,
+      existing.assetId,
+      params.bytes,
+    );
+    this.offloadedAssetIds.delete(existing.assetId);
+
+    const authors = params.authors?.trim();
+    const year = params.year?.trim();
+    // Drop any stale `availabilityStatus` (e.g. a website "snapshot-cached"
+    // flag) — a re-hydrated PDF binary is resident. exactOptionalPropertyTypes
+    // forbids assigning `undefined`, so we OMIT the key via destructuring.
+    const { availabilityStatus: _staleAvailability, ...existingRest } = existing;
+    void _staleAvailability;
+    const updated: Source = {
+      ...existingRest,
+      title: existing.title, // keep the original library title
+      versionHash: params.versionHash,
+      pageCount:
+        Number.isFinite(params.pageCount) && params.pageCount > 0
+          ? params.pageCount
+          : existing.pageCount,
+      contentHash,
+      docStem,
+      ...(canonicalId != null ? { canonicalId } : { canonicalId: existing.canonicalId }),
+      ...(textShingles != null ? { textShingles } : {}),
+      // Backfill authors/year only when currently absent.
+      ...(existing.authors == null && authors ? { authors } : {}),
+      ...(existing.year == null && year ? { year } : {}),
+    };
+
+    const sources = this.data.sources.slice();
+    sources[matchIdx] = updated;
+
+    // Keep the manifest asset-index entry in sync with the new binary.
+    const assetIndex = this.data.manifest.assetIndex.map((e) =>
+      e.assetId === existing.assetId
+        ? {
+            ...e,
+            byteLength: params.bytes.byteLength,
+            contentHash: params.versionHash,
+          }
+        : e,
+    );
+
+    // Re-anchor highlights when the content actually changed and we have text.
+    let annotations = this.data.annotations;
+    const contentChanged =
+      existing.contentHash !== contentHash ||
+      existing.versionHash !== params.versionHash ||
+      prevPageCount !== updated.pageCount;
+    if (contentChanged && pageTexts.length > 0) {
+      annotations = this.reanchorAnnotations(
+        existing.id,
+        params.versionHash,
+        pageTexts,
+      );
+    } else if (existing.versionHash !== params.versionHash) {
+      // Even without text, keep stored anchor version hashes consistent.
+      annotations = this.restampAnchorVersionHash(existing.id, params.versionHash);
+    }
+
+    this.data = {
+      ...this.data,
+      sources,
+      annotations,
+      manifest: { ...this.data.manifest, assetIndex },
+    };
+    await this.persist();
+    return { source: updated, matched: true };
+  }
+
+  /**
+   * M12 re-stamp every annotation's stored anchor `sourceVersionHash` for one
+   * source to `versionHash`, without moving any page index. Pure; returns a new
+   * annotations array.
+   */
+  private restampAnchorVersionHash(
+    sourceId: SourceId,
+    versionHash: string,
+  ): Annotation[] {
+    return this.data.annotations.map((a) => {
+      if (a.sourceId !== sourceId) return a;
+      return this.withAnchorPatch(a, versionHash, null, null);
+    });
+  }
+
+  /**
+   * M12 (FEAT-001) re-anchor every annotation on `sourceId` against freshly
+   * extracted `pageTexts`:
+   *  1. Match each text annotation's normalized quote in the new page texts.
+   *  2. If a DOMINANT uniform page shift Δp != 0 emerges (e.g. +1 for a
+   *     prepended cover sheet), shift ALL annotations on the source by Δp.
+   *  3. For any text annotation whose quote is NOT at oldPageIndex + Δp but IS
+   *     uniquely found on another page, move it to that page.
+   * All page indices are clamped to [0, pageTexts.length - 1]. Pure; returns a
+   * new annotations array.
+   */
+  private reanchorAnnotations(
+    sourceId: SourceId,
+    versionHash: string,
+    pageTexts: readonly string[],
+  ): Annotation[] {
+    const normPages = pageTexts.map((t) => normalizeForMatch(t));
+    const lastIdx = Math.max(0, normPages.length - 1);
+
+    // Locate each text annotation's quote: all pages it appears on.
+    interface Located {
+      readonly annotation: Annotation;
+      readonly oldPageIndex: number;
+      readonly quote: string;
+      readonly foundPages: number[];
+    }
+    const located: Located[] = [];
+    for (const a of this.data.annotations) {
+      if (a.sourceId !== sourceId) continue;
+      if (a.scope.kind !== "text") continue;
+      const quote = normalizeForMatch(a.scope.anchor.selectedText);
+      if (quote.length < 8) continue; // too short to match reliably
+      const foundPages: number[] = [];
+      for (let p = 0; p < normPages.length; p++) {
+        if (normPages[p]!.includes(quote)) foundPages.push(p);
+      }
+      located.push({
+        annotation: a,
+        oldPageIndex: a.scope.anchor.pageIndex,
+        quote,
+        foundPages,
+      });
+    }
+
+    // Determine the dominant uniform shift Δp from quotes found on exactly one
+    // page (unambiguous), weighting each matched quote equally.
+    const shiftVotes = new Map<number, number>();
+    for (const loc of located) {
+      if (loc.foundPages.length === 1) {
+        const delta = loc.foundPages[0]! - loc.oldPageIndex;
+        shiftVotes.set(delta, (shiftVotes.get(delta) ?? 0) + 1);
+      }
+    }
+    let dominantShift = 0;
+    let bestVotes = 0;
+    for (const [delta, votes] of shiftVotes) {
+      if (votes > bestVotes || (votes === bestVotes && Math.abs(delta) < Math.abs(dominantShift))) {
+        bestVotes = votes;
+        dominantShift = delta;
+      }
+    }
+
+    const clamp = (n: number): number => Math.min(Math.max(n, 0), lastIdx);
+    const locatedById = new Map<AnnotationId, Located>();
+    for (const loc of located) locatedById.set(loc.annotation.id, loc);
+
+    return this.data.annotations.map((a) => {
+      if (a.sourceId !== sourceId) return a;
+
+      // Default: apply the uniform shift to every annotation on this source.
+      let pageDelta: number | null = dominantShift !== 0 ? dominantShift : null;
+      let absolutePage: number | null = null;
+
+      const loc = locatedById.get(a.id);
+      if (loc) {
+        const shiftedTarget = loc.oldPageIndex + dominantShift;
+        const atShifted =
+          shiftedTarget >= 0 &&
+          shiftedTarget < normPages.length &&
+          normPages[shiftedTarget]!.includes(loc.quote);
+        if (!atShifted && loc.foundPages.length === 1) {
+          // Individual paragraph move: quote is not where the uniform shift
+          // predicts but IS uniquely on another page.
+          absolutePage = clamp(loc.foundPages[0]!);
+          pageDelta = null;
+        }
+      }
+
+      return this.withAnchorPatch(a, versionHash, pageDelta, absolutePage, clamp);
+    });
+  }
+
+  /**
+   * M12 immutably patch one annotation's anchor: re-stamp its version hash, and
+   * either shift its page index by `pageDelta` OR set it to `absolutePage`
+   * (absolute wins when non-null). Range/area anchors shift start/end/page
+   * indices; text anchors shift pageIndex. Clamped by `clamp` when supplied.
+   */
+  private withAnchorPatch(
+    a: Annotation,
+    versionHash: string,
+    pageDelta: number | null,
+    absolutePage: number | null,
+    clamp: (n: number) => number = (n) => n,
+  ): Annotation {
+    const scope = a.scope;
+    if (scope.kind === "text") {
+      const base = scope.anchor.pageIndex;
+      const nextPage =
+        absolutePage != null
+          ? absolutePage
+          : pageDelta != null
+            ? clamp(base + pageDelta)
+            : base;
+      return {
+        ...a,
+        scope: {
+          kind: "text",
+          anchor: { ...scope.anchor, sourceVersionHash: versionHash, pageIndex: nextPage },
+        },
+      };
+    }
+    if (scope.kind === "area") {
+      const base = scope.anchor.pageIndex;
+      const nextPage =
+        absolutePage != null
+          ? absolutePage
+          : pageDelta != null
+            ? clamp(base + pageDelta)
+            : base;
+      return {
+        ...a,
+        scope: {
+          kind: "area",
+          anchor: { ...scope.anchor, sourceVersionHash: versionHash, pageIndex: nextPage },
+        },
+      };
+    }
+    // pages (range) anchor: shift both start and end by the same delta.
+    const start = scope.anchor.startPageIndex;
+    const end = scope.anchor.endPageIndex;
+    const nextStart = pageDelta != null ? clamp(start + pageDelta) : start;
+    const nextEnd = pageDelta != null ? clamp(end + pageDelta) : end;
+    return {
+      ...a,
+      scope: {
+        kind: "pages",
+        anchor: {
+          ...scope.anchor,
+          sourceVersionHash: versionHash,
+          startPageIndex: nextStart,
+          endPageIndex: nextEnd,
+        },
+      },
+    };
   }
 
   /** Read the stored PDF bytes for a source (for the reader to render). */
@@ -825,12 +1231,28 @@ export class Workbench {
       pageCount?: number | undefined;
       authors?: string | undefined;
       year?: string | undefined;
+      /**
+       * M12 (FEAT-001) page texts extracted by the Reader via
+       * `page.getTextContent()`. When supplied, the canonicalId + textShingles
+       * identity signals are computed and backfilled (only when absent) so a
+       * source that was batch-ingested or imported in jsdom gains its fuzzy
+       * identity once rendered. The docStem is backfilled from the title.
+       */
+      pageTexts?: readonly string[] | undefined;
+      metaStr?: string | undefined;
     },
   ): Promise<void> {
     const idx = this.data.sources.findIndex((s) => s.id === sourceId);
     if (idx < 0) return;
     const source = this.data.sources[idx]!;
-    const next: { pageCount?: number; authors?: string; year?: string } = {};
+    const next: {
+      pageCount?: number;
+      authors?: string;
+      year?: string;
+      docStem?: string;
+      canonicalId?: string;
+      textShingles?: readonly string[];
+    } = {};
     if (
       source.pageCount === 0 &&
       meta.pageCount != null &&
@@ -843,6 +1265,27 @@ export class Workbench {
     if (source.authors == null && authors) next.authors = authors;
     const year = meta.year?.trim();
     if (source.year == null && year) next.year = year;
+
+    // M12 identity-signal backfill (only fill what is missing).
+    if (source.docStem == null) {
+      const { docStem } = extractDocStem(source.title);
+      if (docStem.length > 0) next.docStem = docStem;
+    }
+    const pageTexts = meta.pageTexts ?? [];
+    if (pageTexts.length > 0 || meta.metaStr) {
+      if (source.canonicalId == null) {
+        const canonicalId = extractCanonicalId(pageTexts, meta.metaStr);
+        if (canonicalId != null) next.canonicalId = canonicalId;
+      }
+      if (
+        (source.textShingles == null || source.textShingles.length < 4) &&
+        pageTexts.length > 0
+      ) {
+        const shingles = computeTextShingles(pageTexts);
+        if (shingles.length >= 4) next.textShingles = shingles;
+      }
+    }
+
     if (Object.keys(next).length === 0) return;
     const sources = this.data.sources.slice();
     sources[idx] = { ...source, ...next };
