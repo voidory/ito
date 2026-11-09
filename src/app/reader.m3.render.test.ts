@@ -96,6 +96,33 @@ async function click(el: Element): Promise<void> {
   });
 }
 
+/**
+ * Deterministically settle an async handler whose completion we can only
+ * observe indirectly (the attach flow is fired via `void onFile(...)` on a
+ * change event, so there is no promise to await). The attach chain is
+ * genuinely async — `await file.arrayBuffer()` then `sha256Hex`
+ * (crypto.subtle.digest) then `attachSourceBinary` — and is not guaranteed to
+ * settle within any fixed number of microtask ticks. Instead of guessing a
+ * tick count, poll `predicate` (re-draining the microtask queue inside `act`
+ * each iteration) until it holds or a short timeout elapses. Flushing stays
+ * inside `act` so React state updates are applied before each check.
+ */
+async function waitFor(predicate: () => boolean, timeoutMs = 1000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    let ok = false;
+    await act(async () => {
+      await Promise.resolve();
+      ok = predicate();
+    });
+    if (ok) return;
+    if (Date.now() >= deadline) {
+      throw new Error(`waitFor: condition not met within ${timeoutMs}ms`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 describe("Reader M3 — two-mode deletion menu (D02)", () => {
   it("renders both delete controls in the association menu", async () => {
     const wb = await Workbench.open(new InMemoryStorageAdapter());
@@ -219,10 +246,7 @@ describe("Reader M3 — binary-offloaded popover + attach (A17)", () => {
     await act(async () => {
       input.dispatchEvent(new Event("change", { bubbles: true }));
     });
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+    await waitFor(() => attached && wb.sourceBinaryStatus(src.id) === "cached");
 
     expect(attached).toBe(true);
     expect(wb.sourceBinaryStatus(src.id)).toBe("cached");
@@ -248,10 +272,7 @@ describe("Reader M3 — binary-offloaded popover + attach (A17)", () => {
     await act(async () => {
       input.dispatchEvent(new Event("change", { bubbles: true }));
     });
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+    await waitFor(() => el.querySelector('[data-testid="attach-pdf-error"]') !== null);
 
     expect(el.querySelector('[data-testid="attach-pdf-error"]')).not.toBeNull();
     expect(wb.sourceBinaryStatus(src.id)).toBe("binary-offloaded");
