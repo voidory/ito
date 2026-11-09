@@ -147,8 +147,14 @@ describe("FEAT-002 2.1 SelectionToolbar is fixed + clamped near the anchor", () 
     );
     const el = q('[data-testid="selection-toolbar"]')!;
     expect(el).not.toBeNull();
+    // M10: the toolbar now mounts the shared <Popover>, which portals onto the
+    // fixed .ito-ui-popover-layer and positions the surface via clampFixedAnchor.
     expect(el.style.position).toBe("fixed");
-    expect(el.style.zIndex).toBe("1000");
+    expect(el.className).toContain("ito-ui-popover");
+    expect(el.className).toContain("ito-selection-toolbar");
+    expect(q('[data-testid="ito-popover-layer"]')).not.toBeNull();
+    // The z-index now comes from the --ito-z-popover token on .ito-ui-popover,
+    // not an inline style, so it is no longer asserted inline.
     // anchorCenterX 440 - 130 = 310; top 200 - 48 = 152.
     expect(el.style.left).toBe("310px");
     expect(el.style.top).toBe("152px");
@@ -156,6 +162,7 @@ describe("FEAT-002 2.1 SelectionToolbar is fixed + clamped near the anchor", () 
     expect(q('[data-testid="commit-highlight"]')).not.toBeNull();
     expect(q('[data-testid="commit-underline"]')).not.toBeNull();
     expect(q('[data-testid="color-controls"]')).not.toBeNull();
+    expect(q('[data-testid="dismiss-toolbar"]')).not.toBeNull();
   });
 });
 
@@ -187,7 +194,14 @@ describe("FEAT-002 2.2a HighlightEditPopover (1-click edit)", () => {
       }),
     );
     const el = q('[data-testid="highlight-edit-popover"]')!;
+    // M10: the edit popover now mounts the shared <Popover> and is clamped over
+    // its anchor (centre 300, width 300 -> left 150; top 300 - 48 = 252).
     expect(el.style.position).toBe("fixed");
+    expect(el.className).toContain("ito-ui-popover");
+    expect(el.className).toContain("ito-annot-popover");
+    expect(el.style.left).toBe("150px");
+    expect(el.style.top).toBe("252px");
+    expect(q('[data-testid="ito-popover-layer"]')).not.toBeNull();
     expect(q('[data-testid="comment-surface"]')).not.toBeNull();
     expect(q('[data-testid="comment-input"]')).not.toBeNull();
     expect(q('[data-testid="comment-save"]')).not.toBeNull();

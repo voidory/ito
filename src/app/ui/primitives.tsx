@@ -236,6 +236,7 @@ export function Popover({
   role = "dialog",
   testId,
   className,
+  dataAttrs,
 }: {
   anchor: AnchorRect;
   width?: number;
@@ -245,26 +246,34 @@ export function Popover({
   role?: "dialog" | "menu";
   testId?: string;
   className?: string;
+  /** Extra `data-*` attributes forwarded onto the surface element. */
+  dataAttrs?: DataAttrs;
 }): JSX.Element | null {
   const surfaceRef = useRef<HTMLDivElement>(null);
   const reactId = useId();
   const { left, top } = clampFixedAnchor(anchor, width);
 
-  // Close on Esc + any pointer-down outside the surface.
+  // Close on Esc + any pointer interaction that finishes outside the surface.
+  //
+  // We dismiss on `mouseup` (not `mousedown`) on purpose: a surface such as the
+  // highlight edit popover autosaves its comment textarea on `blur` (4e29b1a).
+  // The `mousedown` that lands outside the surface moves focus and fires that
+  // blur-save; closing on the following `mouseup` guarantees the blur commit
+  // runs BEFORE the popover unmounts, so an in-progress comment is never lost.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === "Escape") onClose();
     };
-    const onDown = (e: MouseEvent): void => {
+    const onUp = (e: MouseEvent): void => {
       if (surfaceRef.current && !surfaceRef.current.contains(e.target as Node)) onClose();
     };
     document.addEventListener("keydown", onKey);
     // A timeout defers the outside-click listener past the opening click.
-    const t = setTimeout(() => document.addEventListener("mousedown", onDown), 0);
+    const t = setTimeout(() => document.addEventListener("mouseup", onUp), 0);
     return () => {
       document.removeEventListener("keydown", onKey);
       clearTimeout(t);
-      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("mouseup", onUp);
     };
   }, [onClose]);
 
@@ -277,6 +286,7 @@ export function Popover({
       aria-label={ariaLabel}
       className={["ito-ui-popover", className].filter(Boolean).join(" ")}
       style={{ position: "fixed", left, top, width }}
+      {...dataAttrs}
     >
       {children}
     </div>

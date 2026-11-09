@@ -1062,6 +1062,180 @@ label[data-testid="open-restore-input"]:active {
   box-shadow: none;
 }
 
+/* --- M10: overlay surfaces migrated off the legacy inline `styles` ----- */
+/* The selection toolbar + highlight edit popover + offloaded citation popover
+   now mount the shared <Popover> primitive (.ito-ui-popover supplies the panel
+   chrome: background, border, radius, shadow, z-index). These classes add only
+   the per-surface layout; dynamic left/top/width and colour swatches stay as
+   inline style on the elements themselves. */
+
+/* The compact no-tool selection toolbar: a single non-wrapping control row. */
+.ito-selection-toolbar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: nowrap;
+}
+
+.ito-selection-toolbar .ito-color-controls {
+  display: flex;
+  gap: 0.25rem;
+}
+
+/* The highlight edit popover panel flows as a single vertical stack. */
+.ito-highlight-popover {
+  display: block;
+  box-sizing: border-box;
+  align-items: stretch;
+}
+
+/* The captured area/figure preview thumbnail inside the edit popover. */
+.ito-area-figure-preview {
+  display: block;
+  max-width: 100%;
+  max-height: 8rem;
+  margin-bottom: 0.4rem;
+  border: 1px solid var(--ito-border, #ddd);
+  border-radius: 4px;
+}
+
+/* The live watercolor comment surface when it floats standalone (R02/R10). */
+.ito-comment-surface-floating {
+  position: fixed;
+  z-index: 1001;
+  top: 20%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 22rem;
+  padding: 0.75rem;
+  background: var(--ito-bg-elevated, #fff);
+  border: 1px solid var(--ito-border, #ccc);
+  border-radius: 8px;
+  box-shadow: var(--ito-shadow-lg, 0 6px 24px rgba(0, 0, 0, 0.2));
+}
+
+.ito-comment-surface-floating textarea {
+  width: 100%;
+  min-height: 4rem;
+}
+
+.ito-comment-surface-foot {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+/* The standalone association/subject-picker menu floated at a pointer rect. */
+.ito-association-menu {
+  position: absolute;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  align-items: stretch;
+  padding: 0.35rem 0.5rem;
+  background: var(--ito-bg-elevated, #fff);
+  border: 1px solid var(--ito-border, #ccc);
+  border-radius: 8px;
+  box-shadow: var(--ito-shadow-lg, 0 4px 16px rgba(0, 0, 0, 0.15));
+  flex-wrap: wrap;
+}
+
+.ito-association-menu-embedded {
+  position: static;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+/* "Show in Nodes" multi-destination picker anchored under its trigger. */
+.ito-nodes-destination-picker {
+  position: absolute;
+  z-index: 1002;
+  top: 100%;
+  right: 0;
+  min-width: 12rem;
+  padding: 0.25rem;
+  background: var(--ito-bg-elevated, #fff);
+  border: 1px solid var(--ito-border, #ccc);
+  border-radius: 6px;
+  box-shadow: var(--ito-shadow-lg, 0 6px 24px rgba(0, 0, 0, 0.2));
+}
+
+.ito-nodes-destination-picker button {
+  display: block;
+  width: 100%;
+  text-align: left;
+}
+
+/* The binary-offloaded citation popover (A17). */
+.ito-offloaded-popover {
+  max-width: 90vw;
+  width: 24rem;
+  padding: 0.9rem 1rem;
+  border-color: #f0c38a;
+}
+
+/* Centred-modal placement when it opens standalone (not anchored). */
+.ito-offloaded-popover-floating {
+  position: absolute;
+  z-index: 1003;
+  top: 20%;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.ito-offloaded-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.35rem;
+}
+
+.ito-offloaded-reason {
+  font-size: 0.8rem;
+  color: #7a4b00;
+  margin: 0 0 0.5rem;
+}
+
+.ito-offloaded-quote {
+  margin: 0 0 0.5rem;
+  padding: 0.35rem 0.6rem;
+  border-left: 3px solid #1a56db;
+  background: #f6f8ff;
+  font-size: 0.9rem;
+}
+
+.ito-offloaded-comment {
+  font-size: 0.82rem;
+  color: #555;
+}
+
+.ito-offloaded-page {
+  font-size: 0.78rem;
+  color: #777;
+}
+
+.ito-offloaded-error {
+  color: #c5221f;
+  font-size: 0.8rem;
+}
+
+.ito-attach-pdf-label {
+  display: inline-block;
+  margin-top: 0.4rem;
+  padding: 0.35rem 0.75rem;
+  background: #1a56db;
+  color: #fff;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.ito-comment-error {
+  color: #c5221f;
+}
+
 /* --- Reader chrome polish --------------------------------------------- */
 [data-testid="source-pane"] {
   position: relative;
