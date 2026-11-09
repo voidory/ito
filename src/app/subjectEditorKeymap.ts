@@ -7,6 +7,7 @@
 
 import { keymap } from "prosemirror-keymap";
 import { baseKeymap, toggleMark, setBlockType } from "prosemirror-commands";
+import { history, redo, undo } from "prosemirror-history";
 import type { Plugin } from "prosemirror-state";
 import { subjectSchema } from "../editor";
 
@@ -15,6 +16,15 @@ export function subjectKeymapPlugins(): Plugin[] {
   const em = subjectSchema.marks.em!;
   const paragraph = subjectSchema.nodes.paragraph!;
   return [
+    // Undo/redo history so typing, formatting, quote inserts and block moves
+    // are all reversible (Mod-z / Mod-y / Mod-Shift-z). The history plugin must
+    // precede the keymaps so the tracked transactions include their edits.
+    history(),
+    keymap({
+      "Mod-z": undo,
+      "Mod-y": redo,
+      "Mod-Shift-z": redo,
+    }),
     keymap({
       "Mod-b": toggleMark(strong),
       "Mod-i": toggleMark(em),

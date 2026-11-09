@@ -78,6 +78,7 @@ import {
 } from "../network";
 import {
   appendEvidence,
+  collectEvidence,
   compositionStats,
   findEvidencePos,
   hydrateState,
@@ -560,6 +561,20 @@ export class Workbench {
    */
   private failNextSaves = 0;
   /**
+   * Tail of the serialized save chain. Every persist() appends to this so
+   * writes never resolve out of order and a slow write cannot clobber a newer
+   * one. See persist() for the race it defends against.
+   */
+  private saveQueue: Promise<void> = Promise.resolve();
+  /**
+   * Live-editor doc providers keyed by subject page id. When a subject page is
+   * open in the ProseMirror editor, the editor registers a getter here via
+   * attachLiveDoc so external mutations (insert evidence / move block) fold the
+   * editor's newest unsaved doc into stored documentJson first, instead of
+   * operating on a stale persisted snapshot and wiping unsaved text.
+   */
+  private liveDocs = new Map<PageId, () => DocumentJson>();
+  /**
    * Asset ids whose PDF binary is currently OFFLOADED locally (A17). Kept as a
    * sync-readable cache so `resolveEvidenceSource` (and the node map / search,
    * which read records, not bytes) stay synchronous. It is populated by
@@ -605,7 +620,26 @@ export class Workbench {
       data = await storage.readBrain(brainId);
     } else {
       const ids = await storage.listBrains();
-      if (ids[0]) data = await storage.readBrain(ids[0]);
+      // A StrictMode double-mount (or a crashed prior boot) can leave more than
+      // one brain in the store. Pick the one most recently updated so the
+      // user's work wins, tie-breaking on the highest publicationRevision.
+      let best: BrainData | null = null;
+      for (const id of ids) {
+        const candidate = await storage.readBrain(id);
+        if (!candidate) continue;
+        if (!best) {
+          best = candidate;
+          continue;
+        }
+        const a = candidate.manifest;
+        const b = best.manifest;
+        const aTime = Date.parse(a.updatedAt);
+        const bTime = Date.parse(b.updatedAt);
+        if (aTime > bTime || (aTime === bTime && a.publicationRevision > b.publicationRevision)) {
+          best = candidate;
+        }
+      }
+      data = best;
     }
     if (!data) {
       data = createEmptyBrainData();
@@ -1295,6 +1329,17 @@ export class Workbench {
     this.openSourceIds = [...sourceIds];
   }
 
+  /**
+   * Ensure a source is open WITHOUT closing any other pane (used by
+   * source-return so following a quote into a not-yet-open source adds it
+   * alongside the subject + other sources, never replacing them). Idempotent:
+   * a source already open is left in place and not duplicated.
+   */
+  ensureSourceOpen(sourceId: SourceId): void {
+    if (this.openSourceIds.includes(sourceId)) return;
+    this.openSourceIds = [...this.openSourceIds, sourceId];
+  }
+
   closeWorkspace(): void {
     this.openSourceIds = [];
     this.openSubjectPageId = null;
@@ -1709,6 +1754,21 @@ export class Workbench {
   async deleteAnnotation(id: AnnotationId): Promise<void> {
     const { [id]: _removed, ...remainingStyles } =
       this.data.presentation.annotationStyles ?? {};
+
+    // Every evidence instance that quotes this annotation, by destination page,
+    // so we can also strip the matching inline atoms from each page document.
+    const doomedEvidence = this.data.evidenceInstances.filter(
+      (e) => e.annotationId === id,
+    );
+    const now = new Date().toISOString();
+    const pages = this.data.pages.map((page) => {
+      const onThisPage = doomedEvidence.filter((e) => e.destinationPageId === page.id);
+      if (onThisPage.length === 0) return page;
+      let state = hydrateState((page.documentJson as DocumentJson) ?? emptyDocJson());
+      for (const ev of onThisPage) state = removeEvidenceNode(state, ev.id);
+      return { ...page, documentJson: serializeState(state), updatedAt: now };
+    });
+
     this.data = {
       ...this.data,
       annotations: this.data.annotations.filter((a) => a.id !== id),
@@ -1716,6 +1776,7 @@ export class Workbench {
       subjectAssociations: this.data.subjectAssociations.filter(
         (a) => a.annotationId !== id,
       ),
+      pages,
       presentation: { ...this.data.presentation, annotationStyles: remainingStyles },
     };
     await this.persist();
@@ -1885,6 +1946,48 @@ export class Workbench {
   }
 
   /**
+   * Register the live ProseMirror editor's doc getter for an open subject page.
+   * While a page is open in the editor its on-screen doc can hold newer,
+   * not-yet-persisted text than stored documentJson. External mutations (insert
+   * evidence from the reader, move a block) first fold that live doc into the
+   * stored JSON via pullLiveDoc so they operate on the real current content and
+   * never wipe unsaved typing. Returns a detach function the editor calls on
+   * unmount. Only one provider per page; a re-attach replaces the prior one.
+   */
+  attachLiveDoc(pageId: PageId, getDoc: () => DocumentJson): () => void {
+    this.liveDocs.set(pageId, getDoc);
+    return () => {
+      // Only detach if we are still the registered provider for this page.
+      if (this.liveDocs.get(pageId) === getDoc) this.liveDocs.delete(pageId);
+    };
+  }
+
+  /**
+   * Fold the live editor doc (if one is attached for this page) into stored
+   * documentJson so a subsequent structural mutation starts from the newest
+   * content. Does NOT persist by itself (the caller persists once as part of
+   * its own write). A no-op when no live provider is attached or the page is
+   * unknown.
+   */
+  private pullLiveDoc(pageId: PageId): void {
+    const getDoc = this.liveDocs.get(pageId);
+    if (!getDoc) return;
+    const idx = this.data.pages.findIndex((p) => p.id === pageId);
+    if (idx < 0) return;
+    let live: DocumentJson;
+    try {
+      live = getDoc();
+    } catch {
+      return; // a detached/disposed editor should never break a model write
+    }
+    const canonical = serializeState(hydrateState(live));
+    const prev = this.data.pages[idx]!;
+    const pages = this.data.pages.slice();
+    pages[idx] = { ...prev, documentJson: canonical };
+    this.data = { ...this.data, pages };
+  }
+
+  /**
    * Persist a subject page's composition from structured document JSON. The
    * JSON is the durable source of truth (NOT the editor HTML/DOM); it is
    * re-hydrated + re-serialized here so a malformed doc is rejected and so the
@@ -1893,7 +1996,8 @@ export class Workbench {
   async saveSubjectDoc(pageId: PageId, json: DocumentJson): Promise<void> {
     const idx = this.data.pages.findIndex((p) => p.id === pageId);
     if (idx < 0) throw new Error("saveSubjectDoc: unknown page");
-    const canonical = serializeState(hydrateState(json));
+    const state = hydrateState(json);
+    const canonical = serializeState(state);
     const prev = this.data.pages[idx]!;
     const updated: Page = {
       ...prev,
@@ -1902,8 +2006,54 @@ export class Workbench {
     };
     const pages = this.data.pages.slice();
     pages[idx] = updated;
-    this.data = { ...this.data, pages };
+    // Reconcile the EvidenceInstance records for this page with the evidence
+    // atoms actually present in the saved doc BEFORE building the next state so
+    // a quote removed in the editor drops its instance (solid -> none/tentative)
+    // and a cut-then-pasted quote restores its instance.
+    const reconciledEvidence = this.reconcileEvidenceForPage(
+      pageId,
+      collectEvidence(state.doc),
+    );
+    this.data = { ...this.data, pages, evidenceInstances: reconciledEvidence };
     await this.persist();
+  }
+
+  /**
+   * Reconcile EvidenceInstance records for a single subject page against the
+   * `evidence` atoms actually present in its document. EvidenceInstances for
+   * this page whose atom is gone are dropped; atoms whose EvidenceInstance is
+   * missing (e.g. a cut-then-pasted quote, or a quote carried in via an
+   * external paste) are restored from the atom's own provenance attrs. Records
+   * for OTHER pages are never touched. Returns the next evidenceInstances list.
+   */
+  private reconcileEvidenceForPage(
+    pageId: PageId,
+    atoms: readonly EvidenceAttrs[],
+  ): readonly EvidenceInstance[] {
+    const atomById = new Map<string, EvidenceAttrs>();
+    for (const atom of atoms) atomById.set(String(atom.evidenceId), atom);
+
+    // Keep every instance that is either on another page or still has its atom.
+    const kept = this.data.evidenceInstances.filter(
+      (e) => e.destinationPageId !== pageId || atomById.has(String(e.id)),
+    );
+    const keptIds = new Set(kept.map((e) => String(e.id)));
+
+    // Restore an instance for any atom on this page that lost its record.
+    const now = new Date().toISOString();
+    const restored: EvidenceInstance[] = [];
+    for (const atom of atoms) {
+      const evidenceId = String(atom.evidenceId);
+      if (keptIds.has(evidenceId)) continue;
+      restored.push({
+        id: atom.evidenceId,
+        annotationId: atom.annotationId,
+        destinationPageId: pageId,
+        quotedText: atom.quotedText,
+        createdAt: now,
+      });
+    }
+    return [...kept, ...restored];
   }
 
   /**
@@ -1993,6 +2143,9 @@ export class Workbench {
   ): Promise<EvidenceInstance> {
     const annotation = this.data.annotations.find((a) => a.id === annotationId);
     if (!annotation) throw new Error("insertEvidenceIntoPage: unknown annotation");
+    // Fold any live unsaved editor content for this page into stored JSON first
+    // so the inserted quote lands in the user's current doc, not a stale one.
+    this.pullLiveDoc(destinationPageId);
     const pageIdx = this.data.pages.findIndex((p) => p.id === destinationPageId);
     if (pageIdx < 0) throw new Error("insertEvidenceIntoPage: unknown page");
 
@@ -2038,6 +2191,9 @@ export class Workbench {
    * links (A04). Re-derives + persists the canonical JSON.
    */
   async moveSubjectBlock(pageId: PageId, from: number, to: number): Promise<void> {
+    // Fold live unsaved editor content in first so the move reorders the user's
+    // current blocks (including freshly typed text) rather than a stale copy.
+    this.pullLiveDoc(pageId);
     const page = this.data.pages.find((p) => p.id === pageId);
     if (!page) throw new Error("moveSubjectBlock: unknown page");
     const state = hydrateState((page.documentJson as DocumentJson) ?? emptyDocJson());
@@ -2054,7 +2210,7 @@ export class Workbench {
    */
   resolveEvidenceSource(evidenceId: string):
     | {
-        readonly sourceId: SourceId;
+        readonly sourceId: SourceId | null;
         readonly anchor: TextAnchor | null;
         readonly scopeStartPageIndex: number;
         readonly resolution: AnchorResolution;
@@ -2065,7 +2221,11 @@ export class Workbench {
     const annotation = this.data.annotations.find((a) => a.id === evidence.annotationId);
     if (!annotation) {
       return {
-        sourceId: evidence.annotationId as unknown as SourceId,
+        // The annotation record is gone, so there is no real source to point
+        // at; a null sourceId is explicit (never a bogus id derived from an
+        // unrelated field) so the UI reports "unresolved" rather than
+        // navigating somewhere wrong.
+        sourceId: null,
         anchor: null,
         scopeStartPageIndex: 0,
         resolution: { kind: "unresolved", reason: "source annotation no longer exists" },
@@ -3646,6 +3806,21 @@ export class Workbench {
    * caller/UI shows an actionable error and keeps the draft.
    */
   private async persist(): Promise<void> {
+    // Serialize every persist through a single promise chain. Rapid mutations
+    // (e.g. setComment on two annotations back to back) must apply and resolve
+    // in call order; otherwise a slow first write could land AFTER a fast
+    // second write and clobber it with a stale snapshot. Each queued task reads
+    // the LATEST `this.data` at execution time so writes compose instead of
+    // racing. A rejection does not break the chain for subsequent saves.
+    const run = this.saveQueue.then(() => this.persistNow());
+    // Swallow rejections on the chain tail so one failed save cannot reject the
+    // next caller's queued promise; the real error is still surfaced via `run`.
+    this.saveQueue = run.catch(() => undefined);
+    return run;
+  }
+
+  /** Perform a single write-through. Only ever invoked from the save queue. */
+  private async persistNow(): Promise<void> {
     const next: BrainData = {
       ...this.data,
       manifest: {
@@ -3670,6 +3845,16 @@ export class Workbench {
       };
       throw err;
     }
+  }
+
+  /**
+   * Re-attempt a persist after a previous save failed, clearing `saveError` on
+   * success. The current in-memory draft (never discarded on failure) is what
+   * gets written. A no-op resolve when there is no recorded error.
+   */
+  async retrySave(): Promise<void> {
+    if (!this.saveError) return;
+    await this.persist();
   }
 
   /** Normalized union bounding box for a set of rects (used for overlays). */

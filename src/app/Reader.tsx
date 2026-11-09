@@ -17,6 +17,7 @@ import {
   type Workbench,
 } from "./workbench";
 import { SubjectEditor } from "./SubjectEditor";
+import { importPdfFiles } from "./pdfImport";
 
 /** A pending source-return request (spec section 8.2, A17). */
 interface ReturnTarget {
@@ -81,6 +82,18 @@ export function Reader({
   // this stored metadata; attaching re-hydrates the live render.
   const [offloadedPopover, setOffloadedPopover] = useState<OffloadedPopover | null>(null);
   const nonceRef = useRef(0);
+  const readerPdfInputRef = useRef<HTMLInputElement>(null);
+
+  // Local-PDF import from the Reader header (same hash + numPages + importSource
+  // path as the Library button). Resets the input so the same file re-imports.
+  const importReaderFiles = useCallback(
+    async (files: FileList | null) => {
+      if (!files || files.length === 0) return;
+      const count = await importPdfFiles(wb, Array.from(files));
+      if (count > 0) bump();
+    },
+    [wb, bump],
+  );
 
   // Source-return (A17): resolve the evidence's live source WITHOUT closing the
   // subject page. A changed/missing version produces an explicit notice and
@@ -103,9 +116,11 @@ export function Reader({
         const pageIndex = resolved.anchor?.pageIndex ?? resolved.scopeStartPageIndex;
         setReturnNotice(null);
         setReturnTarget(null);
+        // A binary-offloaded resolution always carries a real source id (the
+        // annotation + source still exist; only the PDF bytes were evicted).
         setOffloadedPopover({
           evidenceId,
-          sourceId: resolved.sourceId,
+          sourceId: resolved.sourceId!,
           sourceTitle: source?.title ?? "Source",
           quotedText: evidence?.quotedText ?? "",
           comment: annotation?.comment ?? "",
@@ -120,6 +135,12 @@ export function Reader({
             ? "The source version changed since this quote was captured; the exact passage could not be located."
             : `The source passage is unavailable: ${resolved.resolution.reason}.`,
         );
+        // A deleted annotation resolves with a null sourceId: there is nowhere
+        // to navigate, so show only the notice and clear any prior target.
+        if (resolved.sourceId == null) {
+          setReturnTarget(null);
+          return;
+        }
         setReturnTarget({
           sourceId: resolved.sourceId,
           anchor: resolved.anchor,
@@ -130,6 +151,10 @@ export function Reader({
         return;
       }
       setReturnNotice(null);
+      if (resolved.sourceId == null) {
+        setReturnTarget(null);
+        return;
+      }
       setReturnTarget({
         sourceId: resolved.sourceId,
         anchor: resolved.anchor,
@@ -199,6 +224,25 @@ export function Reader({
         <button data-testid="back-to-library" onClick={onBackToLibrary}>
           ← Library
         </button>
+        <button
+          data-testid="import-pdf-btn"
+          style={{ fontWeight: 600 }}
+          onClick={() => readerPdfInputRef.current?.click()}
+        >
+          + Import PDF
+        </button>
+        <input
+          ref={readerPdfInputRef}
+          data-testid="import-pdf-input"
+          type="file"
+          accept=".pdf,application/pdf"
+          multiple
+          style={{ display: "none" }}
+          onChange={(e) => {
+            void importReaderFiles(e.target.files);
+            e.target.value = "";
+          }}
+        />
         {together && (
           <span data-testid="open-together-indicator" style={{ color: "#555" }}>
             Shared workspace · no analysis
@@ -1024,7 +1068,7 @@ function SelectionToolbar({
  * that leaves no persistent obstruction: closing it returns focus toward the
  * passage. On a failed save the draft is retained and an error is shown (R12).
  */
-function CommentSurface({
+export function CommentSurface({
   wb,
   annotationId,
   onClose,
@@ -1038,6 +1082,14 @@ function CommentSurface({
   const view = wb.viewFor(annotationId);
   const [draft, setDraft] = useState(view?.annotation.comment ?? "");
   const [error, setError] = useState<string | null>(null);
+
+  // Reset the draft whenever the surface switches to a DIFFERENT annotation so
+  // one highlight's in-progress comment can never leak into (or be saved onto)
+  // another highlight. Keyed on annotationId, not on every wb render.
+  useEffect(() => {
+    setDraft(wb.viewFor(annotationId)?.annotation.comment ?? "");
+    setError(null);
+  }, [wb, annotationId]);
 
   const save = async (): Promise<void> => {
     try {

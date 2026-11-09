@@ -178,6 +178,9 @@ export function App(): JSX.Element {
             }}
           >
             <ViewSwitch viewMode={state.viewMode} onSetViewMode={onSetViewMode} />
+            {/* Subjects launcher: open any existing subject page, or create a
+                new standalone one, from the shell header (always reachable). */}
+            <SubjectsLauncher wb={wb} bump={bump} />
             {/*
               Shell-level search surface (FEAT-005): reachable in BOTH Files and
               Nodes. Selecting a result opens the match via existing Workbench
@@ -222,6 +225,10 @@ export function App(): JSX.Element {
               </label>
             </span>
           </div>
+          {/* Always-visible save-error banner (R12): a failed persist retains
+              the in-memory draft and surfaces here so the user can retry. */}
+          <SaveErrorBanner wb={wb} bump={bump} />
+
           {backupModalOpen && (
             <BackupExportModal wb={wb} onClose={() => setBackupModalOpen(false)} />
           )}
@@ -325,6 +332,140 @@ export function App(): JSX.Element {
         </>
       ) : (
         <p style={{ padding: "2rem" }}>Loading workbench…</p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Subjects launcher (m8): a header dropdown listing every existing Subject Page
+ * so any one can be opened (wb.openSubjectPage) without first finding a cited
+ * annotation, plus a "+ New Subject" action that creates a standalone subject
+ * page (wb.createSubjectPage) and opens it. Presentation-only shell affordance;
+ * the durable records it touches are created only by the explicit new action.
+ */
+/**
+ * Always-visible save-error banner (R12). When the last persist failed the
+ * Workbench retains the in-memory draft and records a SaveError; this surfaces
+ * it with a Retry action that re-attempts the save and clears the error on
+ * success. Renders nothing when there is no error.
+ */
+export function SaveErrorBanner({
+  wb,
+  bump,
+}: {
+  wb: NonNullable<ReturnType<typeof useWorkbench>["wb"]>;
+  bump: () => void;
+}): JSX.Element | null {
+  const saveError = wb.snapshot().saveError;
+  if (!saveError) return null;
+  return (
+    <div
+      data-testid="save-error-banner"
+      role="alert"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "0.75rem",
+        padding: "0.5rem 1rem",
+        background: "#fdecea",
+        color: "#611a15",
+        borderBottom: "1px solid #f5c6c2",
+        fontSize: "0.85rem",
+      }}
+    >
+      <span style={{ flex: 1 }}>
+        A change could not be saved: {saveError.message}. Your draft is kept.
+      </span>
+      <button
+        data-testid="retry-save-btn"
+        onClick={() => {
+          void wb.retrySave().finally(() => bump());
+        }}
+      >
+        Retry save
+      </button>
+    </div>
+  );
+}
+
+export function SubjectsLauncher({
+  wb,
+  bump,
+}: {
+  wb: NonNullable<ReturnType<typeof useWorkbench>["wb"]>;
+  bump: () => void;
+}): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const subjects = wb.rawData().pages.filter((p) => p.kind === "subject");
+
+  const openSubject = (id: SourceId | string): void => {
+    wb.openSubjectPage(id as never);
+    setOpen(false);
+    bump();
+  };
+
+  const createStandalone = async (): Promise<void> => {
+    const page = await wb.createSubjectPage("Untitled subject");
+    wb.openSubjectPage(page.id);
+    setOpen(false);
+    bump();
+  };
+
+  return (
+    <div data-testid="subjects-launcher" style={{ position: "relative" }}>
+      <button
+        data-testid="subjects-launcher-toggle"
+        aria-expanded={open}
+        aria-haspopup="menu"
+        onClick={() => setOpen((v) => !v)}
+      >
+        Subjects ({subjects.length})
+      </button>
+      {open && (
+        <div
+          data-testid="subjects-launcher-menu"
+          role="menu"
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            left: 0,
+            zIndex: 20,
+            minWidth: "16rem",
+            background: "#fff",
+            border: "1px solid #ddd",
+            borderRadius: "8px",
+            boxShadow: "0 6px 24px rgba(0,0,0,0.14)",
+            padding: "0.4rem",
+          }}
+        >
+          <button
+            data-testid="create-standalone-subject"
+            style={{ width: "100%", textAlign: "left", fontWeight: 600, marginBottom: "0.3rem" }}
+            onClick={() => void createStandalone()}
+          >
+            + New Subject
+          </button>
+          <ul style={{ listStyle: "none", margin: 0, padding: 0, maxHeight: "16rem", overflow: "auto" }}>
+            {subjects.length === 0 && (
+              <li data-testid="subjects-launcher-empty" style={{ color: "#888", fontSize: "0.85rem", padding: "0.25rem" }}>
+                No subject pages yet
+              </li>
+            )}
+            {subjects.map((p) => (
+              <li key={p.id}>
+                <button
+                  data-testid="subjects-launcher-item"
+                  data-page-id={p.id}
+                  style={{ width: "100%", textAlign: "left" }}
+                  onClick={() => openSubject(p.id)}
+                >
+                  {p.title}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </div>
   );

@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { Source, SourceId } from "../model";
 import type { Workbench } from "./workbench";
+import { importPdfFiles } from "./pdfImport";
 
 /** Accepted snapshot file extensions for a website source (A15, D11). */
 const SNAPSHOT_ACCEPT = ".html,.htm,.md,.txt";
@@ -246,6 +247,14 @@ export function Library({
   const [selected, setSelected] = useState<Set<SourceId>>(new Set());
   const [addWebsiteOpen, setAddWebsiteOpen] = useState(false);
   const [importZoteroOpen, setImportZoteroOpen] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const pdfInputRef = useRef<HTMLInputElement>(null);
+
+  const importFiles = async (files: FileList | null): Promise<void> => {
+    if (!files || files.length === 0) return;
+    const count = await importPdfFiles(wb, Array.from(files));
+    if (count > 0) onImported?.();
+  };
   const categories = useMemo(() => wb.categories(), [wb, wb.rawData()]);
   const sections = useMemo(
     () => wb.librarySections(sortBy),
@@ -262,6 +271,26 @@ export function Library({
   };
 
   return (
+    <section
+      data-testid="library-pdf-dropzone"
+      data-dragging={dragging ? "true" : "false"}
+      // Full-window drag-and-drop: dropping a .pdf from the OS must NOT navigate
+      // the tab away (the browser's default for a dropped file), so every drag
+      // event preventDefaults. On drop we import each PDF via the same hash +
+      // numPages + wb.importSource path the button uses.
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+        if (!dragging) setDragging(true);
+      }}
+      onDragLeave={() => setDragging(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragging(false);
+        void importFiles(e.dataTransfer.files);
+      }}
+      style={styles.dropRoot}
+    >
     <section data-testid="library" data-view="library" style={styles.root}>
       <header style={styles.header}>
         <h2 style={{ margin: 0 }}>Library</h2>
@@ -292,6 +321,25 @@ export function Library({
               <option value="importedAt">Imported</option>
             </select>
           </label>
+          <button
+            data-testid="import-pdf-btn"
+            style={{ marginLeft: "0.75rem", fontWeight: 600 }}
+            onClick={() => pdfInputRef.current?.click()}
+          >
+            + Import PDF
+          </button>
+          <input
+            ref={pdfInputRef}
+            data-testid="import-pdf-input"
+            type="file"
+            accept=".pdf,application/pdf"
+            multiple
+            style={{ display: "none" }}
+            onChange={(e) => {
+              void importFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
           <button
             data-testid="open-together"
             disabled={selected.size < 2}
@@ -361,6 +409,7 @@ export function Library({
           </ul>
         </div>
       ))}
+    </section>
     </section>
   );
 }
@@ -446,6 +495,7 @@ function LibraryRow({
 }
 
 const styles: Record<string, React.CSSProperties> = {
+  dropRoot: { minHeight: "100%" },
   root: { padding: "1.5rem", maxWidth: "52rem", margin: "0 auto" },
   header: {
     display: "flex",
