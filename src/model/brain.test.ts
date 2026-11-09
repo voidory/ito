@@ -16,6 +16,7 @@ import {
   newCategoryId,
   newPageId,
   newRelationshipId,
+  type AnnotationStyleRecord,
   type Category,
   type PresentationState,
   type Relationship,
@@ -41,6 +42,11 @@ describe("createEmptyBrainData — fresh brain with M2 presentation defaults", (
     expect(data.presentation.dragOffsets).toEqual({});
   });
 
+  it("seeds the M2.5 annotationStyles store as an empty object (ADR-0010)", () => {
+    const data = createEmptyBrainData();
+    expect(data.presentation.annotationStyles).toEqual({});
+  });
+
   it("uses SCHEMA_VERSION on the manifest, which is still 1 (no migration)", () => {
     const data = createEmptyBrainData();
     expect(SCHEMA_VERSION).toBe(1);
@@ -58,9 +64,33 @@ describe("additive schema — v1 shapes still typecheck and read", () => {
     };
     expect(v1.nodePositions).toBeUndefined();
     expect(v1.active3D).toBeUndefined();
+    // M2.5 additive field (ADR-0010) is optional too.
+    expect(v1.annotationStyles).toBeUndefined();
   });
 
-  it("accepts a v1 Category with no colorCode (optional additive field)", () => {
+  it("types annotationStyles as a map of AnnotationStyleRecord (M2.5)", () => {
+    const annId = "ann-1";
+    const style: AnnotationStyleRecord = { kind: "highlight", color: "#ffcc00" };
+    const withStyles: PresentationState = {
+      hiddenPageIds: [],
+      hiddenRelationshipIds: [],
+      positions: {},
+      annotationStyles: { [annId]: style },
+    };
+    expect(withStyles.annotationStyles?.[annId]).toEqual({
+      kind: "highlight",
+      color: "#ffcc00",
+    });
+    // strokeWidth is an optional §14 refinement.
+    const withStroke: AnnotationStyleRecord = {
+      kind: "underline",
+      color: "#00aaff",
+      strokeWidth: 2,
+    };
+    expect(withStroke.strokeWidth).toBe(2);
+  });
+
+  it("accepts a v1 Category with no colorCode or masterPageId (additive)", () => {
     const v1: Category = {
       id: newCategoryId(),
       name: "Legacy",
@@ -68,6 +98,8 @@ describe("additive schema — v1 shapes still typecheck and read", () => {
       createdAt: new Date().toISOString(),
     };
     expect(v1.colorCode).toBeUndefined();
+    // M2.5 A14 master-page link is optional/additive (ADR-0010).
+    expect(v1.masterPageId).toBeUndefined();
     // DEFAULT_CATEGORY_COLOR documents the fallback the app applies.
     expect(DEFAULT_CATEGORY_COLOR).toMatch(/^#[0-9a-fA-F]{6}$/);
   });
@@ -84,6 +116,8 @@ describe("additive schema — v1 shapes still typecheck and read", () => {
       createdAt: new Date().toISOString(),
     };
     expect(v1.endpointPageIds).toBeUndefined();
+    // M2.5 A13 explanatory-page link is optional/additive (ADR-0010).
+    expect(v1.explanatoryPageId).toBeUndefined();
     // The normalizer yields the 2-page degenerate case.
     expect(relationshipEndpoints(v1)).toEqual([from, to]);
   });

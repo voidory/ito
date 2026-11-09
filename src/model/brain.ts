@@ -49,6 +49,9 @@ export function createEmptyBrainData(
       categoryBounds: {},
       active3D: false,
       dragOffsets: {},
+      // M2.5 non-destructive annotation-style store (ADR-0010). Replaces the M1
+      // sentinel-Capture hack; keyed by annotation id, empty on a fresh brain.
+      annotationStyles: {},
     },
   };
 }

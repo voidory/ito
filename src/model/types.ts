@@ -247,6 +247,16 @@ export interface Category {
   readonly colorCode?: string;
   /** Optional presentation ordering hint; lower sorts first. View-only. */
   readonly presentationOrder?: number;
+  /**
+   * Optional id of this category's MASTER PAGE (A14, §12.2). A category has one
+   * master page — a real `Page` record (editable in SubjectEditor) that MAY
+   * connect to another category's boundary, giving category-to-category links a
+   * first-class home rather than inferring them only from member bridges.
+   * Additive/optional so v1 brains without it read fine and SCHEMA_VERSION
+   * stays 1 (ADR-0010); brain.ts seeds no default because absence = "no master
+   * page yet" and the workbench creates one lazily on demand.
+   */
+  readonly masterPageId?: PageId;
 }
 
 export type RelationshipKind = "relates" | "supports" | "contradicts" | "derives";
@@ -284,6 +294,16 @@ export interface Relationship {
   readonly hubPosition?: { readonly x: number; readonly y: number };
   /** Derived, cached watercolor-multiply of the endpoint categories' colors. */
   readonly blendColor?: string;
+  /**
+   * Optional id of the relationship hub's EXPLANATORY PAGE (A13, §12.1 "The
+   * Bump"). It lazily links a hub to a full `Page` record so a short connection
+   * explanation can DEVELOP INTO A PAGE and connect further subjects, instead
+   * of being reduced to an unnamed edge or a fixed-length label. Because the
+   * page has a real `PageId`, it can itself participate as an endpoint in
+   * further relationships. Optional/additive, v1-safe (ADR-0010): absence means
+   * the hub only carries its short `label` and no page has been developed yet.
+   */
+  readonly explanatoryPageId?: PageId;
 }
 
 /**
@@ -317,6 +337,23 @@ export interface Revision {
   readonly publicationRevision: number;
   readonly label: string;
   readonly createdAt: Timestamp;
+}
+
+/**
+ * Persisted annotation highlight style (spec §14). A model-layer record for the
+ * `kind`/`color`/`strokeWidth` a user picks for an annotation highlight.
+ *
+ * It lives HERE (not in src/app) so `PresentationState.annotationStyles` can
+ * reference it without the model layer importing from src/app — the model is
+ * the pure section-20 contract and must never depend on the React/app layer.
+ * `kind` and `color` are the required visual identity; `strokeWidth` is an
+ * optional §14 refinement. All fields readonly like the rest of the contract.
+ */
+export interface AnnotationStyleRecord {
+  readonly kind: string;
+  readonly color: string;
+  /** Optional §14 highlight stroke width. */
+  readonly strokeWidth?: number;
 }
 
 /**
@@ -370,6 +407,15 @@ export interface PresentationState {
   readonly dragOffsets?: Readonly<
     Record<string, { readonly x: number; readonly y: number }>
   >;
+  /**
+   * Non-destructive home for annotation highlight styles (§14), keyed by
+   * annotation id string. This REPLACES the M1 sentinel-`Capture` hack (styles
+   * smuggled into `BrainData.captures` via a fake capture with `sourceId:
+   * null`), keeping `captures` strictly real user captures. Optional/additive
+   * and v1-safe (ADR-0010): brain.ts seeds it to `{}` and a v1 brain without it
+   * reads fine; SCHEMA_VERSION stays 1.
+   */
+  readonly annotationStyles?: Readonly<Record<string, AnnotationStyleRecord>>;
 }
 
 // ---------------------------------------------------------------------------
