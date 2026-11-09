@@ -22,6 +22,7 @@ import { SubjectEditor } from "./SubjectEditor";
 import { importPdfFiles } from "./pdfImport";
 import { ReaderToolbar, type ActiveTool } from "./reader/ReaderToolbar";
 import { AnnotationSidebar } from "./reader/AnnotationSidebar";
+import { LeftSidebar } from "./reader/LeftSidebar";
 import {
   anchorRectFrom,
   clampZoom,
@@ -88,6 +89,8 @@ export interface PaneCommands {
   readonly fitWidth: () => void;
   readonly goToPage: (pageNumber: number) => void;
   readonly openFind: () => void;
+  /** The live pdf.js document for the left-sidebar thumbnails/outline. */
+  readonly getDoc: () => PDFDocumentProxy | null;
 }
 
 /** A pending source-return request (spec section 8.2, A17). */
@@ -193,6 +196,30 @@ export function Reader({
   // highlight/underline commits (1-4) and the no-tool popup default.
   const [activeTool, setActiveTool] = useState<ActiveTool>(null);
   const [activeColor, setActiveColor] = useState<HighlightColor>("yellow");
+  // FEAT-002: the annotation selected from the sidebar (flashed + card-active).
+  const [selectedAnnotationId, setSelectedAnnotationId] = useState<AnnotationId | null>(null);
+  // FEAT-002: the left sidebar (Thumbnails / Outline), toggled from the toolbar.
+  const [leftSidebarOpen, setLeftSidebarOpen] = useState(false);
+
+  // Scroll the reader to an annotation's page, flash its overlay, and mark it
+  // selected (sidebar card click). The flash reuses a short-lived CSS class on
+  // the overlay container keyed by data-annotation-id.
+  const selectAnnotation = useCallback(
+    (annotationId: AnnotationId, pageNumber: number) => {
+      setSelectedAnnotationId(annotationId);
+      paneCommandsRef.current?.goToPage(pageNumber);
+      if (typeof document !== "undefined") {
+        const el = document.querySelector<HTMLElement>(
+          `[data-annotation-id="${cssEscapeId(annotationId)}"]`,
+        );
+        if (el) {
+          el.classList.add("ito-highlight-flash");
+          window.setTimeout(() => el.classList.remove("ito-highlight-flash"), 1200);
+        }
+      }
+    },
+    [],
+  );
 
   // The primary source pane registers its imperative zoom/paging/find commands
   // here so the single reader toolbar can drive them; it reports zoom/page back
@@ -391,6 +418,8 @@ export function Reader({
         title={primaryTitle}
         sidebarOpen={highlightsTabOpen}
         onToggleSidebar={() => onToggleTab(!highlightsTabOpen)}
+        leftSidebarOpen={leftSidebarOpen}
+        onToggleLeftSidebar={() => setLeftSidebarOpen((v) => !v)}
         onBackToLibrary={onBackToLibrary}
         activeTool={activeTool}
         onToggleTool={(t) => setActiveTool((cur) => (cur === t ? null : t))}
@@ -489,6 +518,14 @@ export function Reader({
         style={styles.body}
         ref={bodyRef}
       >
+        {leftSidebarOpen && !narrow && (
+          <LeftSidebar
+            doc={paneCommandsRef.current?.getDoc() ?? null}
+            pageCount={nav.pageCount}
+            currentPage={nav.page}
+            onJump={(n) => paneCommandsRef.current?.goToPage(n)}
+          />
+        )}
         <main
           data-testid="reader-main"
           data-together={together ? "true" : "false"}
@@ -597,7 +634,14 @@ export function Reader({
 
         {/* Closed tab reserves ZERO width: the aside is not rendered at all. */}
         {highlightsTabOpen && (
-          <AnnotationSidebar wb={wb} openSourceIds={openSourceIds} bump={bump} />
+          <AnnotationSidebar
+            wb={wb}
+            openSourceIds={openSourceIds}
+            bump={bump}
+            currentPage={nav.page}
+            selectedAnnotationId={selectedAnnotationId}
+            onSelectAnnotation={selectAnnotation}
+          />
         )}
       </div>
     </div>
@@ -1528,6 +1572,7 @@ function SourcePane({
       fitWidth: () => setZoom(1),
       goToPage,
       openFind: () => setFindOpen(true),
+      getDoc: () => docRef.current,
     });
   }, [isPrimary, registerCommands, goToPage]);
 

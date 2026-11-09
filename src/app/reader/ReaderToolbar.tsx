@@ -11,6 +11,12 @@ const Icons = {
   sidebar: (
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
       <rect x="1.5" y="2.5" width="13" height="11" rx="1" />
+      <line x1="10" y1="2.5" x2="10" y2="13.5" />
+    </svg>
+  ),
+  leftSidebar: (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <rect x="1.5" y="2.5" width="13" height="11" rx="1" />
       <line x1="6" y1="2.5" x2="6" y2="13.5" />
     </svg>
   ),
@@ -95,6 +101,8 @@ export function ReaderToolbar({
   title,
   sidebarOpen,
   onToggleSidebar,
+  leftSidebarOpen,
+  onToggleLeftSidebar,
   onBackToLibrary,
   activeTool,
   onToggleTool,
@@ -121,6 +129,8 @@ export function ReaderToolbar({
   title: string;
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
+  leftSidebarOpen: boolean;
+  onToggleLeftSidebar: () => void;
   onBackToLibrary: () => void;
   activeTool: ActiveTool;
   onToggleTool: (t: Exclude<ActiveTool, null>) => void;
@@ -169,7 +179,15 @@ export function ReaderToolbar({
   return (
     <header data-testid="reader-toolbar" className="ito-reader-toolbar" role="toolbar" aria-label="Reader toolbar">
       <IconButton
-        label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
+        label={leftSidebarOpen ? "Hide thumbnails & outline" : "Show thumbnails & outline"}
+        data-testid="toggle-left-sidebar"
+        pressed={leftSidebarOpen}
+        onClick={onToggleLeftSidebar}
+      >
+        {Icons.leftSidebar}
+      </IconButton>
+      <IconButton
+        label={sidebarOpen ? "Hide annotations" : "Show annotations"}
         data-testid="toggle-highlights-tab"
         aria-pressed={sidebarOpen}
         onClick={onToggleSidebar}

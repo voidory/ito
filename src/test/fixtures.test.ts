@@ -32,4 +32,15 @@ describe("PDF fixtures have real selectable text", () => {
     }
     expect(texts.join(" ")).toContain("quick brown fox");
   });
+
+  it("sample-12page-figure.pdf has 12 pages of extractable two-column text", async () => {
+    const bytes = new Uint8Array(await readFile(resolve(FIXTURES, "sample-12page-figure.pdf")));
+    const doc = await getDocument({ data: bytes, useSystemFonts: false }).promise;
+    expect(doc.numPages).toBe(12);
+    const texts = await extractPageTexts("sample-12page-figure.pdf");
+    for (const t of texts) {
+      expect(t.trim().length).toBeGreaterThan(0);
+    }
+    expect(texts[0]).toContain("Figure 1");
+  });
 });

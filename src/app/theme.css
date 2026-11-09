@@ -201,6 +201,233 @@ input[type="radio"] {
   animation: ito-highlight-pulse var(--ito-motion-fast) var(--ito-motion-ease);
 }
 
+/* FEAT-002: sidebar "flash" applied when a card is clicked (scroll + flash). */
+@keyframes ito-highlight-flash {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(44, 74, 111, 0);
+  }
+  35% {
+    box-shadow: 0 0 0 6px rgba(44, 74, 111, 0.45);
+  }
+}
+.ito-highlight-flash {
+  animation: ito-highlight-flash 1.2s ease;
+}
+
+/* FEAT-002: annotations-only right panel. */
+.ito-annotation-sidebar-title {
+  margin: 0 0 0.6rem;
+  font-size: 0.95rem;
+}
+.ito-annotation-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+.ito-annotation-color-chips,
+.ito-annotation-scope {
+  display: flex;
+  gap: 0.3rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.ito-annotation-chip,
+.ito-annotation-scope button {
+  font-size: 0.78rem;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--ito-border, #ccc);
+  border-radius: 999px;
+  background: #fff;
+  cursor: pointer;
+}
+.ito-annotation-chip[data-selected="true"],
+.ito-annotation-scope button[data-selected="true"] {
+  background: var(--ito-accent-soft, #e6eefc);
+  border-color: var(--ito-accent, #2c4a6f);
+  font-weight: 600;
+}
+.ito-annotation-search {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--ito-border, #ccc);
+  border-radius: 6px;
+}
+.ito-annotation-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.ito-annotation-empty {
+  color: #888;
+  font-size: 0.85rem;
+}
+.ito-annotation-card {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  border: 1px solid var(--ito-border, #e3e0d6);
+  border-radius: 8px;
+  background: #fff;
+}
+.ito-annotation-card[data-selected="true"] {
+  border-color: var(--ito-accent, #2c4a6f);
+  box-shadow: 0 0 0 2px var(--ito-accent-soft, #e6eefc);
+}
+.ito-annotation-color-bar {
+  flex: 0 0 4px;
+  border-radius: 3px;
+}
+.ito-annotation-card-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.ito-annotation-card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.ito-annotation-card-spacer {
+  flex: 1;
+}
+.ito-annotation-page {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--ito-accent, #2c4a6f);
+  cursor: pointer;
+}
+.ito-annotation-range-badge {
+  font-size: 0.7rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 4px;
+  background: #eef;
+  color: #556;
+}
+.ito-annotation-actions {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 0.2rem;
+}
+.ito-annotation-thumb {
+  width: 100%;
+  max-height: 120px;
+  object-fit: contain;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+.ito-annotation-quote {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-align: left;
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.3;
+  color: #222;
+  cursor: pointer;
+}
+.ito-annotation-comment {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 2.2rem;
+  resize: vertical;
+  border: 1px solid var(--ito-border, #ddd);
+  border-radius: 6px;
+  padding: 0.3rem 0.4rem;
+  font-size: 0.82rem;
+}
+
+/* FEAT-002: left reader sidebar (Thumbnails / Outline). */
+.ito-left-sidebar {
+  flex: 0 0 160px;
+  width: 160px;
+  border-right: 1px solid var(--ito-border, #ddd);
+  background: #fafafa;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.ito-left-sidebar-tabs {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.4rem;
+  border-bottom: 1px solid var(--ito-border, #eee);
+}
+.ito-thumbnail-strip,
+.ito-outline-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.5rem;
+  overflow: auto;
+  flex: 1;
+}
+.ito-thumbnail-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: center;
+}
+.ito-page-thumbnail {
+  position: relative;
+  display: block;
+  width: 120px;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  background: #fff;
+  padding: 2px;
+  cursor: pointer;
+}
+.ito-page-thumbnail[data-current="true"] {
+  border-color: var(--ito-accent, #2c4a6f);
+}
+.ito-page-thumbnail-canvas {
+  display: block;
+  width: 120px;
+  height: auto;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+}
+.ito-page-thumbnail-label {
+  display: block;
+  text-align: center;
+  font-size: 0.72rem;
+  color: #666;
+  margin-top: 2px;
+}
+.ito-outline-entry {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: none;
+  padding: 0.25rem 0.3rem;
+  font-size: 0.82rem;
+  color: #222;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.ito-outline-entry:hover {
+  background: var(--ito-accent-soft, #e6eefc);
+}
+
 /* Node / hub selection ring transition. */
 .graph-node circle,
 .graph-hub {

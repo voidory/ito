@@ -536,6 +536,25 @@ With Pass B merged, every milestone in the plan is delivered and covered:
 | M5        | Mobile captures (idempotent-by-CaptureId) + reader shell + queue   | complete  |
 | M6        | Zotero import, snapshot websites, area annotations                | complete  |
 | M7        | Linked history, checkpoints, multi-span reflection                | complete  |
+| M9        | Zotero-style reader rework: tool-first annotation engine, single reader toolbar + gear settings, shared UI kit (`primitives.tsx`), annotations-only right panel, Thumbnails/Outline left sidebar, sortable Library table, Nodes toolbar restyle | complete  |
+
+## M9 — reader rework (tool-first UI + UI kit)
+
+M9 reworks the reader INTERACTION layer without touching the data model
+(`src/model/types.ts`) or the storage schema (SCHEMA_VERSION unchanged). See
+`docs/decisions/ADR-0014-m9-reader-rework-tool-first-ui-kit.md`.
+
+| Capability                                                                 | Status      | Kind | Covering test |
+| -------------------------------------------------------------------------- | ----------- | ---- | ------------- |
+| Shared UI kit in one file (`Button`, `IconButton`, `Menu`, `Popover`)      | implemented | unit | `src/app/ui/primitives.render.test.ts` |
+| Single reader toolbar (<= 44px) + gear settings menu; serif-font fix       | implemented | unit+e2e | `src/app/m8UiOverhaul.render.test.ts`, `src/app/theme.render.test.ts`; `e2e/reader-workbench.spec.ts` |
+| Tool-first annotation engine (H/U/N/A + colours 1-4; Note reuses `commitAreaAnnotation`) | implemented | unit | `src/app/reader.feat002.render.test.ts` |
+| Annotations-only right panel: cards + colour chips + search + this-page/all; click scrolls/flashes/selects | implemented | unit+e2e | `src/app/reader.feat002.render.test.ts`; `e2e/reader-workbench.spec.ts` (filter/search) |
+| Left sidebar: Thumbnails (lazy ~120px, current outlined) + Outline (hidden when none) | implemented | unit | `src/app/reader/leftSidebar.render.test.ts` |
+| Library sortable table (Title/Authors/Year/Pages/Annotations/Date added) + collection tree; Import PDF + drag-drop + Open-together kept | implemented | unit | `src/app/library.table.render.test.ts`, `src/app/library.offload.render.test.ts`, `src/app/library.zotero.render.test.ts` |
+| Nodes toolbar restyled with the shared primitives (no behaviour change)    | implemented | unit | `src/app/nodesCanvas.render.test.ts` |
+| 12-page two-column fixture with an embedded raster figure                  | implemented | unit | `scripts/gen-fixtures.mjs`; `src/test/fixtures.test.ts` |
+| Single-pass screenshot harness (library/reader/reader-with-popover/nodes @ 1024/1280/1440) | implemented | n/a  | `scripts/local-shot.mjs`, `scripts/run-local-shot.sh` |
 
 Final gate on this working tree (real runs): `npm run test` and
 `npx vitest run --no-file-parallelism` both 419 passed, `npm run typecheck`

@@ -9,6 +9,7 @@ import {
 } from "../network";
 import type { CategoryId, PageId, RelationshipId, RelationshipKind, SourceId } from "../model";
 import type { ConceptGraph, Workbench } from "./workbench";
+import { Button, IconButton } from "./ui/primitives";
 import "./network.css";
 
 /** The relationship kinds a user can pick when creating a hub (§3.1). */
@@ -442,31 +443,25 @@ export function NodesCanvas({
       {/* FEAT-003 (3.1) floating creation bar: build the whole concept network
           with the mouse (+ Subject, + Category, Connect Nodes / Create Hub). */}
       <div data-testid="nodes-create-bar" className="nodes-create-bar">
-        <button
-          type="button"
-          data-testid="nodes-create-subject-btn"
-          onClick={onCreateSubject}
-        >
+        <Button data-testid="nodes-create-subject-btn" onClick={onCreateSubject}>
           + Subject
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button
           data-testid="nodes-create-category-btn"
           data-active={categoryModalOpen ? "true" : "false"}
           aria-expanded={categoryModalOpen}
           onClick={onToggleCategoryModal}
         >
           + Category
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button
           data-testid="nodes-connect-mode-btn"
           data-active={connectMode ? "true" : "false"}
           aria-pressed={connectMode}
           onClick={onToggleConnectMode}
         >
           {connectMode ? "Connecting…" : "Connect Nodes"}
-        </button>
+        </Button>
       </div>
 
       {/* §3.1 category creation + membership popover. */}
@@ -561,38 +556,23 @@ export function NodesCanvas({
             value={hubLabel}
             onChange={(e) => setHubLabel(e.target.value)}
           />
-          <button type="button" data-testid="nodes-create-hub-btn" onClick={onCreateHub}>
+          <Button data-testid="nodes-create-hub-btn" onClick={onCreateHub}>
             Create Hub
-          </button>
+          </Button>
         </div>
       )}
 
       {/* §3.3 zoom controls — wired to wb.setZoom via the folded viewBox. */}
       <div data-testid="canvas-zoom-controls" className="canvas-zoom-controls">
-        <button
-          type="button"
-          data-testid="canvas-zoom-in"
-          aria-label="Zoom in"
-          onClick={onZoomIn}
-        >
+        <IconButton label="Zoom in" data-testid="canvas-zoom-in" onClick={onZoomIn}>
           +
-        </button>
-        <button
-          type="button"
-          data-testid="canvas-zoom-out"
-          aria-label="Zoom out"
-          onClick={onZoomOut}
-        >
-          &minus;
-        </button>
-        <button
-          type="button"
-          data-testid="canvas-zoom-reset"
-          aria-label="Reset zoom"
-          onClick={onZoomReset}
-        >
+        </IconButton>
+        <IconButton label="Zoom out" data-testid="canvas-zoom-out" onClick={onZoomOut}>
+          −
+        </IconButton>
+        <IconButton label="Reset zoom" data-testid="canvas-zoom-reset" onClick={onZoomReset}>
           Reset
-        </button>
+        </IconButton>
       </div>
       <svg
         ref={svgRef}

@@ -6,6 +6,34 @@ import { importPdfFiles } from "./pdfImport";
 /** Accepted snapshot file extensions for a website source (A15, D11). */
 const SNAPSHOT_ACCEPT = ".html,.htm,.md,.txt";
 
+/** M9 (FEAT-002 3) the sortable Library table columns. */
+type LibrarySortColumn = "title" | "authors" | "year" | "pages" | "annotations" | "importedAt";
+
+const LIBRARY_COLUMNS: { key: LibrarySortColumn; label: string }[] = [
+  { key: "title", label: "Title" },
+  { key: "authors", label: "Authors" },
+  { key: "year", label: "Year" },
+  { key: "pages", label: "Pages" },
+  { key: "annotations", label: "Annotations" },
+  { key: "importedAt", label: "Date added" },
+];
+
+/**
+ * The Source model carries no explicit authors/year, so they are derived best
+ * effort from the title (e.g. a trailing "(2021)" year) and otherwise shown as
+ * an em-dash placeholder. The derivation never mutates the record.
+ */
+function sourceYear(title: string): string {
+  const m = title.match(/\b(1[5-9]\d{2}|20\d{2})\b/);
+  return m ? m[1]! : "—";
+}
+function sourceAuthors(_title: string): string {
+  return "—";
+}
+function formatDateAdded(iso: string): string {
+  return iso.slice(0, 10);
+}
+
 function hasAcceptedExtension(name: string): boolean {
   return /\.(html?|md|txt)$/i.test(name);
 }
@@ -244,6 +272,8 @@ export function Library({
   onImported?: () => void;
 }): JSX.Element {
   const [sortBy, setSortBy] = useState<"title" | "importedAt">("title");
+  const [sortColumn, setSortColumn] = useState<LibrarySortColumn>("title");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [selected, setSelected] = useState<Set<SourceId>>(new Set());
   const [addWebsiteOpen, setAddWebsiteOpen] = useState(false);
   const [importZoteroOpen, setImportZoteroOpen] = useState(false);
@@ -256,10 +286,51 @@ export function Library({
     if (count > 0) onImported?.();
   };
   const categories = useMemo(() => wb.categories(), [wb, wb.rawData()]);
-  const sections = useMemo(
+  const rawSections = useMemo(
     () => wb.librarySections(sortBy),
     [wb, sortBy, categoryScope, wb.rawData()],
   );
+
+  // Apply the table-header sort (column + direction) on top of the workbench's
+  // category grouping. Annotation counts are read live from the workbench.
+  const annotationCount = (id: SourceId): number => wb.annotationsForSource(id).length;
+  const compare = (a: Source, b: Source): number => {
+    let r = 0;
+    switch (sortColumn) {
+      case "title":
+        r = a.title.localeCompare(b.title);
+        break;
+      case "authors":
+        r = sourceAuthors(a.title).localeCompare(sourceAuthors(b.title));
+        break;
+      case "year":
+        r = sourceYear(a.title).localeCompare(sourceYear(b.title));
+        break;
+      case "pages":
+        r = a.pageCount - b.pageCount;
+        break;
+      case "annotations":
+        r = annotationCount(a.id) - annotationCount(b.id);
+        break;
+      case "importedAt":
+        r = a.importedAt.localeCompare(b.importedAt);
+        break;
+    }
+    return sortDir === "asc" ? r : -r;
+  };
+  const sections = rawSections.map((s) => ({
+    category: s.category,
+    sources: s.sources.slice().sort(compare),
+  }));
+
+  const onHeaderSort = (col: LibrarySortColumn): void => {
+    if (sortColumn === col) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortColumn(col);
+      setSortDir("asc");
+    }
+  };
 
   const toggle = (id: SourceId): void => {
     setSelected((prev) => {
@@ -397,29 +468,93 @@ export function Library({
         />
       )}
 
-      {sections.length === 0 && (
-        <p data-testid="library-empty" style={{ color: "#777" }}>
-          No documents yet.
-        </p>
-      )}
+      <div style={styles.layout}>
+        {/* Collection tree reusing the existing library categories. Selecting a
+            node drives the SAME scope the library-scope select carries. */}
+        <nav data-testid="collection-tree" aria-label="Collections" style={styles.tree}>
+          <button
+            type="button"
+            data-testid="collection-all"
+            aria-pressed={categoryScope == null}
+            style={{ ...styles.treeItem, fontWeight: categoryScope == null ? 700 : 400 }}
+            onClick={() => onScopeChange(null)}
+          >
+            All documents
+          </button>
+          {categories.map((c) => (
+            <button
+              key={c}
+              type="button"
+              data-testid="collection-node"
+              data-category={c}
+              aria-pressed={categoryScope === c}
+              style={{ ...styles.treeItem, fontWeight: categoryScope === c ? 700 : 400 }}
+              onClick={() => onScopeChange(c)}
+            >
+              {c}
+            </button>
+          ))}
+        </nav>
 
-      {sections.map((section) => (
-        <div key={section.category} data-testid="library-category" data-category={section.category}>
-          <h3 style={styles.categoryHeading}>{section.category}</h3>
-          <ul style={styles.list}>
-            {section.sources.map((source) => (
-              <LibraryRow
-                key={source.id}
-                wb={wb}
-                source={source}
-                checked={selected.has(source.id)}
-                onToggle={() => toggle(source.id)}
-                onOpen={() => onOpen(source.id)}
-              />
-            ))}
-          </ul>
+        <div style={styles.tableWrap}>
+          {sections.length === 0 && (
+            <p data-testid="library-empty" style={{ color: "#777" }}>
+              No documents yet.
+            </p>
+          )}
+
+          {sections.map((section) => (
+            <div
+              key={section.category}
+              data-testid="library-category"
+              data-category={section.category}
+            >
+              <h3 style={styles.categoryHeading}>{section.category}</h3>
+              <table data-testid="library-table" style={styles.table}>
+                <thead>
+                  <tr>
+                    <th style={styles.th} aria-hidden="true" />
+                    {LIBRARY_COLUMNS.map((col) => (
+                      <th key={col.key} style={styles.th}>
+                        <button
+                          type="button"
+                          data-testid={`library-sort-${col.key}`}
+                          aria-sort={
+                            sortColumn === col.key
+                              ? sortDir === "asc"
+                                ? "ascending"
+                                : "descending"
+                              : "none"
+                          }
+                          style={styles.sortHeader}
+                          onClick={() => onHeaderSort(col.key)}
+                        >
+                          {col.label}
+                          {sortColumn === col.key ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+                        </button>
+                      </th>
+                    ))}
+                    <th style={styles.th} aria-hidden="true" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {section.sources.map((source) => (
+                    <LibraryRow
+                      key={source.id}
+                      wb={wb}
+                      source={source}
+                      annotations={annotationCount(source.id)}
+                      checked={selected.has(source.id)}
+                      onToggle={() => toggle(source.id)}
+                      onOpen={() => onOpen(source.id)}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
         </div>
-      ))}
+      </div>
     </section>
     </section>
   );
@@ -428,12 +563,14 @@ export function Library({
 function LibraryRow({
   wb,
   source,
+  annotations,
   checked,
   onToggle,
   onOpen,
 }: {
   wb: Workbench;
   source: Source;
+  annotations: number;
   checked: boolean;
   onToggle: () => void;
   onOpen: () => void;
@@ -456,58 +593,127 @@ function LibraryRow({
   };
 
   return (
-    <li
+    <tr
       data-testid="library-item"
       data-source-id={source.id}
       style={styles.item}
       onDoubleClick={onOpen}
     >
-      <input
-        type="checkbox"
-        aria-label={`Select ${source.title}`}
-        checked={checked}
-        onChange={onToggle}
-      />
-      <button
-        data-testid="library-open"
-        style={styles.openBtn}
-        onClick={onOpen}
-        title="Open document"
-      >
-        {source.title}
-      </button>
-      <span
-        data-testid="source-binary-status"
-        data-source-id={source.id}
-        data-status={status}
-        style={{
-          fontSize: "0.72rem",
-          padding: "0.05rem 0.4rem",
-          borderRadius: "4px",
-          background: offloaded ? "#fef3c7" : "#e6f4ea",
-          color: offloaded ? "#92400e" : "#166534",
-        }}
-      >
-        {status}
-      </span>
-      <button
-        data-testid="offload-pdf-binary"
-        data-source-id={source.id}
-        disabled={busy || offloaded}
-        title="Offload the PDF binary to reclaim space (citations are preserved)"
-        onClick={() => void onOffload()}
-        style={{ fontSize: "0.75rem" }}
-      >
-        Offload PDF Binary
-      </button>
-      <span style={{ color: "#999", fontSize: "0.8rem" }}>{source.pageCount}pp</span>
-    </li>
+      <td style={styles.td}>
+        <input
+          type="checkbox"
+          aria-label={`Select ${source.title}`}
+          checked={checked}
+          onChange={onToggle}
+        />
+      </td>
+      <td style={styles.td}>
+        <button
+          data-testid="library-open"
+          style={styles.openBtn}
+          onClick={onOpen}
+          title="Open document"
+        >
+          {source.title}
+        </button>
+      </td>
+      <td data-testid="library-cell-authors" style={styles.td}>
+        {sourceAuthors(source.title)}
+      </td>
+      <td data-testid="library-cell-year" style={styles.td}>
+        {sourceYear(source.title)}
+      </td>
+      <td data-testid="library-cell-pages" style={styles.tdNum}>
+        {source.pageCount || "—"}
+      </td>
+      <td data-testid="library-cell-annotations" style={styles.tdNum}>
+        {annotations}
+      </td>
+      <td data-testid="library-cell-date" style={styles.td}>
+        {formatDateAdded(source.importedAt)}
+      </td>
+      <td style={styles.td}>
+        <span
+          data-testid="source-binary-status"
+          data-source-id={source.id}
+          data-status={status}
+          style={{
+            fontSize: "0.72rem",
+            padding: "0.05rem 0.4rem",
+            borderRadius: "4px",
+            background: offloaded ? "#fef3c7" : "#e6f4ea",
+            color: offloaded ? "#92400e" : "#166534",
+          }}
+        >
+          {status}
+        </span>
+        <button
+          data-testid="offload-pdf-binary"
+          data-source-id={source.id}
+          disabled={busy || offloaded}
+          title="Offload the PDF binary to reclaim space (citations are preserved)"
+          onClick={() => void onOffload()}
+          style={{ fontSize: "0.75rem", marginLeft: "0.4rem" }}
+        >
+          Offload PDF Binary
+        </button>
+      </td>
+    </tr>
   );
 }
 
 const styles: Record<string, React.CSSProperties> = {
   dropRoot: { minHeight: "100%" },
-  root: { padding: "1.5rem", maxWidth: "52rem", margin: "0 auto" },
+  root: { padding: "1.5rem", maxWidth: "72rem", margin: "0 auto" },
+  layout: { display: "flex", gap: "1.25rem", alignItems: "flex-start" },
+  tree: {
+    flex: "0 0 12rem",
+    display: "flex",
+    flexDirection: "column",
+    gap: "0.15rem",
+    borderRight: "1px solid #eee",
+    paddingRight: "0.75rem",
+  },
+  treeItem: {
+    textAlign: "left",
+    border: "none",
+    background: "none",
+    cursor: "pointer",
+    padding: "0.25rem 0.4rem",
+    borderRadius: "6px",
+    fontSize: "0.9rem",
+    color: "#333",
+  },
+  tableWrap: { flex: 1, minWidth: 0 },
+  table: { width: "100%", borderCollapse: "collapse", marginBottom: "1.25rem" },
+  th: {
+    textAlign: "left",
+    borderBottom: "2px solid #e3e0d6",
+    padding: "0.3rem 0.5rem",
+    fontSize: "0.78rem",
+  },
+  sortHeader: {
+    border: "none",
+    background: "none",
+    cursor: "pointer",
+    font: "inherit",
+    fontWeight: 600,
+    color: "#555",
+    padding: 0,
+  },
+  td: {
+    padding: "0.35rem 0.5rem",
+    borderBottom: "1px solid #eee",
+    fontSize: "0.88rem",
+    verticalAlign: "middle",
+  },
+  tdNum: {
+    padding: "0.35rem 0.5rem",
+    borderBottom: "1px solid #eee",
+    fontSize: "0.88rem",
+    textAlign: "right",
+    whiteSpace: "nowrap",
+  },
   header: {
     display: "flex",
     alignItems: "center",
@@ -521,22 +727,15 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#888",
     marginBottom: "0.25rem",
   },
-  list: { listStyle: "none", padding: 0, margin: "0 0 1.25rem" },
-  item: {
-    display: "flex",
-    alignItems: "center",
-    gap: "0.6rem",
-    padding: "0.4rem 0.5rem",
-    borderBottom: "1px solid #eee",
-  },
+  item: {},
   openBtn: {
-    flex: 1,
     textAlign: "left",
     border: "none",
     background: "none",
-    fontSize: "1rem",
+    fontSize: "0.95rem",
     cursor: "pointer",
     color: "#1a56db",
+    padding: 0,
   },
   modal: {
     margin: "0 0 1.25rem",

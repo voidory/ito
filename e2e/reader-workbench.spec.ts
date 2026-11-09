@@ -199,17 +199,24 @@ test("R03 + R04 + R16 + R17: a 3-page range annotation is one identity with bord
   // R03/R04: one range identity + one independent micro-highlight = 2 records.
   expect(await page.evaluate(() => window.__ito.annotationCount())).toBe(2);
 
-  // R17: the range is filterable and shows "pp. 1-3" when opened.
+  // R17: both annotations list in the annotations-only sidebar; the range card
+  // carries a "pp. 1-3" badge. The text search isolates each by its quote.
   await page.getByTestId("toggle-highlights-tab").click();
-  await page.getByTestId("filter-range").click();
+  await expect(page.getByTestId("highlight-row")).toHaveCount(2);
+  await expect(page.getByTestId("range-badge").first()).toBeVisible();
+
+  // Search for the range label -> only the range card remains.
+  await page.getByTestId("annotation-search").fill("pp. 1-3");
   await expect(page.getByTestId("highlight-row")).toHaveCount(1);
   await expect(page.getByTestId("range-badge").first()).toBeVisible();
-  await page.getByTestId("filter-micro").click();
+
+  // Search for the micro-highlight needle -> only the micro card remains.
+  await page.getByTestId("annotation-search").fill(NEEDLE);
   await expect(page.getByTestId("highlight-row")).toHaveCount(1);
   await expect(page.getByTestId("range-badge")).toHaveCount(0);
+  await page.getByTestId("annotation-search").fill("");
 
   // Opening the range reveals the shared comment surface with the pp. label.
-  await page.getByTestId("filter-range").click();
   await page.locator('.ito-highlight-border').first().click();
   await expect(page.getByTestId("range-label")).toHaveText("pp. 1-3");
 });
