@@ -2040,54 +2040,125 @@ function PassageEvidenceLines({
   bump: () => void;
 }): JSX.Element {
   const [segments, setSegments] = useState<
-    { evidenceId: string; x1: number; y1: number; x2: number; y2: number }[]
+    {
+      key: string;
+      status: "solid" | "dotted";
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+    }[]
   >([]);
   const frame = useRef<number>(0);
+
+  /** Union box of an annotation's drawn pieces inside a source pane, if any. */
+  const highlightBox = (
+    scroll: HTMLElement,
+    annotationId: string,
+  ): DOMRect | null => {
+    const id = cssEscapeId(annotationId);
+    const els = scroll.querySelectorAll(
+      `.ito-highlight[data-annotation-id="${id}"] .ito-highlight-fragment, ` +
+        `.ito-highlight[data-annotation-id="${id}"] .ito-highlight-area, ` +
+        `.ito-highlight[data-annotation-id="${id}"] .ito-highlight-border`,
+    );
+    let l = Infinity;
+    let t = Infinity;
+    let r = -Infinity;
+    let b = -Infinity;
+    for (const el of Array.from(els)) {
+      const box = el.getBoundingClientRect();
+      if (box.width === 0 && box.height === 0) continue;
+      l = Math.min(l, box.left);
+      t = Math.min(t, box.top);
+      r = Math.max(r, box.right);
+      b = Math.max(b, box.bottom);
+    }
+    return Number.isFinite(l) ? new DOMRect(l, t, r - l, b - t) : null;
+  };
 
   const recompute = useCallback(() => {
     const body = bodyRef.current;
     if (!body) return;
     const bodyBox = body.getBoundingClientRect();
-    const lines = wb.passageEvidenceLines();
     const subjectEl = paneScrollRefs.current.get("subject");
+    if (!subjectEl) {
+      setSegments([]);
+      return;
+    }
+    const subjBox = subjectEl.getBoundingClientRect();
+    const clampY = (y: number, top: number, bottom: number): number =>
+      Math.min(Math.max(y, top + 6), bottom - 6);
+
+    const entries: {
+      key: string;
+      status: "solid" | "dotted";
+      annotationId: string;
+      sourceId: string;
+      evidenceId: string | null;
+    }[] = [
+      ...wb.passageEvidenceLines().map((l) => ({
+        key: l.evidenceId,
+        status: "solid" as const,
+        annotationId: l.annotationId,
+        sourceId: l.sourceId,
+        evidenceId: l.evidenceId,
+      })),
+      ...wb.passageAssociationLines().map((l) => ({
+        key: `assoc-${l.associationId}`,
+        status: "dotted" as const,
+        annotationId: l.annotationId,
+        sourceId: l.sourceId,
+        evidenceId: null,
+      })),
+    ];
+
     const next: typeof segments = [];
-    for (const line of lines) {
-      const sourceScroll = paneScrollRefs.current.get(line.sourceId);
-      if (!sourceScroll || !subjectEl) continue;
-      // Anchor the source end at the source passage's page container when it is
-      // on screen; otherwise at the pane's vertical centre (still no motion).
-      const pageEl = sourceScroll.querySelector(
-        `.pdf-page[data-page-index="${line.sourcePageIndex}"]`,
-      ) as HTMLElement | null;
-      const srcBox = (pageEl ?? sourceScroll).getBoundingClientRect();
+    for (const e of entries) {
+      const sourceScroll = paneScrollRefs.current.get(e.sourceId);
+      if (!sourceScroll) continue;
       const paneBox = sourceScroll.getBoundingClientRect();
-      // Clamp the source y into the visible pane band so a scrolled-away
-      // passage still yields a sensible margin endpoint (never off-canvas).
-      const srcY = Math.min(
-        Math.max(srcBox.top + srcBox.height / 2, paneBox.top + 6),
-        paneBox.bottom - 6,
-      );
-      // The subject end anchors at the matching evidence chip if present.
-      const chip = subjectEl.querySelector(
-        `[data-testid="evidence-chip"][data-evidence-id="${line.evidenceId}"]`,
-      ) as HTMLElement | null;
-      const subjBox = subjectEl.getBoundingClientRect();
-      const dstBox = chip ? chip.getBoundingClientRect() : subjBox;
-      const dstY = Math.min(
-        Math.max(dstBox.top + dstBox.height / 2, subjBox.top + 6),
-        subjBox.bottom - 6,
-      );
-      // Route from the source pane's INNER edge (toward the subject) to the
-      // subject pane's INNER edge — i.e. through the inter-pane gutter.
       const sourceLeftOfSubject = paneBox.left < subjBox.left;
-      const x1 = (sourceLeftOfSubject ? paneBox.right : paneBox.left) - bodyBox.left;
-      const x2 = (sourceLeftOfSubject ? subjBox.left : subjBox.right) - bodyBox.left;
+
+      // SOURCE END: the highlight itself, so the line visibly leaves the passage
+      // and crosses the page toward the subject. If the passage has scrolled out
+      // of the pane band, slide along the pane's inner edge (never off-canvas).
+      const hl = highlightBox(sourceScroll, e.annotationId);
+      let sx: number;
+      let sy: number;
+      if (hl && hl.bottom > paneBox.top && hl.top < paneBox.bottom) {
+        sx = sourceLeftOfSubject ? hl.right : hl.left;
+        sy = clampY(hl.top + hl.height / 2, paneBox.top, paneBox.bottom);
+      } else {
+        sx = sourceLeftOfSubject ? paneBox.right : paneBox.left;
+        const clampTo = hl ? (hl.top < paneBox.top ? paneBox.top : paneBox.bottom) : paneBox.top + paneBox.height / 2;
+        sy = clampY(clampTo, paneBox.top, paneBox.bottom);
+      }
+
+      // SUBJECT END: the quote itself (its near edge) for a cited link; the
+      // pane's inner edge for a tentative one (nothing is quoted yet).
+      const chip = e.evidenceId
+        ? (subjectEl.querySelector(
+            `[data-testid="evidence-chip"][data-evidence-id="${e.evidenceId}"]`,
+          ) as HTMLElement | null)
+        : null;
+      let dx: number;
+      let dy: number;
+      if (chip) {
+        const cb = chip.getBoundingClientRect();
+        dx = sourceLeftOfSubject ? cb.left : cb.right;
+        dy = clampY(cb.top + cb.height / 2, subjBox.top, subjBox.bottom);
+      } else {
+        dx = sourceLeftOfSubject ? subjBox.left : subjBox.right;
+        dy = clampY(subjBox.top + subjBox.height / 2, subjBox.top, subjBox.bottom);
+      }
       next.push({
-        evidenceId: line.evidenceId,
-        x1,
-        y1: srcY - bodyBox.top,
-        x2,
-        y2: dstY - bodyBox.top,
+        key: e.key,
+        status: e.status,
+        x1: sx - bodyBox.left,
+        y1: sy - bodyBox.top,
+        x2: dx - bodyBox.left,
+        y2: dy - bodyBox.top,
       });
     }
     setSegments(next);
@@ -2116,7 +2187,13 @@ function PassageEvidenceLines({
     const ro = new ResizeObserver(schedule);
     if (bodyRef.current) ro.observe(bodyRef.current);
     for (const el of scrolls) ro.observe(el);
+    // Highlights are removed and redrawn on every refit / zoom / re-render, and
+    // pages re-render at a new scale: re-anchor the line when that happens, or
+    // it keeps pointing where the highlight USED to be.
+    const mo = new MutationObserver(schedule);
+    for (const el of scrolls) mo.observe(el, { childList: true, subtree: true, attributes: true, attributeFilter: ["style"] });
     return () => {
+      mo.disconnect();
       cancelAnimationFrame(frame.current);
       for (const el of listenEls) el.removeEventListener("scroll", schedule);
       window.removeEventListener("resize", schedule);
@@ -2147,18 +2224,30 @@ function PassageEvidenceLines({
     >
       {segments.map((s) => {
         const midX = (s.x1 + s.x2) / 2;
+        const d = `M ${s.x1} ${s.y1} C ${midX} ${s.y1}, ${midX} ${s.y2}, ${s.x2} ${s.y2}`;
+        const dotted = s.status === "dotted";
         return (
-          <path
-            key={s.evidenceId}
+          <g
+            key={s.key}
             data-testid="evidence-line"
-            data-evidence-id={s.evidenceId}
-            d={`M ${s.x1} ${s.y1} C ${midX} ${s.y1}, ${midX} ${s.y2}, ${s.x2} ${s.y2}`}
-            fill="none"
-            stroke="#1a56db"
-            strokeWidth={1.5}
-            strokeOpacity={0.55}
-            strokeDasharray="4 3"
-          />
+            data-evidence-id={s.key}
+            data-line-status={s.status}
+          >
+            {/* Pale halo so the line stays legible where it crosses page text. */}
+            <path d={d} fill="none" stroke="#fff" strokeWidth={4.5} strokeOpacity={0.85} strokeLinecap="round" />
+            <path
+              d={d}
+              fill="none"
+              stroke="#1a56db"
+              strokeWidth={dotted ? 2 : 1.75}
+              strokeOpacity={dotted ? 0.7 : 0.85}
+              strokeLinecap="round"
+              strokeDasharray={dotted ? "0.1 5.5" : undefined}
+            />
+            {/* Endpoints: a dot at the highlight, a dot at the quote / pane. */}
+            <circle cx={s.x1} cy={s.y1} r={3.2} fill="#1a56db" stroke="#fff" strokeWidth={1.5} />
+            <circle cx={s.x2} cy={s.y2} r={3.2} fill={dotted ? "#fff" : "#1a56db"} stroke="#1a56db" strokeWidth={1.5} />
+          </g>
         );
       })}
     </svg>

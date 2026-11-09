@@ -1669,6 +1669,42 @@ export class Workbench {
     return lines;
   }
 
+  /**
+   * Tentative (DOTTED) passage->page links: annotations associated with the open
+   * subject page that have NOT been quoted into it yet. A pair that already has
+   * an EvidenceInstance is solid and is covered by passageEvidenceLines(), so it
+   * is skipped here. Presentation data only, like its solid counterpart.
+   */
+  passageAssociationLines(): {
+    associationId: string;
+    annotationId: AnnotationId;
+    sourceId: SourceId;
+    sourcePageIndex: number;
+  }[] {
+    const pageId = this.openSubjectPageId;
+    if (!pageId) return [];
+    const out: ReturnType<Workbench["passageAssociationLines"]> = [];
+    for (const assoc of this.data.subjectAssociations) {
+      if (assoc.destinationPageId !== pageId) continue;
+      const quoted = this.data.evidenceInstances.some(
+        (e) => e.annotationId === assoc.annotationId && e.destinationPageId === pageId,
+      );
+      if (quoted) continue;
+      const annotation = this.data.annotations.find((a) => a.id === assoc.annotationId);
+      if (!annotation || !this.openSourceIds.includes(annotation.sourceId)) continue;
+      out.push({
+        associationId: assoc.id,
+        annotationId: annotation.id,
+        sourceId: annotation.sourceId,
+        sourcePageIndex:
+          annotation.scope.kind === "pages"
+            ? annotation.scope.anchor.startPageIndex
+            : annotation.scope.anchor.pageIndex,
+      });
+    }
+    return out;
+  }
+
   /** Test-only: force the next `count` persist() calls to fail (R12 path). */
   forceNextSaveFailures(count: number): void {
     this.failNextSaves = count;

@@ -298,3 +298,47 @@ test("N03 + N08: Library -> Reader -> workspace transitions preserve the reader 
   });
   await expect(page.locator(".textLayer span").first()).toBeVisible({ timeout: 20_000 });
 });
+
+test("evidence lines run from the highlight itself to the quote in the page, crossing the PDF", async ({
+  page,
+}) => {
+  await openThreePaneWorkspace(page);
+  const line = page.locator('[data-testid="evidence-line"][data-line-status="solid"]').first();
+  await expect(line).toBeAttached();
+
+  // Pages re-fit after the panes settle, so poll until the line has re-anchored.
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(() => {
+          const svg = document.querySelector(
+            '[data-testid="passage-evidence-lines"]',
+          ) as SVGSVGElement;
+          const origin = svg.getBoundingClientRect();
+          const g = document.querySelector(
+            '[data-testid="evidence-line"][data-line-status="solid"]',
+          ) as SVGGElement;
+          const dots = g.querySelectorAll("circle");
+          const at = (c: Element) => ({
+            x: origin.left + Number(c.getAttribute("cx")),
+            y: origin.top + Number(c.getAttribute("cy")),
+          });
+          const start = at(dots[0]!);
+          const end = at(dots[1]!);
+          const frag = document.querySelector(".ito-highlight-fragment")!.getBoundingClientRect();
+          const chip = document.querySelector('[data-testid="evidence-chip"]')!.getBoundingClientRect();
+          const pane = document.querySelector('[data-testid="pane-scroll"]')!.getBoundingClientRect();
+          const within = (p: { x: number; y: number }, r: DOMRect) =>
+            p.x >= r.left - 4 && p.x <= r.right + 4 && p.y >= r.top - 4 && p.y <= r.bottom + 4;
+          return {
+            // Starts ON the highlight, well inside the PDF pane (not at its edge)...
+            startOnHighlight: within(start, frag),
+            insidePane: start.x < pane.right - 8,
+            // ...and ends at the quote chip in the page.
+            endOnQuote: within(end, chip),
+          };
+        }),
+      { timeout: 8_000 },
+    )
+    .toEqual({ startOnHighlight: true, insidePane: true, endOnQuote: true });
+});
