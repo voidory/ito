@@ -134,6 +134,36 @@ p.copied-comment::before {
 }
 
 /*
+ * FIX-ROTATED-PDF-SELECTION: pdf.js's TextLayer lays out spans in the page's
+ * UNROTATED coordinate space and signals the page rotation purely via the
+ * `data-main-rotation` attribute on the `.textLayer` element (see
+ * setLayerDimensions in pdfjs-dist). The actual rotation that maps those spans
+ * onto the rotated <canvas> glyphs lives in pdf.js's own `pdf_viewer.css`,
+ * which this project does NOT import — so without these rules a 90°/270° page
+ * rendered the canvas rotated while the selectable text layer stayed
+ * horizontal in the top-left corner. That desync is exactly why dragging along
+ * the visible vertical glyphs selected the wrong text / misaligned highlights.
+ *
+ * These mirror the upstream pdf.js rules (rotate + translate back into view),
+ * anchored at the layer's top-left so the rotated layer overlays the stage.
+ */
+.textLayer {
+  transform-origin: 0 0;
+}
+
+.textLayer[data-main-rotation="90"] {
+  transform: rotate(90deg) translateY(-100%);
+}
+
+.textLayer[data-main-rotation="180"] {
+  transform: rotate(180deg) translate(-100%, -100%);
+}
+
+.textLayer[data-main-rotation="270"] {
+  transform: rotate(270deg) translateX(-100%);
+}
+
+/*
  * FIX-HIGHLIGHT-OFFSET (3.1) page structure. The outer `.pdf-page` wrapper
  * stacks a page header ABOVE the inner stage; the stage is the exact viewport
  * box that all overlays position against.

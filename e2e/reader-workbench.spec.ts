@@ -150,7 +150,6 @@ test("reader overflow menu escapes the toolbar scroll container", async ({ page 
     if (!toolbar || !menu || !layer) return null;
     const toolbarRect = toolbar.getBoundingClientRect();
     const menuRect = menu.getBoundingClientRect();
-    const layerRect = layer.getBoundingClientRect();
     return {
       toolbar: { top: toolbarRect.top, bottom: toolbarRect.bottom, height: toolbarRect.height },
       menu: { top: menuRect.top, bottom: menuRect.bottom, left: menuRect.left, right: menuRect.right },

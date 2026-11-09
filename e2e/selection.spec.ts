@@ -97,68 +97,115 @@ test("rotated PDF selection follows visible glyph geometry at 90 and 270 degrees
     timeout: 20_000,
   });
   await expect(page.locator(".textLayer span").first()).toBeVisible({ timeout: 20_000 });
+  // Let the rotated text layers settle (transform + glyph layout) before the
+  // geometry is measured and the drag is performed.
+  await page.waitForTimeout(600);
 
   for (const rotation of [90, 270]) {
     const needle = "Rotated page at " + rotation + " degrees";
-    const path = await page.evaluate(({ needle, pageIndex }) => {
-      const page = [...document.querySelectorAll(".pdf-page")].find(
+    const pageIndex = rotation === 90 ? 0 : 2;
+
+    // Bring the target page into the viewport so the pointer drag lands on the
+    // visible glyphs. The 270° page is the third page, far down the scroll
+    // container; dragging without scrolling would aim at off-screen coordinates.
+    await page.evaluate((pageIndex) => {
+      const el = [...document.querySelectorAll(".pdf-page")].find(
         (el) => el.getAttribute("data-page-index") === String(pageIndex),
       );
-      const layer = page?.querySelector(".textLayer");
-      const span = layer && [...layer.querySelectorAll("span")].find((el) =>
-        el.firstChild?.nodeType === Node.TEXT_NODE && el.firstChild.textContent?.includes(needle),
-      );
-      const node = span?.firstChild;
-      if (!(node instanceof Text) || !span) return null;
-      const start = node.data.indexOf(needle);
-      if (start < 0) return null;
+      el?.scrollIntoView({ block: "center" });
+    }, pageIndex);
+    await page.waitForTimeout(300);
 
-      const charRects: DOMRect[] = [];
-      for (let i = start; i < start + needle.length; i++) {
-        const range = document.createRange();
-        range.setStart(node, i);
-        range.setEnd(node, i + 1);
-        charRects.push(range.getBoundingClientRect());
-      }
-      const first = charRects[0]!;
-      const last = charRects[charRects.length - 1]!;
-      const firstCenter = { x: first.left + first.width / 2, y: first.top + first.height / 2 };
-      const lastCenter = { x: last.left + last.width / 2, y: last.top + last.height / 2 };
-      const dx = lastCenter.x - firstCenter.x;
-      const dy = lastCenter.y - firstCenter.y;
-      const length = Math.hypot(dx, dy);
-      if (!length) return null;
-      const axis = { x: dx / length, y: dy / length };
-      const normal = { x: -axis.y, y: axis.x };
-      const project = (r: DOMRect) => [
-        [r.left, r.top], [r.right, r.top], [r.left, r.bottom], [r.right, r.bottom],
-      ].map(([x, y]) => x * axis.x + y * axis.y);
-      const firstAlong = project(first);
-      const lastAlong = project(last);
-      const across = firstCenter.x * normal.x + firstCenter.y * normal.y;
-      const point = (along: number) => ({
-        x: along * axis.x + across * normal.x,
-        y: along * axis.y + across * normal.y,
-      });
-      const startAlong = Math.min(...firstAlong) + 0.75;
-      const endAlong = Math.max(...lastAlong) - 0.75;
-      const startPoint = point(startAlong);
-      const endPoint = point(endAlong);
-      const target = {
-        left: Math.min(...charRects.map((r) => r.left)),
-        top: Math.min(...charRects.map((r) => r.top)),
-        right: Math.max(...charRects.map((r) => r.right)),
-        bottom: Math.max(...charRects.map((r) => r.bottom)),
-      };
-      return {
-        startPoint,
-        endPoint,
-        target,
-        vertical: target.bottom - target.top > (target.right - target.left) * 5,
-      };
-    }, { needle, pageIndex: rotation === 90 ? 0 : 2 });
+    // Measure the glyph geometry and derive a drag path along the visible
+    // baseline. Shared with the re-measure after we nudge the text into a safe
+    // band (clear of the toolbar / viewport edges).
+    const measurePath = () =>
+      page.evaluate(({ needle, pageIndex }) => {
+        const page = [...document.querySelectorAll(".pdf-page")].find(
+          (el) => el.getAttribute("data-page-index") === String(pageIndex),
+        );
+        const layer = page?.querySelector(".textLayer");
+        const span = layer && [...layer.querySelectorAll("span")].find((el) =>
+          el.firstChild?.nodeType === Node.TEXT_NODE && el.firstChild.textContent?.includes(needle),
+        );
+        const node = span?.firstChild;
+        if (!(node instanceof Text) || !span) return null;
+        const start = node.data.indexOf(needle);
+        if (start < 0) return null;
 
+        const charRects: DOMRect[] = [];
+        for (let i = start; i < start + needle.length; i++) {
+          const range = document.createRange();
+          range.setStart(node, i);
+          range.setEnd(node, i + 1);
+          charRects.push(range.getBoundingClientRect());
+        }
+        const first = charRects[0]!;
+        const last = charRects[charRects.length - 1]!;
+        const firstCenter = { x: first.left + first.width / 2, y: first.top + first.height / 2 };
+        const lastCenter = { x: last.left + last.width / 2, y: last.top + last.height / 2 };
+        const dx = lastCenter.x - firstCenter.x;
+        const dy = lastCenter.y - firstCenter.y;
+        const length = Math.hypot(dx, dy);
+        if (!length) return null;
+        const axis = { x: dx / length, y: dy / length };
+        const normal = { x: -axis.y, y: axis.x };
+        const project = (r: DOMRect) =>
+          ([
+            [r.left, r.top], [r.right, r.top], [r.left, r.bottom], [r.right, r.bottom],
+          ] as const).map(([x, y]) => x * axis.x + y * axis.y);
+        const firstAlong = project(first);
+        const lastAlong = project(last);
+        const across = firstCenter.x * normal.x + firstCenter.y * normal.y;
+        const point = (along: number) => ({
+          x: along * axis.x + across * normal.x,
+          y: along * axis.y + across * normal.y,
+        });
+        const startAlong = Math.min(...firstAlong) + 0.75;
+        const endAlong = Math.max(...lastAlong) - 0.75;
+        const startPoint = point(startAlong);
+        const endPoint = point(endAlong);
+        const target = {
+          left: Math.min(...charRects.map((r) => r.left)),
+          top: Math.min(...charRects.map((r) => r.top)),
+          right: Math.max(...charRects.map((r) => r.right)),
+          bottom: Math.max(...charRects.map((r) => r.bottom)),
+        };
+        return {
+          startPoint,
+          endPoint,
+          target,
+          vertical: target.bottom - target.top > (target.right - target.left) * 5,
+        };
+      }, { needle, pageIndex });
+
+    let path = await measurePath();
     expect(path, "fixture text should be measurable").not.toBeNull();
+
+    // The drag endpoints must sit over the glyphs, NOT in the reader header /
+    // toolbar above the page. `scrollIntoView({ block: "center" })` can leave
+    // the top of a vertical run tucked under the fixed toolbar (especially in a
+    // short viewport), which would make the press land on header UI and let the
+    // browser's native drag-select grab unrelated text. Nudge the scroll
+    // container so the whole run falls inside a safe band, then re-measure.
+    const viewportH = page.viewportSize()!.height;
+    const safeTop = 140; // clear of the reader toolbar
+    const safeBottom = viewportH - 40;
+    const bandTop = Math.min(path!.startPoint.y, path!.endPoint.y, path!.target.top);
+    const bandBottom = Math.max(path!.startPoint.y, path!.endPoint.y, path!.target.bottom);
+    let delta = 0;
+    if (bandTop < safeTop) delta = bandTop - safeTop; // scroll up (content down)
+    else if (bandBottom > safeBottom) delta = bandBottom - safeBottom;
+    if (delta !== 0) {
+      await page.evaluate((dy) => {
+        const scroller = document.querySelector('[data-testid="pane-scroll"]');
+        scroller?.scrollBy({ top: dy });
+      }, delta);
+      await page.waitForTimeout(250);
+      path = await measurePath();
+      expect(path, "fixture text should be measurable after scroll").not.toBeNull();
+    }
+
     expect(path!.vertical, "text should be visually vertical").toBe(true);
 
     // Follow the actual baseline from the first glyph to the last glyph.
@@ -167,7 +214,10 @@ test("rotated PDF selection follows visible glyph geometry at 90 and 270 degrees
     await page.mouse.move(path!.endPoint.x, path!.endPoint.y, { steps: 30 });
     await page.mouse.up();
 
-    await expect(page.getByTestId("live-selection-preview")).toBeVisible();
+    // The live-preview WRAPPER is a zero-size container of position:fixed pills,
+    // so it never has a bounding box of its own; assert on the rendered pill
+    // (and the toolbar) instead, which is what actually mirrors the selection.
+    await expect(page.locator(".ito-selection-live-preview").first()).toBeVisible();
     await expect(page.getByTestId("selection-toolbar")).toBeVisible();
 
     const measured = await page.evaluate(() => {
