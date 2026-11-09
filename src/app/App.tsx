@@ -9,6 +9,9 @@ import { NetworkSearch } from "./NetworkSearch";
 import { ThreeScene } from "./ThreeScene";
 import { BackupExportModal } from "./BackupExportModal";
 import { ImportStagingReport } from "./ImportStagingReport";
+import { SyncBanner } from "./SyncBanner";
+import { MobileReaderSheet } from "./MobileReaderSheet";
+import { CaptureProcessingQueue } from "./CaptureProcessingQueue";
 import { revealPresentation } from "./threeScene.map";
 import { installTestApi } from "./testApi";
 import type { StagedImport } from "../storage";
@@ -68,12 +71,16 @@ export function App(): JSX.Element {
   );
 
   const onSetViewMode = useCallback(
-    (mode: "files" | "nodes" | "history") => {
+    (mode: "files" | "nodes" | "history" | "captures") => {
       wb?.setViewMode(mode);
       bump();
     },
     [wb, bump],
   );
+
+  // M4/M5 (A21) deterministic Phone Reading toggle. When on (or on a <760px
+  // viewport) the Reader body collapses to the MobileReaderShell flow.
+  const [mobileMode, setMobileMode] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -172,8 +179,20 @@ export function App(): JSX.Element {
               transitions and creates ZERO durable records.
             */}
             <NetworkSearch wb={wb} categoryScope={state.categoryScope} bump={bump} />
-            {/* M3 backup/restore triggers (A18/A19): always reachable. */}
-            <span style={{ marginLeft: "auto", display: "flex", gap: "0.5rem", paddingRight: "1rem" }}>
+            {/* M3 backup/restore triggers (A18/A19) + M4 sync banner + M5 mobile toggle. */}
+            <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "0.5rem", paddingRight: "1rem" }}>
+              {/* M4 (§16.1, A20) remote-sync status + publish/refresh. The remote
+                  adapter is wired at runtime once Koofr credentials exist; the
+                  banner still shows status (and disables actions) without one. */}
+              <SyncBanner wb={wb} remote={null} onChange={bump} />
+              {/* M5 (A21) deterministic Phone Reading toggle. */}
+              <button
+                data-testid="toggle-mobile-mode"
+                data-active={mobileMode}
+                onClick={() => setMobileMode((v) => !v)}
+              >
+                {mobileMode ? "Exit mobile" : "Mobile"}
+              </button>
               <button data-testid="open-backup-export" onClick={() => setBackupModalOpen(true)}>
                 Backup
               </button>
@@ -207,7 +226,14 @@ export function App(): JSX.Element {
               }}
             />
           )}
-          {state.viewMode === "history" ? (
+          {state.viewMode === "captures" ? (
+            <div
+              data-testid="captures-view"
+              style={{ position: "fixed", inset: 0, top: "3rem", overflow: "auto" }}
+            >
+              <CaptureProcessingQueue wb={wb} onChange={bump} />
+            </div>
+          ) : state.viewMode === "history" ? (
             <div
               data-testid="history-view"
               style={{ position: "fixed", inset: 0, top: "3rem", overflow: "auto" }}
@@ -241,6 +267,23 @@ export function App(): JSX.Element {
               }}
               onImported={() => bump()}
             />
+          ) : mobileMode && state.openSourceIds.length === 1 ? (
+            // M4/M5 (A21) Phone Reading: a single-document reader whose scroll +
+            // zoom survive the related-writing bottom sheet round-trip.
+            <div
+              data-testid="mobile-reader-view"
+              style={{ position: "fixed", inset: 0, top: "3rem", overflow: "auto" }}
+            >
+              <MobileReaderSheet
+                wb={wb}
+                sourceId={state.openSourceIds[0]!}
+                onBackToLibrary={() => {
+                  wb.closeWorkspace();
+                  bump();
+                }}
+                onChange={bump}
+              />
+            </div>
           ) : (
             <Reader
               wb={wb}
@@ -274,8 +317,8 @@ function ViewSwitch({
   viewMode,
   onSetViewMode,
 }: {
-  viewMode: "files" | "nodes" | "history";
-  onSetViewMode: (mode: "files" | "nodes" | "history") => void;
+  viewMode: "files" | "nodes" | "history" | "captures";
+  onSetViewMode: (mode: "files" | "nodes" | "history" | "captures") => void;
 }): JSX.Element {
   return (
     <div
@@ -316,6 +359,15 @@ function ViewSwitch({
         onClick={() => onSetViewMode("history")}
       >
         History
+      </button>
+      <button
+        data-testid="view-captures"
+        role="tab"
+        aria-selected={viewMode === "captures"}
+        data-active={viewMode === "captures"}
+        onClick={() => onSetViewMode("captures")}
+      >
+        Captures
       </button>
     </div>
   );

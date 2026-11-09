@@ -603,7 +603,7 @@ export function installTestApi(wb: Workbench, bump: () => void): void {
       return wb.viewMode();
     },
     setViewMode(mode) {
-      wb.setViewMode(mode as "files" | "nodes" | "history");
+      wb.setViewMode(mode as "files" | "nodes" | "history" | "captures");
       bump();
     },
     sourceIsConnected(sourceId) {

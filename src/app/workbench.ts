@@ -375,7 +375,7 @@ export interface PassageEvidenceLine {
  * the Nodes concept-network canvas. This is SESSION VIEW STATE (relates D19) —
  * preserved across in-session transitions, writing NO durable record.
  */
-export type ViewMode = "files" | "nodes" | "history";
+export type ViewMode = "files" | "nodes" | "history" | "captures";
 
 /**
  * M4 (§15, A20) remote-sync status surfaced to the UI banner. `publishing`

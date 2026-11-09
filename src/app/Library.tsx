@@ -122,6 +122,105 @@ export function AddWebsiteModal({
 }
 
 /**
+ * M6 Zotero import surfacing (§2.3). A modal that accepts a raw Zotero export
+ * JSON (pasted into a textarea OR loaded from a chosen file) and feeds it to the
+ * existing `wb.importZoteroBundle(rawJson)` engine, then reports the summary.
+ * The engine method already exists; this only adds the visible UI.
+ */
+export function ImportZoteroModal({
+  wb,
+  onClose,
+  onImported,
+}: {
+  wb: Workbench;
+  onClose: () => void;
+  onImported: () => void;
+}): JSX.Element {
+  const [rawJson, setRawJson] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [summary, setSummary] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const takeFile = async (f: File | null): Promise<void> => {
+    if (!f) return;
+    const text = await f.text();
+    setRawJson(text);
+    setError(null);
+  };
+
+  const submit = async (): Promise<void> => {
+    if (rawJson.trim() === "") {
+      setError("Paste or choose a Zotero export JSON.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await wb.importZoteroBundle(rawJson);
+      setSummary(
+        `Added ${result.sourcesAdded} source(s), updated ${result.sourcesUpdated}; ` +
+          `added ${result.annotationsAdded} annotation(s), updated ${result.annotationsUpdated}.`,
+      );
+      onImported();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      data-testid="import-zotero-modal"
+      role="dialog"
+      aria-label="Import Zotero"
+      style={styles.modal}
+    >
+      <h3 style={{ marginTop: 0 }}>Import from Zotero</h3>
+      <label style={{ display: "block", marginBottom: "0.5rem", fontSize: "0.85rem", color: "#555" }}>
+        Paste the Zotero export JSON, or choose a file:
+      </label>
+      <textarea
+        data-testid="zotero-json-input"
+        value={rawJson}
+        placeholder='{"items": [ … ]}'
+        onChange={(e) => setRawJson(e.target.value)}
+        rows={6}
+        style={{ display: "block", width: "100%", boxSizing: "border-box", fontFamily: "monospace", fontSize: "0.8rem" }}
+      />
+      <label style={{ display: "inline-block", marginTop: "0.5rem", cursor: "pointer" }}>
+        <input
+          data-testid="zotero-file-input"
+          type="file"
+          accept=".json,application/json"
+          style={{ display: "none" }}
+          onChange={(e) => void takeFile(e.target.files?.[0] ?? null)}
+        />
+        <span style={{ fontSize: "0.85rem", color: "#1a56db" }}>Choose JSON file…</span>
+      </label>
+      {error && (
+        <p data-testid="zotero-import-error" role="alert" style={{ color: "#c5221f", fontSize: "0.85rem" }}>
+          {error}
+        </p>
+      )}
+      {summary && (
+        <p data-testid="zotero-import-summary" style={{ color: "#166534", fontSize: "0.85rem" }}>
+          {summary}
+        </p>
+      )}
+      <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end", marginTop: "0.5rem" }}>
+        <button data-testid="import-zotero-cancel" onClick={onClose} disabled={busy}>
+          Close
+        </button>
+        <button data-testid="zotero-import-submit" onClick={() => void submit()} disabled={busy}>
+          {busy ? "Importing…" : "Import"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
  * The Library is the DEFAULT entry (spec section 5). It lists all imported PDFs
  * organized by category and sorted, opens a document on double-click/tap, and
  * offers "Open together" to open a multi-selection in a shared workspace with
@@ -146,6 +245,7 @@ export function Library({
   const [sortBy, setSortBy] = useState<"title" | "importedAt">("title");
   const [selected, setSelected] = useState<Set<SourceId>>(new Set());
   const [addWebsiteOpen, setAddWebsiteOpen] = useState(false);
+  const [importZoteroOpen, setImportZoteroOpen] = useState(false);
   const categories = useMemo(() => wb.categories(), [wb, wb.rawData()]);
   const sections = useMemo(
     () => wb.librarySections(sortBy),
@@ -207,6 +307,13 @@ export function Library({
           >
             Add website…
           </button>
+          <button
+            data-testid="import-zotero-btn"
+            style={{ marginLeft: "0.75rem" }}
+            onClick={() => setImportZoteroOpen(true)}
+          >
+            Import Zotero
+          </button>
         </div>
       </header>
 
@@ -216,6 +323,16 @@ export function Library({
           onClose={() => setAddWebsiteOpen(false)}
           onImported={() => {
             setAddWebsiteOpen(false);
+            onImported?.();
+          }}
+        />
+      )}
+
+      {importZoteroOpen && (
+        <ImportZoteroModal
+          wb={wb}
+          onClose={() => setImportZoteroOpen(false)}
+          onImported={() => {
             onImported?.();
           }}
         />
