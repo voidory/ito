@@ -34,6 +34,7 @@ import {
   type AnchorResolution,
   type BrainData,
   type BrainId,
+  type BrainManifest,
   type Category,
   type CategoryId,
   type EvidenceInstance,
@@ -75,7 +76,20 @@ import {
   type DocumentJson,
   type EvidenceAttrs,
 } from "../editor";
-import { sha256Hex, type StorageAdapter } from "../storage";
+import {
+  exportBundleZip,
+  exportCoreBrainJson,
+  ingestPdfBinaries,
+  resolveBackupOptions,
+  stageImport as stageImportCodec,
+  commitStagedImport as commitStagedImportCodec,
+  sha256Hex,
+  strToU8,
+  type BackupOptions,
+  type IngestOptions,
+  type StagedImport,
+  type StorageAdapter,
+} from "../storage";
 
 /** An empty subject-page composition: one empty paragraph (never null). */
 function emptyDocJson(): DocumentJson {
@@ -366,6 +380,13 @@ export class Workbench {
    * the adapter at `open()` so offloaded status survives a reopen.
    */
   private offloadedAssetIds = new Set<string>();
+  /**
+   * The in-memory staged import held between `stageImport` and
+   * `commitStagedImport` (A19). NEVER mutates the live store; it is a parsed +
+   * validated candidate the UI can inspect (staging report) and either commit
+   * via 'Try Import Anyway' or discard. null = nothing staged.
+   */
+  private stagedImport: StagedImport | null = null;
 
   private constructor(
     private readonly storage: StorageAdapter,
@@ -582,6 +603,179 @@ export class Workbench {
     await this.storage.writeAsset(this.data.manifest.brainId, source.assetId, bytes);
     this.offloadedAssetIds.delete(source.assetId);
     return { attached: true };
+  }
+
+  // -- two-lane backup + staged import (D09, A18, A19) ----------------------
+
+  /**
+   * Export the live brain as a backup (D09). Reads the live BrainData, pulls
+   * each ticked source's binary bytes via `storage.readAsset`, and returns the
+   * serialized bytes + the omission-stamped manifest (A18). When the
+   * sourceBinaries box is ticked the result is a `.ito.zip` Lane-2 bundle;
+   * otherwise it is the Lane-1 `brain.ito.json` text as bytes. This never
+   * mutates the store.
+   */
+  async exportBackup(
+    options?: Partial<BackupOptions>,
+  ): Promise<{ bytes: Uint8Array; manifest: BrainManifest }> {
+    const resolved = resolveBackupOptions(options);
+    const { manifest, json } = exportCoreBrainJson(this.data, resolved);
+    if (!resolved.sourceBinaries) {
+      return { bytes: strToU8(json), manifest };
+    }
+    // Pull each source's binary bytes so the Lane-2 bundle can embed them. A
+    // source whose binary was offloaded simply contributes no asset entry.
+    const assets = new Map<string, Uint8Array>();
+    for (const source of this.data.sources) {
+      const bytes = await this.storage.readAsset(
+        this.data.manifest.brainId,
+        source.assetId,
+      );
+      if (bytes) assets.set(source.assetId, bytes);
+    }
+    const bytes = await exportBundleZip(this.data, resolved, assets);
+    return { bytes, manifest };
+  }
+
+  /**
+   * Stage an incoming backup for validation WITHOUT touching the live store
+   * (A19). Delegates to the pure staging validator and HOLDS the staged result
+   * in memory so the UI can render the staging report and the user can decide
+   * to commit (optionally lenient). Returns the staged outcome for inspection.
+   */
+  async stageImport(bundle: Uint8Array | string): Promise<StagedImport> {
+    const staged = await stageImportCodec(bundle);
+    this.stagedImport = staged;
+    return staged;
+  }
+
+  /** The currently staged import, if any (for the UI staging report). */
+  stagedImportState(): StagedImport | null {
+    return this.stagedImport;
+  }
+
+  /** Discard any held staged import without committing (Cancel). */
+  clearStagedImport(): void {
+    this.stagedImport = null;
+  }
+
+  /**
+   * Commit the held staged import (A19). For a 'ready' bundle it commits
+   * normally; for 'needs-confirmation' it commits ONLY with `opts.lenient`
+   * ('Try Import Anyway'); a 'hard-reject' never commits. On a successful
+   * commit it writes the resulting BrainData through `storage.writeBrain` and
+   * every asset through `storage.writeAsset`, replaces the in-memory BrainData,
+   * rebuilds the offloaded-binary cache, and clears the staged state. If the
+   * write throws, the PRIOR live data is retained (write-then-swap).
+   */
+  async commitStagedImport(opts?: {
+    lenient?: boolean;
+  }): Promise<{ committed: boolean; reason?: string }> {
+    if (!this.stagedImport) {
+      return { committed: false, reason: "no staged import" };
+    }
+    const result = await commitStagedImportCodec(this.stagedImport, opts);
+    if (!result.committed) {
+      return { committed: false, reason: result.reason };
+    }
+    const previous = this.data;
+    try {
+      await this.storage.writeBrain(result.data);
+      for (const [assetId, bytes] of result.assets) {
+        await this.storage.writeAsset(
+          result.data.manifest.brainId,
+          assetId,
+          bytes,
+        );
+      }
+      this.data = result.data;
+      this.saveError = null;
+    } catch (err) {
+      // Retain the prior live data on any write failure (R12 discipline).
+      this.data = previous;
+      this.saveError = {
+        message: err instanceof Error ? err.message : String(err),
+        atISO: new Date().toISOString(),
+      };
+      throw err;
+    }
+    await this.refreshBinaryAvailability();
+    this.stagedImport = null;
+    return { committed: true };
+  }
+
+  // -- batch PDF ingestion queue (D09) --------------------------------------
+
+  /**
+   * Ingest a batch of PDF files with bounded concurrency (D09). Each file is
+   * validated (%PDF- magic + per-file size guard), hashed to a sha256
+   * versionHash, then either HYDRATES a matching existing Source (writing the
+   * bytes) or CREATES a new Source. Non-PDFs and oversize files are rejected
+   * without a Source. The size guard (default 100 MB) and concurrency (default
+   * 2) are injectable for tests. Persists ONCE at the end when any new Source
+   * was created.
+   */
+  async enqueuePdfBinaries(
+    files: readonly { name: string; bytes: Uint8Array }[],
+    options?: IngestOptions,
+  ): Promise<
+    { sourceId: string; status: "hydrated" | "created" | "rejected"; reason?: string }[]
+  > {
+    let createdAny = false;
+
+    const results = await ingestPdfBinaries(
+      files,
+      async ({ name, bytes, versionHash }) => {
+        const existing = this.data.sources.find((s) => s.versionHash === versionHash);
+        if (existing) {
+          await this.storage.writeAsset(
+            this.data.manifest.brainId,
+            existing.assetId,
+            bytes,
+          );
+          this.offloadedAssetIds.delete(existing.assetId);
+          return { status: "hydrated", sourceId: existing.id };
+        }
+        const assetId = newAssetId();
+        const source: Source = {
+          id: newSourceId(),
+          kind: "pdf",
+          title: name,
+          assetId,
+          versionHash,
+          pageCount: 0,
+          importedAt: new Date().toISOString(),
+          category: "Uncategorized",
+        };
+        await this.storage.writeAsset(this.data.manifest.brainId, assetId, bytes);
+        this.data = {
+          ...this.data,
+          sources: [...this.data.sources, source],
+          manifest: {
+            ...this.data.manifest,
+            assetIndex: [
+              ...this.data.manifest.assetIndex,
+              {
+                assetId,
+                contentType: "application/pdf",
+                byteLength: bytes.byteLength,
+                contentHash: versionHash,
+              },
+            ],
+          },
+        };
+        createdAny = true;
+        return { status: "created", sourceId: source.id };
+      },
+      options,
+    );
+
+    if (createdAny) await this.persist();
+    return results.map((r) =>
+      r.reason === undefined
+        ? { sourceId: r.sourceId, status: r.status }
+        : { sourceId: r.sourceId, status: r.status, reason: r.reason },
+    );
   }
 
   /**
