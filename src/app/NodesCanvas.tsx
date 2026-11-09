@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   buildScene,
   categoryPigment,
@@ -232,16 +232,28 @@ export function NodesCanvas({
     setPan({ x: 0, y: 0 });
     commitZoom(1);
   }, [commitZoom]);
-  const onWheel = useCallback(
-    (e: React.WheelEvent<SVGSVGElement>): void => {
-      // Wheel up (negative deltaY) zooms in; down zooms out.
-      commitZoom(e.deltaY < 0 ? zoom * ZOOM_STEP : zoom / ZOOM_STEP);
-    },
-    [commitZoom, zoom],
-  );
+  // Wheel zooms the canvas. It MUST be a native non-passive listener: React's
+  // onWheel is passive, so preventDefault is ignored and the wheel would also
+  // scroll the surrounding page. The latest zoom handler is kept in a ref so the
+  // listener is attached once.
+  const wheelRef = useRef<(deltaY: number) => void>(() => undefined);
+  wheelRef.current = (deltaY: number): void => {
+    // Wheel up (negative deltaY) zooms in; down zooms out.
+    commitZoom(deltaY < 0 ? zoom * ZOOM_STEP : zoom / ZOOM_STEP);
+  };
 
   // --- §3.3 node drag + background pan gestures ----------------------------
   const svgRef = useRef<SVGSVGElement | null>(null);
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const onNativeWheel = (e: WheelEvent): void => {
+      e.preventDefault();
+      wheelRef.current(e.deltaY);
+    };
+    svg.addEventListener("wheel", onNativeWheel, { passive: false });
+    return () => svg.removeEventListener("wheel", onNativeWheel);
+  }, []);
   // Convert a client delta (px) into scene units using the current viewBox so
   // a drag tracks the pointer regardless of zoom / fit scaling.
   const toSceneDelta = useCallback(
@@ -586,7 +598,6 @@ export function NodesCanvas({
         data-suppress-motion={suppressMotion ? "true" : "false"}
         role="img"
         aria-label="Concept network"
-        onWheel={onWheel}
         onPointerDown={onBackgroundPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endGesture}

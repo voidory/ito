@@ -5,7 +5,7 @@
  *    Annotations, Date added) with sortable headers;
  *  - each source is a library-item row carrying the per-column cells + an
  *    annotation count read live from the workbench;
- *  - the collection tree lists one node per category and drives onScopeChange;
+ *  - the list is flat (no category sections or tree);
  *  - clicking a sortable header reorders the rows (title asc -> desc).
  */
 
@@ -30,10 +30,7 @@ afterEach(() => {
   container = null;
 });
 
-async function mount(
-  wb: Workbench,
-  onScopeChange: (c: string | null) => void = () => undefined,
-): Promise<HTMLElement> {
+async function mount(wb: Workbench): Promise<HTMLElement> {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -41,8 +38,6 @@ async function mount(
     root!.render(
       createElement(Library, {
         wb,
-        categoryScope: null,
-        onScopeChange,
         onOpen: () => undefined,
         onOpenTogether: () => undefined,
       }),
@@ -97,22 +92,38 @@ describe("Library — sortable table + collection tree (FEAT-002 3)", () => {
     );
   });
 
-  it("lists one collection-tree node per category and fires onScopeChange", async () => {
+  it("is one flat list: no category sections, tree or scope select", async () => {
     const wb = await Workbench.open(new InMemoryStorageAdapter());
     await seed(wb, "A", "Papers");
-    await seed(wb, "B", "Books");
-    const scopes: (string | null)[] = [];
-    const el = await mount(wb, (c) => scopes.push(c));
+    await seed(wb, "B", "References");
+    const el = await mount(wb);
 
-    const nodes = el.querySelectorAll('[data-testid="collection-node"]');
-    expect(Array.from(nodes).map((n) => n.getAttribute("data-category")).sort()).toEqual([
-      "Books",
-      "Papers",
-    ]);
-    await click(el.querySelector('[data-testid="collection-node"][data-category="Books"]')!);
-    expect(scopes).toContain("Books");
-    await click(el.querySelector('[data-testid="collection-all"]')!);
-    expect(scopes).toContain(null);
+    expect(el.querySelectorAll('[data-testid="library-table"]').length).toBe(1);
+    expect(el.querySelectorAll('[data-testid="library-item"]').length).toBe(2);
+    expect(el.querySelector('[data-testid="library-category"]')).toBeNull();
+    expect(el.querySelector('[data-testid="collection-tree"]')).toBeNull();
+    expect(el.querySelector('[data-testid="library-scope"]')).toBeNull();
+  });
+
+  it("delete asks first, then removes the PDF and its highlights", async () => {
+    const wb = await Workbench.open(new InMemoryStorageAdapter());
+    const a = await seed(wb, "Keep", "Papers");
+    const b = await seed(wb, "Remove", "Papers");
+    const el = await mount(wb);
+
+    await click(el.querySelector(`[data-testid="delete-source"][data-source-id="${b.id}"]`)!);
+    expect(el.querySelector('[data-testid="delete-confirm"]')).not.toBeNull();
+    // Nothing is deleted until confirmed.
+    expect(wb.rawData().sources.length).toBe(2);
+
+    await click(el.querySelector('[data-testid="delete-cancel"]')!);
+    expect(el.querySelector('[data-testid="delete-confirm"]')).toBeNull();
+    expect(wb.rawData().sources.length).toBe(2);
+
+    await click(el.querySelector(`[data-testid="delete-source"][data-source-id="${b.id}"]`)!);
+    await click(el.querySelector('[data-testid="delete-confirm-yes"]')!);
+    expect(wb.rawData().sources.map((s) => s.id)).toEqual([a.id]);
+    expect(el.querySelectorAll('[data-testid="library-item"]').length).toBe(1);
   });
 
   it("toggling a header flips the sort direction order of rows", async () => {

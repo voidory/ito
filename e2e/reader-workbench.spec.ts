@@ -43,10 +43,11 @@ async function openFirstDocument(page: Page, titleMatch?: RegExp): Promise<void>
 /** The fixture contains "quick brown fox" on each page. */
 const NEEDLE = "quick brown fox";
 
-test("library is the default view and lists imported PDFs by category", async ({ page }) => {
+test("library is the default view and lists imported PDFs in one flat table", async ({ page }) => {
   await bootLibrary(page);
   await expect(page.getByTestId("library")).toHaveAttribute("data-view", "library");
-  await expect(page.getByTestId("library-category").first()).toBeVisible();
+  await expect(page.getByTestId("library-table")).toBeVisible();
+  await expect(page.getByTestId("library-category")).toHaveCount(0);
   // Two real fixtures imported.
   expect(await page.getByTestId("library-item").count()).toBeGreaterThanOrEqual(2);
 });

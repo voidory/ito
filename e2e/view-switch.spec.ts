@@ -80,8 +80,9 @@ test("a category selected in Files carries into Nodes and filters the canvas", a
     return { ecology, economics, history };
   });
 
-  // Select the Ecology scope in Files (carried on the shared Workbench scope).
-  await page.getByTestId("library-scope").selectOption("Ecology");
+  // Scope to Ecology on the shared Workbench (the Library no longer has its own
+  // category picker; the scope is carried across the Files<->Nodes switch).
+  await page.evaluate(() => window.__ito.setCategoryScope("Ecology"));
   expect(await page.evaluate(() => window.__ito.categoryScope())).toBe("Ecology");
 
   // Switch to Nodes: only Ecology + Economics squircles (overlap via p2) render;

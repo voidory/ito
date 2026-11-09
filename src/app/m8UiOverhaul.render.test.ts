@@ -93,8 +93,6 @@ const PDF_BYTES = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 1, 2, 3]); // "%
 function libraryEl(wb: Workbench): ReturnType<typeof createElement> {
   return createElement(Library, {
     wb,
-    categoryScope: null,
-    onScopeChange: () => undefined,
     onOpen: () => undefined,
     onOpenTogether: () => undefined,
     onImported: () => undefined,

@@ -57,9 +57,12 @@ async function highlight(page: Page, needle = NEEDLE, pageIndex = 0): Promise<vo
 /** Open two papers together and create+open a subject with a quote from one. */
 async function openThreePaneWorkspace(page: Page): Promise<string> {
   await bootLibrary(page);
+  // Pick the two multi-page fixtures by title so the choice does not depend on
+  // the list order (the Multi-Column fixture is a single page and would not
+  // overflow a narrow pane).
   const items = page.getByTestId("library-item");
-  await items.nth(0).getByRole("checkbox").check();
-  await items.nth(1).getByRole("checkbox").check();
+  await items.filter({ hasText: "Sample Document" }).getByRole("checkbox").check();
+  await items.filter({ hasText: "Rotated" }).getByRole("checkbox").check();
   await page.getByTestId("open-together").click();
   await expect(page.getByTestId("reader")).toBeVisible();
   // Both source panes render real pdf.js text.
@@ -263,21 +266,12 @@ test("A08/R08 foundation: the passage-to-evidence line toggle changes presentati
   await expect.poll(() => page.locator('[data-testid="evidence-line"]').count()).toBeGreaterThan(0);
 });
 
-test("N03 + N08: Library -> Reader -> workspace transitions preserve category scope and the reader passage", async ({
+test("N03 + N08: Library -> Reader -> workspace transitions preserve the reader passage", async ({
   page,
 }) => {
   await bootLibrary(page);
 
-  // Scope the library to one category (the seeded fixtures live in distinct
-  // categories: "Papers" and "References").
-  const categories = await page.evaluate(() => window.__ito.categories());
-  expect(categories.length).toBeGreaterThanOrEqual(2);
-  await page.getByTestId("library-scope").selectOption(categories[0]!);
-  expect(await page.evaluate(() => window.__ito.categoryScope())).toBe(categories[0]);
-  // Only that category's items are listed now.
-  await expect(page.getByTestId("library-category")).toHaveCount(1);
-
-  // Open the scoped document into the reader.
+  // Open a document into the reader.
   await page.getByTestId("library-open").first().click();
   await expect(page.getByTestId("source-pane").first()).toHaveAttribute("data-ready", "true", {
     timeout: 20_000,
@@ -291,12 +285,9 @@ test("N03 + N08: Library -> Reader -> workspace transitions preserve category sc
   const passage = await scroller.evaluate((el) => el.scrollTop);
   expect(passage).toBeGreaterThan(0);
 
-  // Go back to the Library: the category scope is preserved (not reset to All).
+  // Go back to the Library.
   await page.getByTestId("back-to-library").click();
   await expect(page.getByTestId("library")).toBeVisible();
-  expect(await page.evaluate(() => window.__ito.categoryScope())).toBe(categories[0]);
-  await expect(page.getByTestId("library-scope")).toHaveValue(categories[0]!);
-  await expect(page.getByTestId("library-category")).toHaveCount(1);
 
   // Reopen the same document: source identity + a readable passage restore
   // (returning to the reader restores the source + a meaningful passage).

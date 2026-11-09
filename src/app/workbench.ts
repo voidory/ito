@@ -1060,6 +1060,55 @@ export class Workbench {
   }
 
   /**
+   * Permanently delete a source (PDF or website snapshot) from the library.
+   *
+   * Removes the Source record, its stored binary, its manifest asset-index
+   * entry, and every Annotation anchored to it (plus those annotations'
+   * styles and tentative SubjectAssociations). Quotes ALREADY inserted into
+   * Subject pages are deliberately KEPT, exactly as "delete highlight only"
+   * does: the quoted text survives verbatim and the (annotation, page) pair
+   * then derives as unresolved because the annotation is gone. Captures that
+   * pointed at the source are detached (sourceId -> null), not deleted.
+   * A no-op for an unknown id.
+   */
+  async deleteSource(sourceId: SourceId): Promise<void> {
+    const source = this.data.sources.find((s) => s.id === sourceId);
+    if (!source) return;
+
+    const doomedAnnotationIds = new Set(
+      this.data.annotations.filter((a) => a.sourceId === sourceId).map((a) => a.id),
+    );
+    const remainingStyles = Object.fromEntries(
+      Object.entries(this.data.presentation.annotationStyles ?? {}).filter(
+        ([id]) => !doomedAnnotationIds.has(id as AnnotationId),
+      ),
+    );
+
+    // Bytes first: if this throws nothing structured has changed yet.
+    await this.storage.deletePdfBinary(this.data.manifest.brainId, source.assetId);
+    this.offloadedAssetIds.delete(source.assetId);
+
+    this.data = {
+      ...this.data,
+      sources: this.data.sources.filter((s) => s.id !== sourceId),
+      annotations: this.data.annotations.filter((a) => a.sourceId !== sourceId),
+      subjectAssociations: this.data.subjectAssociations.filter(
+        (a) => !doomedAnnotationIds.has(a.annotationId),
+      ),
+      captures: this.data.captures.map((c) =>
+        c.sourceId === sourceId ? { ...c, sourceId: null } : c,
+      ),
+      manifest: {
+        ...this.data.manifest,
+        assetIndex: this.data.manifest.assetIndex.filter((a) => a.assetId !== source.assetId),
+      },
+      presentation: { ...this.data.presentation, annotationStyles: remainingStyles },
+    };
+    this.openSourceIds = this.openSourceIds.filter((id) => id !== sourceId);
+    await this.persist();
+  }
+
+  /**
    * Whether a source's PDF binary is locally available: "cached" when the
    * adapter still holds the asset bytes, "binary-offloaded" when they were
    * evicted (A17). Synchronous: it reads the `offloadedAssetIds` cache (kept in

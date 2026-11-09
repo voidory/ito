@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { Source, SourceId } from "../model";
 import type { Workbench } from "./workbench";
 import { importPdfFiles } from "./pdfImport";
@@ -251,27 +251,22 @@ export function ImportZoteroModal({
 
 /**
  * The Library is the DEFAULT entry (spec section 5). It lists all imported PDFs
- * organized by category and sorted, opens a document on double-click/tap, and
+ * as one flat, sortable table, opens a document on double-click/tap, and
  * offers "Open together" to open a multi-selection in a shared workspace with
  * NO implied automatic analysis.
  */
 export function Library({
   wb,
-  categoryScope,
-  onScopeChange,
   onOpen,
   onOpenTogether,
   onImported,
 }: {
   wb: Workbench;
-  categoryScope: string | null;
-  onScopeChange: (category: string | null) => void;
   onOpen: (id: SourceId) => void;
   onOpenTogether: (ids: SourceId[]) => void;
   /** Called after a website import so the shell can re-render the list. */
   onImported?: () => void;
 }): JSX.Element {
-  const [sortBy, setSortBy] = useState<"title" | "importedAt">("title");
   const [sortColumn, setSortColumn] = useState<LibrarySortColumn>("title");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [selected, setSelected] = useState<Set<SourceId>>(new Set());
@@ -285,11 +280,11 @@ export function Library({
     const count = await importPdfFiles(wb, Array.from(files));
     if (count > 0) onImported?.();
   };
-  const categories = useMemo(() => wb.categories(), [wb, wb.rawData()]);
-  const rawSections = useMemo(
-    () => wb.librarySections(sortBy),
-    [wb, sortBy, categoryScope, wb.rawData()],
-  );
+  // One flat list: a document is a document, whatever it was imported as.
+  const allSources = wb.rawData().sources;
+  // Ids awaiting delete confirmation (row button or bulk action).
+  const [pendingDelete, setPendingDelete] = useState<SourceId[] | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Apply the table-header sort (column + direction) on top of the workbench's
   // category grouping. Annotation counts are read live from the workbench.
@@ -318,10 +313,28 @@ export function Library({
     }
     return sortDir === "asc" ? r : -r;
   };
-  const sections = rawSections.map((s) => ({
-    category: s.category,
-    sources: s.sources.slice().sort(compare),
-  }));
+  const sources = allSources.slice().sort((a, b) => {
+    const r = compare(a, b);
+    // Stable, predictable tie-break so equal rows never shuffle between renders.
+    return r !== 0 ? r : a.title.localeCompare(b.title);
+  });
+
+  const confirmDelete = async (): Promise<void> => {
+    if (!pendingDelete) return;
+    setDeleting(true);
+    try {
+      for (const id of pendingDelete) await wb.deleteSource(id);
+      setSelected((prev) => {
+        const next = new Set(prev);
+        for (const id of pendingDelete) next.delete(id);
+        return next;
+      });
+      setPendingDelete(null);
+      onImported?.();
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const onHeaderSort = (col: LibrarySortColumn): void => {
     if (sortColumn === col) {
@@ -377,32 +390,6 @@ export function Library({
       <header style={styles.header}>
         <h2 style={{ margin: 0 }}>Library</h2>
         <div>
-          <label style={{ fontSize: "0.85rem", color: "#555", marginRight: "0.75rem" }}>
-            Category{" "}
-            <select
-              data-testid="library-scope"
-              value={categoryScope ?? ""}
-              onChange={(e) => onScopeChange(e.target.value === "" ? null : e.target.value)}
-            >
-              <option value="">All</option>
-              {categories.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label style={{ fontSize: "0.85rem", color: "#555" }}>
-            Sort by{" "}
-            <select
-              data-testid="library-sort"
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as "title" | "importedAt")}
-            >
-              <option value="title">Title</option>
-              <option value="importedAt">Imported</option>
-            </select>
-          </label>
           <button
             data-testid="import-pdf-btn"
             style={{ marginLeft: "0.75rem", fontWeight: 600 }}
@@ -430,6 +417,15 @@ export function Library({
           >
             Open together ({selected.size})
           </button>
+          {selected.size > 0 && (
+            <button
+              data-testid="delete-selected"
+              style={{ marginLeft: "0.75rem", color: "#b3261e" }}
+              onClick={() => setPendingDelete([...selected])}
+            >
+              Delete selected ({selected.size})
+            </button>
+          )}
           <button
             data-testid="add-website"
             style={{ marginLeft: "0.75rem" }}
@@ -468,92 +464,67 @@ export function Library({
         />
       )}
 
-      <div style={styles.layout}>
-        {/* Collection tree reusing the existing library categories. Selecting a
-            node drives the SAME scope the library-scope select carries. */}
-        <nav data-testid="collection-tree" aria-label="Collections" style={styles.tree}>
-          <button
-            type="button"
-            data-testid="collection-all"
-            aria-pressed={categoryScope == null}
-            style={{ ...styles.treeItem, fontWeight: categoryScope == null ? 700 : 400 }}
-            onClick={() => onScopeChange(null)}
-          >
-            All documents
-          </button>
-          {categories.map((c) => (
-            <button
-              key={c}
-              type="button"
-              data-testid="collection-node"
-              data-category={c}
-              aria-pressed={categoryScope === c}
-              style={{ ...styles.treeItem, fontWeight: categoryScope === c ? 700 : 400 }}
-              onClick={() => onScopeChange(c)}
-            >
-              {c}
-            </button>
-          ))}
-        </nav>
+      {pendingDelete && (
+        <DeleteConfirmBar
+          wb={wb}
+          ids={pendingDelete}
+          busy={deleting}
+          onConfirm={() => void confirmDelete()}
+          onCancel={() => setPendingDelete(null)}
+        />
+      )}
 
-        <div style={styles.tableWrap}>
-          {sections.length === 0 && (
-            <p data-testid="library-empty" style={{ color: "#777" }}>
-              No documents yet.
-            </p>
-          )}
+      <div style={styles.tableWrap}>
+        {sources.length === 0 && (
+          <p data-testid="library-empty" style={{ color: "#777" }}>
+            No documents yet.
+          </p>
+        )}
 
-          {sections.map((section) => (
-            <div
-              key={section.category}
-              data-testid="library-category"
-              data-category={section.category}
-            >
-              <h3 style={styles.categoryHeading}>{section.category}</h3>
-              <table data-testid="library-table" style={styles.table}>
-                <thead>
-                  <tr>
-                    <th style={styles.th} aria-hidden="true" />
-                    {LIBRARY_COLUMNS.map((col) => (
-                      <th key={col.key} style={styles.th}>
-                        <button
-                          type="button"
-                          data-testid={`library-sort-${col.key}`}
-                          aria-sort={
-                            sortColumn === col.key
-                              ? sortDir === "asc"
-                                ? "ascending"
-                                : "descending"
-                              : "none"
-                          }
-                          style={styles.sortHeader}
-                          onClick={() => onHeaderSort(col.key)}
-                        >
-                          {col.label}
-                          {sortColumn === col.key ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
-                        </button>
-                      </th>
-                    ))}
-                    <th style={styles.th} aria-hidden="true" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {section.sources.map((source) => (
-                    <LibraryRow
-                      key={source.id}
-                      wb={wb}
-                      source={source}
-                      annotations={annotationCount(source.id)}
-                      checked={selected.has(source.id)}
-                      onToggle={() => toggle(source.id)}
-                      onOpen={() => onOpen(source.id)}
-                    />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ))}
-        </div>
+        {sources.length > 0 && (
+          <table data-testid="library-table" style={styles.table}>
+            <thead>
+              <tr>
+                <th style={styles.th} aria-hidden="true" />
+                {LIBRARY_COLUMNS.map((col) => (
+                  <th key={col.key} style={styles.th}>
+                    <button
+                      type="button"
+                      data-testid={`library-sort-${col.key}`}
+                      aria-sort={
+                        sortColumn === col.key
+                          ? sortDir === "asc"
+                            ? "ascending"
+                            : "descending"
+                          : "none"
+                      }
+                      style={styles.sortHeader}
+                      onClick={() => onHeaderSort(col.key)}
+                    >
+                      {col.label}
+                      {sortColumn === col.key ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+                    </button>
+                  </th>
+                ))}
+                <th style={styles.th} aria-hidden="true" />
+              </tr>
+            </thead>
+            <tbody>
+              {sources.map((source) => (
+                <LibraryRow
+                  key={source.id}
+                  wb={wb}
+                  source={source}
+                  annotations={annotationCount(source.id)}
+                  checked={selected.has(source.id)}
+                  onToggle={() => toggle(source.id)}
+                  onOpen={() => onOpen(source.id)}
+                  onDelete={() => setPendingDelete([source.id])}
+                />
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </section>
     </section>
@@ -567,6 +538,7 @@ function LibraryRow({
   checked,
   onToggle,
   onOpen,
+  onDelete,
 }: {
   wb: Workbench;
   source: Source;
@@ -574,6 +546,7 @@ function LibraryRow({
   checked: boolean;
   onToggle: () => void;
   onOpen: () => void;
+  onDelete: () => void;
 }): JSX.Element {
   // A17: the source's PDF binary availability. Offloading evicts ONLY the bytes
   // (the Source + its annotations + citations survive), flipping the badge to
@@ -657,13 +630,65 @@ function LibraryRow({
         >
           Offload PDF Binary
         </button>
+        <button
+          data-testid="delete-source"
+          data-source-id={source.id}
+          aria-label={`Delete ${source.title}`}
+          title="Delete this document and its highlights"
+          onClick={onDelete}
+          style={{ fontSize: "0.75rem", marginLeft: "0.4rem", color: "#b3261e" }}
+        >
+          Delete
+        </button>
       </td>
     </tr>
   );
 }
 
+/**
+ * Inline confirmation shown above the table before anything is deleted. States
+ * exactly what goes (the file + its highlights) and what stays (quotes already
+ * inserted into Subject pages keep their text).
+ */
+function DeleteConfirmBar({
+  wb,
+  ids,
+  busy,
+  onConfirm,
+  onCancel,
+}: {
+  wb: Workbench;
+  ids: readonly SourceId[];
+  busy: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}): JSX.Element {
+  const sources = wb.rawData().sources.filter((s) => ids.includes(s.id));
+  const highlights = ids.reduce((n, id) => n + wb.annotationsForSource(id).length, 0);
+  const what =
+    sources.length === 1 ? `“${sources[0]!.title}”` : `${sources.length} documents`;
+  return (
+    <div data-testid="delete-confirm" role="alertdialog" aria-label="Confirm delete" className="ito-confirm-bar">
+      <span>
+        Delete {what}
+        {highlights > 0 ? ` and its ${highlights} highlight${highlights === 1 ? "" : "s"}` : ""}? Quotes
+        already inserted into Subject pages keep their text but will no longer link back to the source.
+        This can’t be undone.
+      </span>
+      <span className="ito-confirm-actions">
+        <button data-testid="delete-cancel" onClick={onCancel} disabled={busy}>
+          Cancel
+        </button>
+        <button data-testid="delete-confirm-yes" className="ito-confirm-danger" onClick={onConfirm} disabled={busy}>
+          {busy ? "Deleting…" : "Delete"}
+        </button>
+      </span>
+    </div>
+  );
+}
+
 const styles: Record<string, React.CSSProperties> = {
-  dropRoot: { minHeight: "100%" },
+  dropRoot: { height: "100%", overflowY: "auto" },
   root: { padding: "1.5rem", maxWidth: "72rem", margin: "0 auto" },
   layout: { display: "flex", gap: "1.25rem", alignItems: "flex-start" },
   tree: {

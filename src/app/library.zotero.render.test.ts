@@ -34,8 +34,6 @@ async function mount(wb: Workbench, onImported: () => void): Promise<HTMLElement
     root!.render(
       createElement(Library, {
         wb,
-        categoryScope: null,
-        onScopeChange: () => undefined,
         onOpen: () => undefined,
         onOpenTogether: () => undefined,
         onImported,

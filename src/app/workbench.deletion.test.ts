@@ -143,3 +143,42 @@ describe("D02 — deleteAnnotationAndQuotes snapshots then removes only the matc
     expect(wb.rawData().revisions.length).toBe(before);
   });
 });
+
+describe("deleteSource removes the document but never the quotes already written", () => {
+  it("drops the source, its binary, annotations and associations; keeps evidence + atoms", async () => {
+    const storage = new InMemoryStorageAdapter();
+    const wb = await Workbench.open(storage);
+    const doomed = await importOne(wb);
+    const other = await wb.importSource({
+      title: "Other",
+      bytes: new Uint8Array([9, 9, 9]),
+      versionHash: "hash-Other",
+      pageCount: 1,
+    });
+    const a = await annotate(wb, doomed, "a quote that outlives its pdf");
+    const page = await wb.createSubjectPage("S");
+    const e = await wb.insertEvidenceIntoPage(a.annotation.id, page.id, { pos: null });
+    wb.openSource(doomed.id);
+
+    await wb.deleteSource(doomed.id);
+
+    const data = wb.rawData();
+    expect(data.sources.map((s) => s.id)).toEqual([other.id]);
+    expect(data.annotations.some((x) => x.sourceId === doomed.id)).toBe(false);
+    expect(data.manifest.assetIndex.some((x) => x.assetId === doomed.assetId)).toBe(false);
+    expect(await storage.readAsset(data.manifest.brainId, doomed.assetId)).toBeNull();
+    expect(wb.snapshot().openSourceIds).not.toContain(doomed.id);
+
+    // The quote stays in the page, with its text.
+    expect(data.evidenceInstances.some((x) => x.id === e.id)).toBe(true);
+    const doc = hydrateState(wb.subjectDocJson(page.id) as DocumentJson).doc;
+    expect(evidenceInOrder(doc)[0]!.attrs.quotedText).toBe("a quote that outlives its pdf");
+  });
+
+  it("is a no-op for an unknown source id", async () => {
+    const wb = await Workbench.open(new InMemoryStorageAdapter());
+    const before = wb.rawData().sources.length;
+    await wb.deleteSource("nope" as SourceId);
+    expect(wb.rawData().sources.length).toBe(before);
+  });
+});

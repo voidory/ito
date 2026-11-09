@@ -122,11 +122,11 @@ export function App(): JSX.Element {
     if (wb.rawData().sources.length > 0) return;
     setImporting(true);
     void (async () => {
-      await importFixture(wb, fixture3, "Sample Document (3 pages)", "Papers");
-      await importFixture(wb, fixtureMulti, "Multi-Column Fixture", "References");
+      await importFixture(wb, fixture3, "Sample Document (3 pages)");
+      await importFixture(wb, fixtureMulti, "Multi-Column Fixture");
       // A third paper so a reader pane can be switched to a third source while
       // the same subject stays open (spec section 8.2 note).
-      await importFixture(wb, fixtureRotated, "Rotated Fixture", "Papers");
+      await importFixture(wb, fixtureRotated, "Rotated Fixture");
       bump();
     })();
   }, [wb, importing, bump]);
@@ -297,11 +297,6 @@ export function App(): JSX.Element {
           ) : state.openSourceIds.length === 0 ? (
             <Library
               wb={wb}
-              categoryScope={state.categoryScope}
-              onScopeChange={(category) => {
-                wb.setCategoryScope(category);
-                bump();
-              }}
               onOpen={(id: SourceId) => {
                 wb.openSource(id);
                 bump();
@@ -831,11 +826,10 @@ async function importFixture(
   wb: NonNullable<ReturnType<typeof useWorkbench>["wb"]>,
   url: string,
   title: string,
-  category: string,
 ): Promise<void> {
   const res = await fetch(url);
   const bytes = new Uint8Array(await res.arrayBuffer());
   const versionHash = await hashBytes(bytes);
   const doc = await loadDocument(bytes.slice());
-  await wb.importSource({ title, bytes, versionHash, pageCount: doc.numPages, category });
+  await wb.importSource({ title, bytes, versionHash, pageCount: doc.numPages });
 }
