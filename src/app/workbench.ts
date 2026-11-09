@@ -18,8 +18,10 @@ import {
   createEmptyBrainData,
   deriveSubjectReferenceStatus,
   deriveSubjectReferences,
+  migrateBrainData,
   newAnnotationId,
   newAssetId,
+  newCaptureId,
   newCategoryId,
   newEvidenceInstanceId,
   newCheckpointId,
@@ -35,10 +37,14 @@ import {
   type AnnotationScope,
   type AnnotationStyleRecord,
   type AnchorResolution,
+  type AreaAnchor,
   type AssetIndexEntry,
   type BrainData,
   type BrainId,
   type BrainManifest,
+  type Capture,
+  type CaptureHandling,
+  type CaptureId,
   type Category,
   type CategoryId,
   type Checkpoint,
@@ -94,8 +100,10 @@ import {
   sha256Hex,
   strToU8,
   parseZoteroBundle,
+  KoofrStorageAdapter,
   type BackupOptions,
   type IngestOptions,
+  type RemotePointer,
   type StagedImport,
   type StorageAdapter,
 } from "../storage";
@@ -103,6 +111,34 @@ import {
 /** An empty subject-page composition: one empty paragraph (never null). */
 function emptyDocJson(): DocumentJson {
   return { type: "doc", content: [{ type: "paragraph" }] };
+}
+
+/**
+ * Append the capture's text as a new paragraph to a subject page's document
+ * JSON (M5, §16.3). Pure + DOM-free: it only adds a paragraph node to the doc's
+ * content array, never rewriting existing composition. A missing/empty content
+ * array is coerced to a valid single-paragraph doc first.
+ */
+function appendParagraphToDoc(documentJson: unknown, text: string): DocumentJson {
+  const base =
+    documentJson && typeof documentJson === "object"
+      ? (structuredClone(documentJson) as DocumentJson)
+      : emptyDocJson();
+  const content = Array.isArray(base.content) ? [...base.content] : [];
+  const trimmed = text.trim();
+  const paragraph =
+    trimmed.length > 0
+      ? { type: "paragraph", content: [{ type: "text", text }] }
+      : { type: "paragraph" };
+  content.push(paragraph);
+  return { type: "doc", content };
+}
+
+/** Derive a short subject-page title from a capture's text (M5, create-subject). */
+function deriveCaptureTitle(text: string): string {
+  const firstLine = text.split(/\r?\n/)[0]?.trim() ?? "";
+  const cleaned = firstLine.length > 0 ? firstLine : "Captured thought";
+  return cleaned.length > 80 ? `${cleaned.slice(0, 77)}...` : cleaned;
 }
 
 /**
@@ -341,6 +377,36 @@ export interface PassageEvidenceLine {
  */
 export type ViewMode = "files" | "nodes" | "history";
 
+/**
+ * M4 (§15, A20) remote-sync status surfaced to the UI banner. `publishing`
+ * while a publish is in flight, `up-to-date` once a publish/refresh succeeds,
+ * `offline`/`stale` on a failure (with a human-readable `reason`).
+ * `lastSyncedRevision` is the publicationRevision last known to be live on the
+ * remote (null before any successful sync).
+ */
+export interface SyncStatus {
+  readonly state: "stale" | "up-to-date" | "offline" | "publishing";
+  readonly lastSyncedRevision: number | null;
+  readonly reason?: string;
+}
+
+/**
+ * M5 (§16.2) input to createMobileCapture. A capture is a loose thought/quote;
+ * creating one NEVER creates a Page/Category/Relationship (A23).
+ */
+export interface MobileCaptureInput {
+  readonly content: string;
+  readonly sourceId?: SourceId;
+  readonly anchor?: TextAnchor | ScopeAnchor | AreaAnchor;
+  readonly targetPageId?: PageId;
+  readonly originDevice?: string;
+  /** When true, the capture is saved as `pending` (queued for upload). */
+  readonly queueForUpload?: boolean;
+}
+
+/** M5 (§16.3) the disposition the desktop reviewer chose for a capture. */
+export type CaptureAction = "insert-into-page" | "create-subject" | "dismiss";
+
 /** Immutable snapshot of workbench state the UI renders from. */
 export interface WorkbenchState {
   readonly brainId: BrainId;
@@ -514,6 +580,15 @@ export class Workbench {
    * `flushPendingRevision()` commits it. null = nothing buffered.
    */
   private pendingProse: PendingProseRevision | null = null;
+
+  /**
+   * M4 (§15, A20) backing fields for syncStatus(). Updated by publishToRemote /
+   * refreshFromRemote. `lastSyncedRevision` is the publicationRevision last
+   * known to be live on the remote; null before any successful sync.
+   */
+  private syncState: SyncStatus["state"] = "stale";
+  private lastSyncedRevision: number | null = null;
+  private syncReason: string | undefined = undefined;
 
   private constructor(
     private readonly storage: StorageAdapter,
@@ -3013,6 +3088,24 @@ export class Workbench {
 
     for (let i = startIdx; i <= targetIdx; i += 1) {
       const rev = revisions[i]!;
+      // A `restore` revision records its `afterSnapshot` as an ARRAY of
+      // { pageId, documentJson } (see restoreRevision). Replay each entry so a
+      // revision recorded AFTER a mid-segment restore reconstructs the restored
+      // page content, even before the next checkpoint.
+      if (rev.kind === "restore") {
+        const entries = rev.afterSnapshot as
+          | { pageId?: string; documentJson?: unknown }[]
+          | undefined;
+        if (!Array.isArray(entries)) {
+          missingIds.push(rev.id);
+          continue;
+        }
+        for (const entry of entries) {
+          if (!entry || typeof entry.pageId !== "string") continue;
+          pages.set(entry.pageId, entry.documentJson);
+        }
+        continue;
+      }
       if (rev.kind !== "page-prose") continue;
       const after = rev.afterSnapshot as
         | { pageId?: string; documentJson?: unknown }
@@ -3161,6 +3254,386 @@ export class Workbench {
     };
     this.data = { ...this.data, revisionComments };
     await this.persist();
+  }
+
+  // -- M4 remote sync (Koofr): safe atomic publication + resilient refresh --
+
+  /**
+   * M4 (§15, A20) current remote-sync status for the UI banner. Reflects the
+   * last publish/refresh outcome. `publishing` only while a publish is in
+   * flight; `up-to-date` after a verified success; `offline`/`stale` with a
+   * reason on failure.
+   */
+  syncStatus(): SyncStatus {
+    return {
+      state: this.syncState,
+      lastSyncedRevision: this.lastSyncedRevision,
+      ...(this.syncReason !== undefined ? { reason: this.syncReason } : {}),
+    };
+  }
+
+  /**
+   * M4 (§15, A20, H06) publish the live brain to a Koofr/WebDAV remote using the
+   * POINTER-LAST protocol:
+   *
+   *   Step 1 (H06 economical assets): upload ONLY assets not already present on
+   *     the remote (probe each `assets/<id>`); unchanged PDFs and history
+   *     archives are never re-uploaded.
+   *   Step 2: write `snapshots/rev-<publicationRevision>.json` and VERIFY the
+   *     read-back integrity hash (sha256Hex of the snapshot JSON bytes).
+   *   Step 3 (pointer LAST): update `current-revision.json` ONLY after steps 1
+   *     and 2 succeed and verify.
+   *
+   * If any step before step 3 throws, the prior remote `current-revision.json`
+   * is left untouched and the failure is surfaced through syncStatus().
+   */
+  async publishToRemote(remote: KoofrStorageAdapter): Promise<SyncStatus> {
+    // Flush any buffered prose so the snapshot reflects settled state.
+    if (this.pendingProse) await this.flushPendingRevision();
+
+    this.syncState = "publishing";
+    this.syncReason = undefined;
+    const publicationRevision = this.data.manifest.publicationRevision;
+    try {
+      await remote.ensureLayout();
+
+      // Step 1 (H06): upload only missing assets.
+      for (const entry of this.data.manifest.assetIndex) {
+        const assetId = entry.assetId as string;
+        const already = await remote.hasAsset(assetId);
+        if (already) continue;
+        const bytes = await this.storage.readAsset(
+          this.data.manifest.brainId,
+          assetId,
+        );
+        // A locally-offloaded binary (A17) simply cannot be re-published; skip
+        // it rather than fail the whole publish.
+        if (!bytes) continue;
+        await remote.writeAsset(assetId, bytes);
+      }
+
+      // Step 2: write the immutable snapshot and verify read-back integrity.
+      const snapshotJson = JSON.stringify(this.data);
+      const expectedHash = await sha256Hex(strToU8(snapshotJson));
+      await remote.writeSnapshot(publicationRevision, snapshotJson);
+      const readBack = await remote.readSnapshot(publicationRevision);
+      if (readBack === null) {
+        throw new Error("snapshot read-back missing after write");
+      }
+      const actualHash = await sha256Hex(strToU8(readBack));
+      if (actualHash !== expectedHash) {
+        throw new Error("snapshot read-back integrity hash mismatch");
+      }
+
+      // Step 3 (pointer LAST): advance the remote pointer only now.
+      const pointer: RemotePointer = {
+        publicationRevision,
+        snapshotHash: expectedHash,
+        updatedAt: new Date().toISOString(),
+      };
+      await remote.writePointer(pointer);
+
+      this.syncState = "up-to-date";
+      this.lastSyncedRevision = publicationRevision;
+      this.syncReason = undefined;
+      return this.syncStatus();
+    } catch (err) {
+      // A failure BEFORE step 3 leaves the prior remote pointer intact (we never
+      // touched it). Surface the failure without advancing lastSyncedRevision.
+      this.syncState = "offline";
+      this.syncReason = err instanceof Error ? err.message : String(err);
+      return this.syncStatus();
+    }
+  }
+
+  /**
+   * M4 (A20) resilient phone/client refresh. Reads `current-revision.json`,
+   * fetches the target snapshot, validates it through the existing staging
+   * validator, verifies the integrity hash, and ONLY THEN replaces active
+   * state.
+   *
+   * A20 guarantee: on a dropped fetch, a corrupted/invalid snapshot, or an
+   * integrity mismatch, the prior local working copy is retained UNTOUCHED
+   * (this.data is never mutated) and syncStatus() is set to a stale/offline
+   * state with a reason.
+   */
+  async refreshFromRemote(remote: KoofrStorageAdapter): Promise<SyncStatus> {
+    try {
+      const pointer = await remote.readPointer();
+      if (!pointer) {
+        this.syncState = "offline";
+        this.syncReason = "no remote pointer (current-revision.json absent)";
+        return this.syncStatus();
+      }
+
+      const snapshotJson = await remote.readSnapshot(pointer.publicationRevision);
+      if (snapshotJson === null) {
+        this.syncState = "stale";
+        this.syncReason = `remote snapshot rev-${pointer.publicationRevision} missing`;
+        return this.syncStatus();
+      }
+
+      // Integrity: the snapshot bytes must hash to the pointer's recorded hash.
+      const actualHash = await sha256Hex(strToU8(snapshotJson));
+      if (actualHash !== pointer.snapshotHash) {
+        this.syncState = "stale";
+        this.syncReason = "remote snapshot failed integrity verification";
+        return this.syncStatus();
+      }
+
+      // Validate the snapshot shape through the staging validator WITHOUT
+      // touching the live store. A hard-reject means a corrupted/invalid
+      // snapshot; retain the local copy.
+      const staged = await this.stageImport(snapshotJson);
+      if (staged.outcome === "hard-reject") {
+        this.clearStagedImport();
+        this.syncState = "stale";
+        this.syncReason = `remote snapshot rejected: ${staged.reason}`;
+        return this.syncStatus();
+      }
+
+      // Parse into a fully-populated BrainData only after validation passed.
+      const next = migrateBrainData(JSON.parse(snapshotJson));
+      this.clearStagedImport();
+      this.data = next;
+      this.syncState = "up-to-date";
+      this.lastSyncedRevision = pointer.publicationRevision;
+      this.syncReason = undefined;
+      return this.syncStatus();
+    } catch (err) {
+      // A20: any interruption/corruption leaves this.data untouched.
+      this.clearStagedImport();
+      this.syncState = "offline";
+      this.syncReason = err instanceof Error ? err.message : String(err);
+      return this.syncStatus();
+    }
+  }
+
+  // -- M5 mobile thought capture + idempotent desktop queue -----------------
+
+  /** All captures in the live brain (for the mobile composer / desktop queue). */
+  captures(): readonly Capture[] {
+    return this.data.captures;
+  }
+
+  /** The capture-handling audit log (dedupe key store for A22 idempotency). */
+  captureHandlings(): readonly CaptureHandling[] {
+    return this.data.captureHandlings ?? [];
+  }
+
+  /**
+   * M5 (§16.2, A23) create a mobile Capture saved locally IMMEDIATELY. The
+   * capture is a loose thought/quote: creating one (with or WITHOUT a source)
+   * MUST NEVER create a Page/Category/Relationship graph node. It is only added
+   * to this.data.captures and persisted. Status is `"local"` by default, or
+   * `"pending"` when queued for upload.
+   */
+  async createMobileCapture(input: MobileCaptureInput): Promise<Capture> {
+    const now = new Date().toISOString();
+    const status: Capture["status"] = input.queueForUpload ? "pending" : "local";
+    const capture: Capture = {
+      id: newCaptureId(),
+      // Keep the canonical `sourceId` field assignable (SourceId | null) and
+      // mirror an explicit optional sourceId when provided.
+      sourceId: input.sourceId ?? null,
+      text: input.content,
+      createdAt: now,
+      ...(input.originDevice !== undefined ? { originDevice: input.originDevice } : {}),
+      ...(input.anchor !== undefined ? { anchor: input.anchor } : {}),
+      ...(input.targetPageId !== undefined ? { targetPageId: input.targetPageId } : {}),
+      status,
+    };
+    // A23: ONLY the captures collection is touched. No Page/Category/Relationship.
+    this.data = { ...this.data, captures: [...this.data.captures, capture] };
+    await this.persist();
+    return capture;
+  }
+
+  /**
+   * M5 (§16.2) upload every local/pending capture to the remote `captures/`
+   * collection as an INDEPENDENT item (never overwriting the published PC brain
+   * snapshot) and transition its status to `"uploaded"`. On an offline/error
+   * for a capture, its status is kept `"pending"` with an honest error recorded
+   * through syncStatus; the capture is never thrown away. Returns the per-id
+   * outcome.
+   */
+  async uploadPendingCaptures(
+    remote: KoofrStorageAdapter,
+  ): Promise<{ captureId: string; status: "uploaded" | "pending"; error?: string }[]> {
+    const results: { captureId: string; status: "uploaded" | "pending"; error?: string }[] = [];
+    let ensured = false;
+    const nextCaptures = this.data.captures.slice();
+    let changed = false;
+    let lastError: string | undefined;
+
+    for (let i = 0; i < nextCaptures.length; i += 1) {
+      const cap = nextCaptures[i]!;
+      if (cap.status !== "local" && cap.status !== "pending") continue;
+      try {
+        if (!ensured) {
+          await remote.ensureLayout();
+          ensured = true;
+        }
+        await remote.writeCapture(cap.id as string, JSON.stringify(cap));
+        nextCaptures[i] = { ...cap, status: "uploaded" };
+        changed = true;
+        results.push({ captureId: cap.id as string, status: "uploaded" });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        lastError = message;
+        // Keep the capture queued for a later retry; do not discard it.
+        if (cap.status !== "pending") {
+          nextCaptures[i] = { ...cap, status: "pending" };
+          changed = true;
+        }
+        results.push({ captureId: cap.id as string, status: "pending", error: message });
+      }
+    }
+
+    if (changed) {
+      this.data = { ...this.data, captures: nextCaptures };
+      await this.persist();
+    }
+    if (lastError !== undefined) {
+      this.syncState = "offline";
+      this.syncReason = lastError;
+    }
+    return results;
+  }
+
+  /**
+   * M5 (§16.3, A22) pull remote captures from the `captures/` collection into
+   * the live brain, STRICTLY idempotent by CaptureId: a capture already present
+   * in this.data.captures OR already recorded in this.data.captureHandlings is
+   * incorporated AT MOST ONCE, so repeated / out-of-order pulls are safe.
+   * Returns the ids newly incorporated.
+   */
+  async pullRemoteCaptures(remote: KoofrStorageAdapter): Promise<string[]> {
+    const ids = await remote.listCaptureIds();
+    const knownCaptureIds = new Set(this.data.captures.map((c) => c.id as string));
+    const handledIds = new Set(
+      (this.data.captureHandlings ?? []).map((h) => h.captureId as string),
+    );
+
+    const incorporated: string[] = [];
+    const additions: Capture[] = [];
+    for (const id of ids) {
+      // A22: dedupe against BOTH captures and handlings.
+      if (knownCaptureIds.has(id) || handledIds.has(id)) continue;
+      const json = await remote.readCapture(id);
+      if (json === null) continue;
+      let parsed: Capture;
+      try {
+        parsed = JSON.parse(json) as Capture;
+      } catch {
+        continue;
+      }
+      if (!parsed || typeof parsed.id !== "string") continue;
+      // Guard against a duplicate id within this same pull batch.
+      if (knownCaptureIds.has(parsed.id as string)) continue;
+      knownCaptureIds.add(parsed.id as string);
+      additions.push(parsed);
+      incorporated.push(parsed.id as string);
+    }
+
+    if (additions.length > 0) {
+      this.data = { ...this.data, captures: [...this.data.captures, ...additions] };
+      await this.persist();
+    }
+    return incorporated;
+  }
+
+  /**
+   * M5 (§16.3, A22) act on a pulled capture. STRICTLY idempotent: if the capture
+   * was already handled (present in captureHandlings) this is a no-op.
+   *
+   *  - `insert-into-page`: insert the capture's thought/quote into its target
+   *    Page and record a CaptureHandling with disposition `incorporated-quote`.
+   *  - `create-subject`: DELIBERATELY create a new subject Page from the capture
+   *    (disposition `created-subject`). This is the ONLY path in the capture
+   *    engine that creates a Page, and only on this explicit user action.
+   *  - `dismiss`: record disposition `dismissed`.
+   *
+   * In all cases the original Capture record is preserved with an updated
+   * `status`, and a CaptureHandling is appended.
+   */
+  async handleCapture(
+    captureId: CaptureId,
+    action: CaptureAction,
+  ): Promise<CaptureHandling | null> {
+    const idStr = captureId as string;
+    // A22: already handled -> no-op (idempotent).
+    if ((this.data.captureHandlings ?? []).some((h) => (h.captureId as string) === idStr)) {
+      return (
+        (this.data.captureHandlings ?? []).find(
+          (h) => (h.captureId as string) === idStr,
+        ) ?? null
+      );
+    }
+    const idx = this.data.captures.findIndex((c) => (c.id as string) === idStr);
+    if (idx < 0) return null;
+    const capture = this.data.captures[idx]!;
+    const now = new Date().toISOString();
+
+    let pages = this.data.pages;
+    let destinationPageId: PageId | undefined;
+    let disposition: CaptureHandling["disposition"];
+    let nextStatus: Capture["status"];
+
+    if (action === "insert-into-page") {
+      const targetId = capture.targetPageId;
+      const targetIdx =
+        targetId != null ? this.data.pages.findIndex((p) => p.id === targetId) : -1;
+      if (targetIdx < 0) {
+        // No valid target page: cannot incorporate; leave the capture intact.
+        return null;
+      }
+      const page = this.data.pages[targetIdx]!;
+      const nextDoc = appendParagraphToDoc(page.documentJson, capture.text);
+      const nextPages = this.data.pages.slice();
+      nextPages[targetIdx] = { ...page, documentJson: nextDoc, updatedAt: now };
+      pages = nextPages;
+      destinationPageId = page.id;
+      disposition = "incorporated-quote";
+      nextStatus = "incorporated";
+    } else if (action === "create-subject") {
+      // DELIBERATE page creation on explicit user action only (A23 allows this
+      // path because it is the user choosing to make a subject).
+      const title = deriveCaptureTitle(capture.text);
+      const newPage: Page = {
+        id: newPageId(),
+        kind: "subject",
+        title,
+        documentJson: appendParagraphToDoc(emptyDocJson(), capture.text),
+        createdAt: now,
+        updatedAt: now,
+      };
+      pages = [...this.data.pages, newPage];
+      destinationPageId = newPage.id;
+      disposition = "created-subject";
+      nextStatus = "incorporated";
+    } else {
+      // dismiss
+      disposition = "dismissed";
+      nextStatus = "dismissed";
+    }
+
+    const captures = this.data.captures.slice();
+    captures[idx] = { ...capture, status: nextStatus };
+    const handling: CaptureHandling = {
+      captureId,
+      disposition,
+      ...(destinationPageId !== undefined ? { destinationPageId } : {}),
+      handledAt: now,
+    };
+    this.data = {
+      ...this.data,
+      pages,
+      captures,
+      captureHandlings: [...(this.data.captureHandlings ?? []), handling],
+    };
+    await this.persist();
+    return handling;
   }
 
   // -- persistence ----------------------------------------------------------

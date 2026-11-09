@@ -97,6 +97,9 @@ function fillDefaults(data: BrainData): BrainData {
     checkpoints: data.checkpoints ?? defaults.checkpoints ?? [],
     reflections: data.reflections ?? defaults.reflections ?? [],
     revisionComments: data.revisionComments ?? defaults.revisionComments ?? {},
+    // M5 (§16.3, A22): additive optional collection; a v2 brain without it
+    // reads fine and gets the empty default here (no version bump needed).
+    captureHandlings: data.captureHandlings ?? defaults.captureHandlings ?? [],
     presentation: {
       ...defaults.presentation,
       ...(data.presentation ?? {}),

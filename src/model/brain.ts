@@ -44,6 +44,9 @@ export function createEmptyBrainData(
     checkpoints: [],
     reflections: [],
     revisionComments: {},
+    // M5 (§16.3, A22): mobile-capture handling audit log. Optional/additive so
+    // a v2 brain loads fine; seeded here so a fresh brain is fully populated.
+    captureHandlings: [],
     presentation: {
       hiddenPageIds: [],
       hiddenRelationshipIds: [],

@@ -392,6 +392,56 @@ export interface Capture {
   readonly sourceId: SourceId | null;
   readonly text: string;
   readonly createdAt: Timestamp;
+  /**
+   * M5 (§16.2, A23) mobile-capture extensions. All OPTIONAL/readonly and
+   * additive so a pre-M5 (v2) capture loads with no migration and
+   * SCHEMA_VERSION stays 2. A capture is a loose thought/quote; creating one
+   * NEVER creates a Page/Category/Relationship (A23).
+   */
+  /** Free-form label of the device the capture originated on (e.g. "phone"). */
+  readonly originDevice?: string;
+  /**
+   * NOTE on sourceId: the capture's source is the EXISTING canonical
+   * `sourceId: SourceId | null` field above. An M5 mobile capture simply sets
+   * that field (null when the capture has no source). A separate optional
+   * `sourceId` is intentionally NOT declared here because TypeScript forbids
+   * redeclaring a property with a different modifier/type; the canonical field
+   * already accepts a SourceId or null and stays assignable.
+   */
+  /**
+   * Optional portable anchor into the source the capture was taken from, so a
+   * desktop reviewer can jump to the exact passage. DOM-independent like every
+   * other anchor.
+   */
+  readonly anchor?: TextAnchor | ScopeAnchor | AreaAnchor;
+  /** Optional suggested target subject Page for later incorporation. */
+  readonly targetPageId?: PageId;
+  /**
+   * Sync/lifecycle status of the capture (M5). `"local"` = saved on device only,
+   * `"pending"` = queued for upload, `"uploaded"` = written to the remote
+   * `captures/` collection, `"incorporated"` = acted on via handleCapture,
+   * `"dismissed"` = explicitly discarded. Optional/additive.
+   */
+  readonly status?: "local" | "pending" | "uploaded" | "incorporated" | "dismissed";
+}
+
+/**
+ * M5 (§16.3, A22) record of how a mobile Capture was handled on the desktop.
+ * Appended to BrainData.captureHandlings so capture incorporation is strictly
+ * idempotent by CaptureId: a repeated / out-of-order pull or a retried
+ * handleCapture call can detect a capture has already been processed. The
+ * original Capture record is always preserved; this is an audit entry, never a
+ * graph node. All fields readonly; the collection is optional/additive.
+ */
+export interface CaptureHandling {
+  readonly captureId: CaptureId;
+  readonly disposition:
+    | "incorporated-quote"
+    | "created-subject"
+    | "dismissed"
+    | "pending";
+  readonly destinationPageId?: PageId;
+  readonly handledAt: string;
 }
 
 /**
@@ -647,4 +697,11 @@ export interface BrainData {
    * Optional/readonly and additive (seeded to `{}`).
    */
   readonly revisionComments?: Readonly<Record<string, string>>;
+  /**
+   * M5 (§16.3, A22) audit log of how mobile Captures were handled. Optional/
+   * readonly and additive so a pre-M5 (v2) brain loads with no migration and
+   * SCHEMA_VERSION stays 2; brain.ts seeds it to `[]` and migrate.ts defaults
+   * it. Used to dedupe capture incorporation strictly by CaptureId.
+   */
+  readonly captureHandlings?: readonly CaptureHandling[];
 }

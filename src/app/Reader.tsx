@@ -1635,8 +1635,11 @@ export function sanitizeSnapshotHtml(html: string): string {
   return html
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
     .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
-    .replace(/\son\w+\s*=\s*"[^"]*"/gi, "")
-    .replace(/\son\w+\s*=\s*'[^']*'/gi, "")
+    // Strip inline event-handler attributes whether their value is
+    // double-quoted, single-quoted, OR UNQUOTED (e.g. onclick=alert(1)). The
+    // leading-whitespace capture group ($1) is preserved so adjacent attributes
+    // are not glued together after the strip.
+    .replace(/(\s)on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "$1")
     .replace(/javascript:/gi, "");
 }
 
