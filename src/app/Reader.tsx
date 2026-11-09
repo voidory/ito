@@ -1061,7 +1061,9 @@ function HighlightsTab({
         {filtered.map((v) => (
           <HighlightRow
             key={v.annotation.id}
+            wb={wb}
             view={v}
+            bump={bump}
             onMenu={(x, y) =>
               setMenuFor({
                 annotationId: v.annotation.id,
@@ -1091,10 +1093,14 @@ function HighlightsTab({
 }
 
 function HighlightRow({
+  wb,
   view,
+  bump,
   onMenu,
 }: {
+  wb: Workbench;
   view: AnnotationView;
+  bump: () => void;
   onMenu: (x: number, y: number) => void;
 }): JSX.Element {
   const label = view.isRange
@@ -1131,6 +1137,7 @@ function HighlightRow({
           ━
         </span>
       )}
+      <ShowInNodes wb={wb} annotationId={view.annotation.id} bump={bump} />
       <button
         data-testid="row-actions"
         aria-haspopup="menu"
@@ -1143,6 +1150,92 @@ function HighlightRow({
         ⋯
       </button>
     </li>
+  );
+}
+
+/**
+ * Reference-directed locating in Nodes (N04/N05/N07, §7.1/§7.2). For an
+ * annotation CITED into >= 1 subject page (an EvidenceInstance pointing at a
+ * subject Page), this renders a "Show in Nodes" control; it renders NOTHING
+ * for an annotation cited into zero subject pages (N07 precondition false).
+ *
+ * The locate transition is an EXPLICIT user action: clicking switches the view
+ * to Nodes (`setViewMode('nodes')`) and sets the explicit camera-focus target
+ * (`setFocusedPageId`), then bumps. It NEVER runs during ordinary editing, so
+ * the camera never jumps unexpectedly (A09-M2).
+ *
+ *  - N04 (exactly 1 cited subject page): click locates straight to that page.
+ *  - N05 (>1 cited subject pages): a lightweight destination picker lists the
+ *    linked subject pages so the user chooses which node to center on.
+ */
+function ShowInNodes({
+  wb,
+  annotationId,
+  bump,
+}: {
+  wb: Workbench;
+  annotationId: AnnotationId;
+  bump: () => void;
+}): JSX.Element | null {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const citedPageIds = wb.citedSubjectPagesForAnnotation(annotationId);
+  // N07: no cited subject page => no Show-in-Nodes affordance at all.
+  if (citedPageIds.length === 0) return null;
+
+  const locate = (pageId: PageId): void => {
+    wb.setViewMode("nodes");
+    wb.setFocusedPageId(pageId);
+    setPickerOpen(false);
+    bump();
+  };
+
+  const onClick = (): void => {
+    if (citedPageIds.length === 1) {
+      // N04: single cited subject page — locate directly.
+      locate(citedPageIds[0]!);
+      return;
+    }
+    // N05: multiple cited subject pages — open the destination picker.
+    setPickerOpen((v) => !v);
+  };
+
+  return (
+    <span style={{ position: "relative", display: "inline-flex" }}>
+      <button
+        data-testid="show-in-nodes"
+        data-annotation-id={annotationId}
+        data-cited-count={String(citedPageIds.length)}
+        aria-label="Show in Nodes"
+        title="Show in Nodes"
+        onClick={onClick}
+      >
+        ◎
+      </button>
+      {pickerOpen && citedPageIds.length > 1 && (
+        <div
+          data-testid="nodes-destination-picker"
+          role="menu"
+          aria-label="Choose a subject node"
+          style={styles.destinationPicker}
+        >
+          {citedPageIds.map((pid) => {
+            const page = wb.rawData().pages.find((p) => p.id === pid);
+            return (
+              <button
+                key={pid}
+                data-testid="nodes-destination-option"
+                data-page-id={pid}
+                role="menuitem"
+                onClick={() => locate(pid)}
+                style={{ display: "block", width: "100%", textAlign: "left" }}
+              >
+                {page?.title ?? "Subject"}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </span>
   );
 }
 
@@ -1455,5 +1548,17 @@ const styles: Record<string, React.CSSProperties> = {
     borderBottom: "1px solid #f0c38a",
     color: "#7a4b00",
     fontSize: "0.85rem",
+  },
+  destinationPicker: {
+    position: "absolute",
+    zIndex: 1002,
+    top: "100%",
+    right: 0,
+    minWidth: "12rem",
+    padding: "0.25rem",
+    background: "#fff",
+    border: "1px solid #ccc",
+    borderRadius: "6px",
+    boxShadow: "0 6px 24px rgba(0,0,0,0.2)",
   },
 };

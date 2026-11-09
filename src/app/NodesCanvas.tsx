@@ -46,6 +46,7 @@ export function NodesCanvas({
   categoryScope = null,
   placeholder = null,
   placeholders,
+  focusedPageId = null,
   suppressMotion,
   bump,
 }: {
@@ -67,6 +68,13 @@ export function NodesCanvas({
    * `placeholder` prop. Each placeholder creates ZERO durable records.
    */
   placeholders?: readonly NodePlaceholderProps[];
+  /**
+   * The explicit locate camera-focus target (N04/N05, FEAT-004). When set, the
+   * matching graph-node is marked `data-focused="true"` and visually
+   * emphasized. This is a STATIC visual focus derived from explicit state —
+   * there is NO camera animation on idle (A09-M2). Defaults to null (no focus).
+   */
+  focusedPageId?: string | null;
   suppressMotion: boolean;
   bump: () => void;
 }): JSX.Element {
@@ -128,6 +136,10 @@ export function NodesCanvas({
     const next = window.prompt("Connecting page label", current);
     if (next === null) return;
     void wb.setRelationshipLabel(relationshipId as RelationshipId, next).then(bump);
+  };
+
+  const onOpenConnectingPage = (relationshipId: string): void => {
+    void wb.developRelationshipPage(relationshipId as RelationshipId).then(bump);
   };
 
   const onNodeClick = (pageId: string): void => {
@@ -293,19 +305,39 @@ export function NodesCanvas({
       {/* Relationship hubs ("The Bump"). */}
       <g data-testid="hub-layer">
         {scene.hubs.map((hub) => (
-          <path
-            key={hub.relationshipId}
-            className="graph-hub"
-            data-testid="graph-hub"
-            data-relationship-id={hub.relationshipId}
-            data-hub-kind={hub.kind}
-            data-endpoint-count={hub.endpointCount}
-            data-hub-cx={round(hub.center.x)}
-            data-hub-cy={round(hub.center.y)}
-            d={hub.d}
-            fill={hub.blendColor}
-            onClick={() => onHubClick(hub.relationshipId)}
-          />
+          <g key={hub.relationshipId} data-testid="hub-group">
+            <path
+              className="graph-hub"
+              data-testid="graph-hub"
+              data-relationship-id={hub.relationshipId}
+              data-hub-kind={hub.kind}
+              data-endpoint-count={hub.endpointCount}
+              data-hub-cx={round(hub.center.x)}
+              data-hub-cy={round(hub.center.y)}
+              d={hub.d}
+              fill={hub.blendColor}
+              onClick={() => onHubClick(hub.relationshipId)}
+            />
+            {/*
+              A13-M2: develop/open the hub's FULL Connecting Page in the
+              SubjectEditor. Distinct from the inline short-label edit (the
+              graph-hub click above, which keeps the prompt path reachable).
+              Clicking lazily creates-or-opens the explanatory subject Page and
+              bumps so the shell re-renders into the editor.
+            */}
+            <text
+              className="open-connecting-page"
+              data-testid="open-connecting-page"
+              data-relationship-id={hub.relationshipId}
+              x={round(hub.center.x)}
+              y={round(hub.center.y) + 22}
+              textAnchor="middle"
+              role="button"
+              onClick={() => onOpenConnectingPage(hub.relationshipId)}
+            >
+              Open connecting page
+            </text>
+          </g>
         ))}
       </g>
 
@@ -314,9 +346,12 @@ export function NodesCanvas({
         {scene.nodes.map((node) => (
           <g
             key={node.pageId}
-            className="graph-node"
+            className={
+              focusedPageId === node.pageId ? "graph-node graph-node-focused" : "graph-node"
+            }
             data-testid="graph-node"
             data-page-id={node.pageId}
+            data-focused={focusedPageId === node.pageId ? "true" : "false"}
             data-x={round(node.x)}
             data-y={round(node.y)}
             transform={`translate(${node.x} ${node.y})`}

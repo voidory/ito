@@ -340,3 +340,89 @@ describe("Ruling 1 (A14-M2, §12.2) — category master pages", () => {
     await expect(wb.connectCategoryBoundaries(cat.id, cat.id)).rejects.toThrow(/distinct/);
   });
 });
+
+describe("M2-FIX-1 (A13-M2, §12.1) — developRelationshipPage (full Connecting Pages)", () => {
+  let storage: InMemoryStorageAdapter;
+  let wb: Workbench;
+
+  beforeEach(async () => {
+    storage = new InMemoryStorageAdapter();
+    wb = await Workbench.open(storage);
+  });
+
+  it("creates ONE real subject Page seeded from the label, links it, and opens it", async () => {
+    const [a, b] = await makePages(wb, ["A", "B"]);
+    const rel = await wb.createRelationship([a!, b!], "relates", "informs");
+    expect(wb.explanatoryPageId(rel.id)).toBeNull();
+    const pagesBefore = wb.rawData().pages.length;
+
+    const explanatoryId = await wb.developRelationshipPage(rel.id);
+
+    // A real subject Page was created, titled from the relationship label.
+    const page = wb.rawData().pages.find((p) => p.id === explanatoryId)!;
+    expect(page).toBeDefined();
+    expect(page.kind).toBe("subject");
+    expect(page.title).toBe("informs");
+    expect(wb.rawData().pages.length).toBe(pagesBefore + 1);
+    // The relationship now references the explanatory page immutably.
+    expect(wb.explanatoryPageId(rel.id)).toBe(explanatoryId);
+    const storedRel = wb.rawData().relationships.find((r) => r.id === rel.id)!;
+    expect(storedRel.explanatoryPageId).toBe(explanatoryId);
+    // It is opened for composition in the SubjectEditor.
+    expect(wb.snapshot().openSubjectPageId).toBe(explanatoryId);
+    // Editable like any subject page.
+    expect(wb.subjectDocJson(explanatoryId)).toBeTruthy();
+  });
+
+  it("falls back to joined endpoint titles when the label is empty", async () => {
+    const [a, b] = await makePages(wb, ["Species", "Climate"]);
+    const rel = await wb.createRelationship([a!, b!]); // no label
+    const explanatoryId = await wb.developRelationshipPage(rel.id);
+    const page = wb.rawData().pages.find((p) => p.id === explanatoryId)!;
+    expect(page.title).toBe("Species ↔ Climate");
+  });
+
+  it("is idempotent: a second call returns the same id and creates no second page", async () => {
+    const [a, b] = await makePages(wb, ["A", "B"]);
+    const rel = await wb.createRelationship([a!, b!], "relates", "informs");
+    const first = await wb.developRelationshipPage(rel.id);
+    const pagesAfterFirst = wb.rawData().pages.length;
+
+    const second = await wb.developRelationshipPage(rel.id);
+    expect(second).toBe(first);
+    expect(wb.rawData().pages.length).toBe(pagesAfterFirst);
+    // Re-opens the same page.
+    expect(wb.snapshot().openSubjectPageId).toBe(first);
+  });
+
+  it("persists the explanatoryPageId across reopen", async () => {
+    const brainId = wb.snapshot().brainId;
+    const [a, b] = await makePages(wb, ["A", "B"]);
+    const rel = await wb.createRelationship([a!, b!], "relates", "informs");
+    const explanatoryId = await wb.developRelationshipPage(rel.id);
+
+    const reopened = await Workbench.open(storage, brainId);
+    expect(reopened.explanatoryPageId(rel.id)).toBe(explanatoryId);
+  });
+
+  it("the explanatory page can be an endpoint in a further relationship (connecting a connection)", async () => {
+    const [a, b, c] = await makePages(wb, ["A", "B", "C"]);
+    const rel = await wb.createRelationship([a!, b!], "relates", "informs");
+    const explanatoryId = await wb.developRelationshipPage(rel.id);
+
+    // Connect the explanatory ("Connecting") page to a further subject C.
+    const further = await wb.createRelationship([explanatoryId, c!]);
+
+    const g = wb.conceptGraph();
+    const furtherLink = g.links.find((l) => l.relationshipId === further.id)!;
+    expect(furtherLink.endpointPageIds).toEqual([explanatoryId, c]);
+    // The explanatory page is a real node in the derived graph.
+    expect(g.nodes.some((n) => n.pageId === explanatoryId)).toBe(true);
+  });
+
+  it("rejects an unknown relationship id", async () => {
+    await expect(
+      wb.developRelationshipPage("rel_does_not_exist" as never),
+    ).rejects.toThrow(/unknown relationship/);
+  });
+});

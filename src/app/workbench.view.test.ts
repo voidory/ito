@@ -298,3 +298,143 @@ describe("Ruling 2 (N06, §7.2) — a placeholder per open UNCONNECTED source", 
     expect(graphRecordCount(wb)).toEqual(before);
   });
 });
+
+describe("M2-FIX-3 (N04/N05/N07, §7.1/§7.2) — reference-directed locating in Nodes", () => {
+  let wb: Workbench;
+  beforeEach(async () => {
+    wb = await Workbench.open(new InMemoryStorageAdapter());
+  });
+
+  /** Commit a text highlight on a source and return its annotation id. */
+  async function citeInto(
+    source: Source,
+    text: string,
+    pageTitle: string,
+  ): Promise<{ annotationId: AnnotationId; pageId: PageId }> {
+    const view = await wb.commitTextAnnotation({
+      sourceId: source.id,
+      anchor: textAnchor(source.id, source.versionHash, text),
+    });
+    const annotationId = view.annotation.id as AnnotationId;
+    const { page } = await wb.createSubjectFromAnnotation(pageTitle, annotationId);
+    return { annotationId, pageId: page.id };
+  }
+
+  it("defaults focusedPageId to null (session view state, not persisted)", () => {
+    expect(wb.focusedPageId()).toBeNull();
+    expect(wb.snapshot().focusedPageId).toBeNull();
+  });
+
+  it("N07: an annotation cited into ZERO subject pages has no locate target", async () => {
+    const source = await importOne(wb, "Paper");
+    const view = await wb.commitTextAnnotation({
+      sourceId: source.id,
+      anchor: textAnchor(source.id, source.versionHash, "quick brown fox"),
+    });
+    // Annotation exists but is not cited into any subject page.
+    expect(
+      wb.citedSubjectPagesForAnnotation(view.annotation.id as AnnotationId),
+    ).toEqual([]);
+  });
+
+  it("N04: an annotation cited into EXACTLY 1 subject page — locate sets viewMode + focusedPageId", async () => {
+    const source = await importOne(wb, "Paper");
+    const { annotationId, pageId } = await citeInto(source, "quick brown fox", "Subject A");
+
+    const cited = wb.citedSubjectPagesForAnnotation(annotationId);
+    expect(cited).toEqual([pageId]);
+
+    // The explicit locate action (what Reader's "Show in Nodes" triggers).
+    wb.setViewMode("nodes");
+    wb.setFocusedPageId(cited[0]!);
+
+    expect(wb.viewMode()).toBe("nodes");
+    expect(wb.focusedPageId()).toBe(pageId);
+    expect(wb.snapshot().focusedPageId).toBe(pageId);
+  });
+
+  it("N05: an annotation cited into 2 subject pages returns BOTH (picker precondition)", async () => {
+    const source = await importOne(wb, "Paper");
+    const view = await wb.commitTextAnnotation({
+      sourceId: source.id,
+      anchor: textAnchor(source.id, source.versionHash, "quick brown fox"),
+    });
+    const annotationId = view.annotation.id as AnnotationId;
+
+    // Cite the SAME annotation into two distinct subject pages.
+    const { page: p1 } = await wb.createSubjectFromAnnotation("Subject A", annotationId);
+    const p2 = await wb.createSubjectPage("Subject B");
+    await wb.insertEvidenceIntoPage(annotationId, p2.id, { pos: null });
+
+    const cited = wb.citedSubjectPagesForAnnotation(annotationId);
+    expect(cited.length).toBe(2);
+    expect(cited.sort()).toEqual([p1.id, p2.id].sort());
+
+    // Choosing the second page in the picker locates there.
+    wb.setViewMode("nodes");
+    wb.setFocusedPageId(p2.id);
+    expect(wb.focusedPageId()).toBe(p2.id);
+  });
+
+  it("de-duplicates multiple evidence instances into the SAME subject page", async () => {
+    const source = await importOne(wb, "Paper");
+    const view = await wb.commitTextAnnotation({
+      sourceId: source.id,
+      anchor: textAnchor(source.id, source.versionHash, "quick brown fox"),
+    });
+    const annotationId = view.annotation.id as AnnotationId;
+    const { page } = await wb.createSubjectFromAnnotation("Subject A", annotationId);
+    // Insert a SECOND quote of the same annotation into the same page.
+    await wb.insertEvidenceIntoPage(annotationId, page.id, { pos: null });
+
+    // Two evidence instances, but exactly one distinct destination page.
+    expect(
+      wb.rawData().evidenceInstances.filter((e) => e.annotationId === annotationId).length,
+    ).toBe(2);
+    expect(wb.citedSubjectPagesForAnnotation(annotationId)).toEqual([page.id]);
+  });
+
+  it("A09-M2 guard: ordinary editing transitions NEVER change focusedPageId", async () => {
+    const source = await importOne(wb, "Paper");
+    const { annotationId, pageId } = await citeInto(source, "quick brown fox", "Subject A");
+
+    // Explicitly locate once.
+    wb.setFocusedPageId(pageId);
+    expect(wb.focusedPageId()).toBe(pageId);
+
+    // Now run a spread of ORDINARY editing transitions. None may touch focus.
+    await wb.saveSubjectDoc(pageId, { type: "doc", content: [{ type: "paragraph" }] });
+    await wb.hideNode(pageId);
+    await wb.showNode(pageId);
+    await wb.setZoom(1.75);
+    await wb.setNodePosition(pageId, 10, 20);
+    wb.setViewMode("files");
+    wb.setViewMode("nodes");
+    wb.setCategoryScope("Papers");
+    wb.setHighlightsTabOpen(true);
+    await wb.insertEvidenceIntoPage(annotationId, pageId, { pos: null });
+
+    // focusedPageId is UNCHANGED by all of the above (no forced camera motion).
+    expect(wb.focusedPageId()).toBe(pageId);
+
+    // focusedPageId is session-only: it is NOT in the persisted BrainData.
+    const persisted = wb.rawData() as unknown as Record<string, unknown>;
+    expect(persisted.focusedPageId).toBeUndefined();
+    expect(
+      (wb.rawData().presentation as unknown as Record<string, unknown>).focusedPageId,
+    ).toBeUndefined();
+  });
+
+  it("setFocusedPageId(null) clears the locate target without writing a record", async () => {
+    const source = await importOne(wb, "Paper");
+    const { pageId } = await citeInto(source, "quick brown fox", "Subject A");
+    wb.setFocusedPageId(pageId);
+    expect(wb.focusedPageId()).toBe(pageId);
+
+    const rev = wb.rawData().manifest.publicationRevision;
+    wb.setFocusedPageId(null);
+    expect(wb.focusedPageId()).toBeNull();
+    // View-state only: no persistence occurred.
+    expect(wb.rawData().manifest.publicationRevision).toBe(rev);
+  });
+});

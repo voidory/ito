@@ -135,6 +135,7 @@ export function App(): JSX.Element {
               wb={wb}
               categoryScope={state.categoryScope}
               openSourceIds={state.openSourceIds}
+              focusedPageId={state.focusedPageId}
               suppressMotion={state.suppressMotion}
               bump={bump}
             />
@@ -244,12 +245,14 @@ function NodesView({
   wb,
   categoryScope,
   openSourceIds,
+  focusedPageId,
   suppressMotion,
   bump,
 }: {
   wb: NonNullable<ReturnType<typeof useWorkbench>["wb"]>;
   categoryScope: string | null;
   openSourceIds: readonly SourceId[];
+  focusedPageId: string | null;
   suppressMotion: boolean;
   bump: () => void;
 }): JSX.Element {
@@ -300,6 +303,7 @@ function NodesView({
               wb={wb}
               categoryScope={categoryScope}
               placeholders={placeholders}
+              focusedPageId={focusedPageId}
               suppressMotion={suppressMotion}
               bump={bump}
             />

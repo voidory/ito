@@ -71,6 +71,35 @@
   stroke-width: 1.5;
 }
 
+/*
+  Explicit locate focus (N04/N05): the matching node is visually emphasized
+  with a ring + slightly larger dot. This is a STATIC emphasis derived from the
+  explicit focusedPageId — there is NO camera motion on idle (A09-M2).
+*/
+.graph-node-focused circle {
+  fill: #1a56db;
+  stroke: #1a56db;
+  stroke-width: 3;
+}
+
+.graph-node-focused .graph-node-label {
+  opacity: 1;
+  font-weight: 700;
+}
+
+/* The hub's "open connecting page" affordance (A13-M2). */
+.open-connecting-page {
+  font: 500 9px system-ui, sans-serif;
+  fill: #2a2825;
+  cursor: pointer;
+  opacity: 0.75;
+}
+
+.open-connecting-page:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
 .graph-node-label {
   font: 500 11px system-ui, sans-serif;
   fill: #2a2825;

@@ -146,6 +146,20 @@ interface ItoTestApi {
   setRelationshipLabel(relationshipId: string, label: string): Promise<void>;
   /** The durable label of a relationship. */
   relationshipLabel(relationshipId: string): string;
+  /**
+   * Develop a relationship's short connection into a full Connecting Page
+   * (A13-M2); lazily creates/returns the explanatory subject Page, opens it,
+   * and returns its id. Idempotent.
+   */
+  developRelationshipPage(relationshipId: string): Promise<string>;
+  /** The explanatory (Connecting) page id of a relationship, or null (A13-M2). */
+  relationshipExplanatoryPageId(relationshipId: string): string | null;
+  /** The explicit Nodes-view locate target (N04/N05), or null. */
+  focusedPageId(): string | null;
+  /** Set/clear the explicit Nodes-view locate target (N04/N05, view state). */
+  setFocusedPageId(pageId: string | null): void;
+  /** The subject page ids an annotation is cited into (N04/N05/N07 branching). */
+  citedSubjectPagesForAnnotation(annotationId: string): string[];
   /** Add a page to a category's membership (never duplicates the Page). */
   addPageToCategory(categoryId: string, pageId: string): Promise<void>;
   /**
@@ -438,6 +452,24 @@ export function installTestApi(wb: Workbench, bump: () => void): void {
     relationshipLabel(relationshipId) {
       const rel = wb.rawData().relationships.find((r) => r.id === relationshipId);
       return rel?.label ?? "";
+    },
+    async developRelationshipPage(relationshipId) {
+      const id = await wb.developRelationshipPage(relationshipId as RelationshipId);
+      bump();
+      return id;
+    },
+    relationshipExplanatoryPageId(relationshipId) {
+      return wb.explanatoryPageId(relationshipId as RelationshipId);
+    },
+    focusedPageId() {
+      return wb.focusedPageId();
+    },
+    setFocusedPageId(pageId) {
+      wb.setFocusedPageId(pageId as PageId | null);
+      bump();
+    },
+    citedSubjectPagesForAnnotation(annotationId) {
+      return wb.citedSubjectPagesForAnnotation(annotationId as AnnotationId);
     },
     async addPageToCategory(categoryId, pageId) {
       await wb.addPageToCategory(categoryId as CategoryId, pageId as PageId);

@@ -220,6 +220,11 @@ export interface WorkbenchState {
    * `nodesViewActive` flag (which now derives from it).
    */
   readonly viewMode: ViewMode;
+  /**
+   * The explicit Nodes-view locate target (N04/N05). Session view state, NOT
+   * persisted; set ONLY by explicit locate actions, never by editing (A09-M2).
+   */
+  readonly focusedPageId: PageId | null;
   /** The integrated-workspace layout (pane widths + line visibility). */
   readonly workspaceLayout: WorkspaceLayout;
   /**
@@ -325,6 +330,14 @@ export class Workbench {
   private highlightsTabOpen = false;
   private suppressMotion = false;
   private view: ViewMode = "files";
+  /**
+   * The explicit "locate" camera-focus target in the Nodes view (N04/N05,
+   * FEAT-004). TRANSIENT session view state (like `view`): it is NOT persisted
+   * and only an explicit locate action ("Show in Nodes" / the destination
+   * picker) ever sets it. Ordinary editing transitions MUST NEVER touch it so
+   * the camera never jumps during normal editing (A09-M2). null = no target.
+   */
+  private focusedPage: PageId | null = null;
   private workspaceLayout: WorkspaceLayout = DEFAULT_WORKSPACE_LAYOUT;
   private activeCategoryScope: string | null = null;
   private saveError: SaveError | null = null;
@@ -409,6 +422,7 @@ export class Workbench {
       suppressMotion: this.suppressMotion,
       nodesViewActive: this.view === "nodes",
       viewMode: this.view,
+      focusedPageId: this.focusedPage,
       workspaceLayout: this.workspaceLayout,
       categoryScope: this.activeCategoryScope,
       saveError: this.saveError,
@@ -562,6 +576,25 @@ export class Workbench {
   }
 
   /**
+   * The explicit Nodes-view locate target (N04/N05, FEAT-004) or null. Pure
+   * getter over transient session state — never persisted.
+   */
+  focusedPageId(): PageId | null {
+    return this.focusedPage;
+  }
+
+  /**
+   * Set (or clear with null) the explicit locate camera-focus target for the
+   * Nodes view (N04/N05). VIEW STATE ONLY: writes no durable record and never
+   * persists. This MUST be called ONLY from explicit locate actions ("Show in
+   * Nodes" / the destination picker) — ordinary editing transitions never call
+   * it, which preserves A09-M2 (no unexpected camera jumps during editing).
+   */
+  setFocusedPageId(pageId: PageId | null): void {
+    this.focusedPage = pageId;
+  }
+
+  /**
    * Whether the Nodes (concept-network) view is active vs the Files view. This
    * now DERIVES from the formal FEAT-005 `viewMode` — FEAT-004 introduced a
    * transient flag which FEAT-005 superseded with the proper view switch, so
@@ -591,6 +624,78 @@ export class Workbench {
     relationships[idx] = updated;
     this.data = { ...this.data, relationships };
     await this.persist();
+  }
+
+  /**
+   * The explanatory ("Connecting Page") page id of a relationship, if one has
+   * been developed via `developRelationshipPage` (A13-M2). Pure getter —
+   * returns null when the relationship is unknown or has no explanatory page.
+   */
+  explanatoryPageId(relationshipId: RelationshipId): PageId | null {
+    const rel = this.data.relationships.find((r) => r.id === relationshipId);
+    return rel?.explanatoryPageId ?? null;
+  }
+
+  /**
+   * Develop a relationship's short connection into a FULL Connecting Page
+   * (A13-M2, §12.1, §20): "Short connection explanation can develop into a page
+   * and connect further subjects." This LAZILY creates (or returns the existing)
+   * real subject Page linked via `Relationship.explanatoryPageId`, seeded from
+   * the relationship's label (falling back to the joined endpoint titles, or
+   * "Connection" when neither is available), and opens it in the SubjectEditor.
+   *
+   * IDEMPOTENT: if the relationship already has an `explanatoryPageId` and that
+   * Page still exists, it is opened and returned unchanged (no second Page is
+   * created). Because the explanatory page has a real PageId it can be passed to
+   * `createRelationship([...])` as an endpoint — connecting a connection to
+   * further subjects — with no special-casing (it flows through the same
+   * `relationshipEndpoints` normalizer). Persists.
+   */
+  async developRelationshipPage(relationshipId: RelationshipId): Promise<PageId> {
+    const idx = this.data.relationships.findIndex((r) => r.id === relationshipId);
+    if (idx < 0) throw new Error("developRelationshipPage: unknown relationship");
+    const rel = this.data.relationships[idx]!;
+    const existingId = rel.explanatoryPageId;
+    if (existingId != null && this.data.pages.some((p) => p.id === existingId)) {
+      this.openSubjectPage(existingId);
+      return existingId;
+    }
+    const title = this.connectingPageTitle(rel);
+    const now = new Date().toISOString();
+    const page: Page = {
+      id: newPageId(),
+      kind: "subject",
+      title,
+      documentJson: emptyDocJson(),
+      createdAt: now,
+      updatedAt: now,
+    };
+    const updatedRel: Relationship = { ...rel, explanatoryPageId: page.id };
+    const relationships = this.data.relationships.slice();
+    relationships[idx] = updatedRel;
+    this.data = {
+      ...this.data,
+      pages: [...this.data.pages, page],
+      relationships,
+    };
+    await this.persist();
+    this.openSubjectPage(page.id);
+    return page.id;
+  }
+
+  /**
+   * Seed a Connecting Page's title from a relationship: prefer its short label;
+   * else join the endpoint page titles with " ↔ "; else fall back to the
+   * literal "Connection". Pure helper — no side effects.
+   */
+  private connectingPageTitle(rel: Relationship): string {
+    const label = rel.label.trim();
+    if (label.length > 0) return label;
+    const endpointTitles = relationshipEndpoints(rel)
+      .map((id) => this.data.pages.find((p) => p.id === id)?.title)
+      .filter((t): t is string => typeof t === "string" && t.length > 0);
+    if (endpointTitles.length > 0) return endpointTitles.join(" ↔ ");
+    return "Connection";
   }
 
   // -- workspace layout (pane config + lines) -------------------------------
@@ -1279,6 +1384,30 @@ export class Workbench {
       this.data.subjectAssociations,
     );
     return { annotation, style, isRange, rangeLabel, references };
+  }
+
+  /**
+   * The subject Page ids an annotation is CITED into (N04/N05/N07): the distinct
+   * `destinationPageId`s of the annotation's EvidenceInstances that point at a
+   * Page of kind 'subject'. A "cited" pair is exactly one backed by an
+   * EvidenceInstance, so this drives the reference-directed locate branching:
+   * 0 cited pages => no "Show in Nodes" (N07 precondition false); exactly 1 =>
+   * single-subject locate (N04); >1 => the destination picker (N05). Pure read.
+   */
+  citedSubjectPagesForAnnotation(annotationId: AnnotationId): PageId[] {
+    const subjectPageIds = new Set<PageId>(
+      this.data.pages.filter((p) => p.kind === "subject").map((p) => p.id),
+    );
+    const out: PageId[] = [];
+    const seen = new Set<PageId>();
+    for (const ev of this.data.evidenceInstances) {
+      if (ev.annotationId !== annotationId) continue;
+      if (!subjectPageIds.has(ev.destinationPageId)) continue;
+      if (seen.has(ev.destinationPageId)) continue;
+      seen.add(ev.destinationPageId);
+      out.push(ev.destinationPageId);
+    }
+    return out;
   }
 
   // -- concept network (M2, FEAT-003) ---------------------------------------

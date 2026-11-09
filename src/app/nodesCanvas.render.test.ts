@@ -38,6 +38,7 @@ async function mount(
     categoryScope?: string | null;
     placeholder?: { sourceId: string; title: string; transient: boolean } | null;
     placeholders?: readonly { sourceId: string; title: string; transient: boolean }[];
+    focusedPageId?: string | null;
   } = {},
 ): Promise<HTMLElement> {
   container = document.createElement("div");
@@ -261,6 +262,50 @@ describe("NodesCanvas — renders from live Workbench records", () => {
     expect(d.pages.length).toBe(0);
     expect(d.relationships.length).toBe(0);
     expect(d.categories.length).toBe(0);
+  });
+
+  it("A13-M2: a rendered hub exposes an open-connecting-page control", async () => {
+    const wb = await Workbench.open(new InMemoryStorageAdapter());
+    const [a, b] = await makePages(wb, ["A", "B"]);
+    const rel = await wb.createRelationship([a!, b!]);
+    const el = await mount(wb);
+
+    const control = el.querySelector('[data-testid="open-connecting-page"]');
+    expect(control).not.toBeNull();
+    expect(control!.getAttribute("data-relationship-id")).toBe(rel.id);
+    // The hub itself is still rendered alongside the control (both affordances).
+    expect(el.querySelector('[data-testid="graph-hub"]')).not.toBeNull();
+  });
+
+  it("A13-M2: clicking open-connecting-page develops+opens the explanatory page", async () => {
+    const wb = await Workbench.open(new InMemoryStorageAdapter());
+    const [a, b] = await makePages(wb, ["A", "B"]);
+    const rel = await wb.createRelationship([a!, b!], "relates", "bridges");
+    const el = await mount(wb);
+
+    const control = el.querySelector(
+      '[data-testid="open-connecting-page"]',
+    ) as SVGTextElement;
+    await act(async () => {
+      control.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    const explanatoryId = wb.explanatoryPageId(rel.id);
+    expect(explanatoryId).not.toBeNull();
+    expect(wb.snapshot().openSubjectPageId).toBe(explanatoryId);
+  });
+
+  it("N04/N05: with focusedPageId set, the matching graph-node has data-focused='true' and others do not", async () => {
+    const wb = await Workbench.open(new InMemoryStorageAdapter());
+    const [a, b] = await makePages(wb, ["A", "B"]);
+    const el = await mount(wb, { focusedPageId: a! });
+
+    const nodes = Array.from(el.querySelectorAll('[data-testid="graph-node"]'));
+    const focused = nodes.filter((n) => n.getAttribute("data-focused") === "true");
+    expect(focused).toHaveLength(1);
+    expect(focused[0]!.getAttribute("data-page-id")).toBe(a);
+    const other = nodes.find((n) => n.getAttribute("data-page-id") === b)!;
+    expect(other.getAttribute("data-focused")).toBe("false");
   });
 
   it("omits a presentation-hidden node from the node layer", async () => {
