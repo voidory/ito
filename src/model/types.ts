@@ -15,8 +15,8 @@
  *    inside a subject page's document (the composition side). They are distinct
  *    records with distinct ids.
  *  - Graph 'hide' never deletes content: visibility is presentation state
- *    (PresentationState.hiddenNodeIds / hiddenEdgeIds), never a mutation or
- *    deletion of the underlying Page/Relationship.
+ *    (PresentationState.hiddenPageIds / hiddenRelationshipIds), never a
+ *    mutation or deletion of the underlying Page/Relationship.
  *  - Evidence serialization independent of DOM coordinates: an EvidenceInstance
  *    stores the annotation id + a text snapshot, not pixel/DOM offsets. The
  *    ProseMirror document JSON (Page.documentJson) is the source of truth.

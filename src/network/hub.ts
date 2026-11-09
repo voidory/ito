@@ -88,7 +88,7 @@ export function endpointAngles(center: Point, endpoints: readonly Point[]): numb
  * Build a concave arched star: each endpoint gets an OUTER vertex pointing
  * toward it; between consecutive outer vertices (sorted by angle) sits an INNER
  * control point pulled toward center, producing concave arcs. The outer radius
- * is the distance to the nearest endpoint (so points reach toward the real
+ * is the distance to the farthest endpoint (so points reach out past the real
  * nodes); the inner radius is a fraction of that, guaranteeing inner < outer.
  */
 function starPath(center: Point, endpoints: readonly Point[]): string {
