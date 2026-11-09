@@ -157,7 +157,18 @@ export function ReaderToolbar({
   const [overflowAnchor, setOverflowAnchor] = useState<AnchorRect | null>(null);
   const [pageDraft, setPageDraft] = useState("");
 
-  useEffect(() => {\n    if (!overflowAnchor) return;\n    const closeOnScroll = () => setOverflowAnchor(null);\n    window.addEventListener("scroll", closeOnScroll, { capture: true, passive: true });\n    window.addEventListener("resize", closeOnScroll, { passive: true });\n    return () => {\n      window.removeEventListener("scroll", closeOnScroll, { capture: true });\n      window.removeEventListener("resize", closeOnScroll);\n    };\n  }, [overflowAnchor]);\n\n  const overflowItems: MenuItem[] = [
+  useEffect(() => {
+    if (!overflowAnchor) return;
+    const closeOnScroll = () => setOverflowAnchor(null);
+    window.addEventListener("scroll", closeOnScroll, { capture: true, passive: true });
+    window.addEventListener("resize", closeOnScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", closeOnScroll, { capture: true });
+      window.removeEventListener("resize", closeOnScroll);
+    };
+  }, [overflowAnchor]);
+
+  const overflowItems: MenuItem[] = [
     {
       id: "suppress-motion",
       label: suppressMotion ? "Show motion" : "Suppress motion",
