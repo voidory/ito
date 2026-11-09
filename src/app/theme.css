@@ -770,6 +770,53 @@ label[data-testid="open-restore-input"]:active {
   padding: 2px 4px;
 }
 
+/* FEAT-002 toolbar statics lifted out of ReaderToolbar.tsx inline styles. */
+.ito-reader-toolbar .ito-page-indicator {
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.ito-reader-toolbar .ito-overflow-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.ito-reader-toolbar .ito-overflow-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 1004;
+}
+
+/* FEAT-002 reader-shell statics lifted out of Reader.tsx inline styles. */
+.ito-open-together {
+  padding: 2px 10px;
+  font-size: 0.78rem;
+  color: var(--ito-muted);
+  border-bottom: 1px solid var(--ito-border);
+  background: var(--ito-bg-paper);
+}
+
+.ito-dismiss-inline {
+  margin-left: 0.5rem;
+}
+
+.ito-reader-main {
+  flex-wrap: nowrap;
+  /* The reading area always fills the space left by whichever side panels are
+     open; pages re-fit to it (see the fit-to-pane effect). */
+  max-width: none;
+  margin: 0;
+}
+
+.ito-subject-pane-fill {
+  height: 100%;
+}
+
+.ito-visually-hidden-input {
+  display: none;
+}
+
 /* --- App header: a <= 36px strip while reading ------------------------ */
 .ito-shell-strip {
   min-height: 0;

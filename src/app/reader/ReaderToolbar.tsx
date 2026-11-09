@@ -268,7 +268,7 @@ export function ReaderToolbar({
           {Icons.prev}
         </IconButton>
         <form
-          style={{ display: "inline-flex", alignItems: "center", gap: "2px" }}
+          className="ito-toolbar-group"
           onSubmit={(e) => {
             e.preventDefault();
             const n = Number(pageDraft);
@@ -285,7 +285,7 @@ export function ReaderToolbar({
             value={pageDraft}
             onChange={(e) => setPageDraft(e.target.value.replace(/[^0-9]/g, ""))}
           />
-          <span data-testid="page-indicator" style={{ fontSize: "0.82rem", whiteSpace: "nowrap" }}>
+          <span data-testid="page-indicator" className="ito-page-indicator">
             / {pageCount}
           </span>
         </form>
@@ -305,7 +305,7 @@ export function ReaderToolbar({
         {Icons.find}
       </IconButton>
 
-      <span style={{ position: "relative", display: "inline-flex" }}>
+      <span className="ito-overflow-wrap">
         <IconButton
           label="More actions"
           data-testid="pane-overflow-menu-btn"
@@ -316,7 +316,7 @@ export function ReaderToolbar({
           {Icons.overflow}
         </IconButton>
         {overflowOpen && (
-          <div style={{ position: "absolute", top: "100%", right: 0, zIndex: 1004 }}>
+          <div className="ito-overflow-menu">
             <Menu
               items={overflowItems}
               ariaLabel="Reader actions"

@@ -40,6 +40,52 @@ export async function readPdfPageCount(bytes: Uint8Array): Promise<number> {
   }
 }
 
+/** The best-effort PDF metadata extracted at import time. */
+export interface PdfImportMetadata {
+  readonly pageCount: number;
+  readonly authors: string | undefined;
+  readonly year: string | undefined;
+}
+
+/**
+ * FEAT-002 best-effort PDF metadata (page count + author + year). Uses pdf.js
+ * `getMetadata()` when it can parse the bytes: `info.Author` becomes `authors`
+ * (trimmed, only when non-empty), and a 4-digit `year` is parsed from
+ * `info.CreationDate` then `info.ModDate` (PDF date format "D:YYYYMMDD..."). It
+ * mirrors readPdfPageCount's discipline: it NEVER rejects, so a jsdom import
+ * test (no pdf.js worker) simply gets { pageCount: 1, authors/year: undefined }
+ * and the Reader backfills the real values later via updateSourceMetadata.
+ */
+export async function readPdfMetadata(bytes: Uint8Array): Promise<PdfImportMetadata> {
+  try {
+    const { loadDocument } = await import("../pdf/render");
+    const doc = await loadDocument(bytes);
+    const count = doc.numPages;
+    const pageCount = Number.isFinite(count) && count > 0 ? count : 1;
+    let authors: string | undefined;
+    let year: string | undefined;
+    try {
+      const meta = await doc.getMetadata();
+      const info = (meta?.info ?? {}) as Record<string, unknown>;
+      const rawAuthor = typeof info.Author === "string" ? info.Author.trim() : "";
+      authors = rawAuthor.length > 0 ? rawAuthor : undefined;
+      year = yearFromPdfDate(info.CreationDate) ?? yearFromPdfDate(info.ModDate);
+    } catch {
+      // getMetadata unavailable: fall through with page count only.
+    }
+    return { pageCount, authors, year };
+  } catch {
+    return { pageCount: 1, authors: undefined, year: undefined };
+  }
+}
+
+/** Parse a 4-digit year out of a PDF date string ("D:YYYYMMDDHHmmSS"). */
+function yearFromPdfDate(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const m = value.match(/D:(\d{4})/) ?? value.match(/(\d{4})/);
+  return m ? m[1] : undefined;
+}
+
 /** Import a single PDF File as a Source. Resolves to the import result. */
 export async function importPdfFile(
   wb: Workbench,
@@ -47,12 +93,14 @@ export async function importPdfFile(
 ): Promise<void> {
   const bytes = new Uint8Array(await file.arrayBuffer());
   const versionHash = await sha256Hex(bytes);
-  const pageCount = await readPdfPageCount(bytes);
+  const meta = await readPdfMetadata(bytes);
   await wb.importSource({
     title: titleFromFileName(file.name),
     bytes,
     versionHash,
-    pageCount,
+    pageCount: meta.pageCount,
+    authors: meta.authors,
+    year: meta.year,
   });
 }
 

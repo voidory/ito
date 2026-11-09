@@ -19,16 +19,21 @@ const LIBRARY_COLUMNS: { key: LibrarySortColumn; label: string }[] = [
 ];
 
 /**
- * The Source model carries no explicit authors/year, so they are derived best
- * effort from the title (e.g. a trailing "(2021)" year) and otherwise shown as
- * an em-dash placeholder. The derivation never mutates the record.
+ * FEAT-002: Authors/Year are REAL PDF metadata when pdf.js extracted them (at
+ * ingest, or backfilled when the Reader first renders the source). They prefer
+ * the persisted `source.authors` / `source.year`; year falls back to the title
+ * regex (e.g. a trailing "(2021)") and then an em-dash placeholder, authors
+ * fall back straight to the placeholder. These helpers never mutate the record.
  */
-function sourceYear(title: string): string {
-  const m = title.match(/\b(1[5-9]\d{2}|20\d{2})\b/);
+function sourceYear(source: Pick<Source, "title" | "year">): string {
+  const persisted = source.year?.trim();
+  if (persisted) return persisted;
+  const m = source.title.match(/\b(1[5-9]\d{2}|20\d{2})\b/);
   return m ? m[1]! : "—";
 }
-function sourceAuthors(_title: string): string {
-  return "—";
+function sourceAuthors(source: Pick<Source, "authors">): string {
+  const persisted = source.authors?.trim();
+  return persisted ? persisted : "—";
 }
 function formatDateAdded(iso: string): string {
   return iso.slice(0, 10);
@@ -296,10 +301,10 @@ export function Library({
         r = a.title.localeCompare(b.title);
         break;
       case "authors":
-        r = sourceAuthors(a.title).localeCompare(sourceAuthors(b.title));
+        r = sourceAuthors(a).localeCompare(sourceAuthors(b));
         break;
       case "year":
-        r = sourceYear(a.title).localeCompare(sourceYear(b.title));
+        r = sourceYear(a).localeCompare(sourceYear(b));
         break;
       case "pages":
         r = a.pageCount - b.pageCount;
@@ -591,10 +596,10 @@ function LibraryRow({
         </button>
       </td>
       <td data-testid="library-cell-authors" style={styles.td}>
-        {sourceAuthors(source.title)}
+        {sourceAuthors(source)}
       </td>
       <td data-testid="library-cell-year" style={styles.td}>
-        {sourceYear(source.title)}
+        {sourceYear(source)}
       </td>
       <td data-testid="library-cell-pages" style={styles.tdNum}>
         {source.pageCount || "—"}

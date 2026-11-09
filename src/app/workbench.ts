@@ -744,8 +744,13 @@ export class Workbench {
     versionHash: string;
     pageCount: number;
     category?: string;
+    /** FEAT-002 optional PDF metadata extracted via pdf.js getMetadata(). */
+    authors?: string | undefined;
+    year?: string | undefined;
   }): Promise<Source> {
     const assetId = newAssetId();
+    const authors = params.authors?.trim();
+    const year = params.year?.trim();
     const source: Source = {
       id: newSourceId(),
       kind: "pdf",
@@ -755,6 +760,8 @@ export class Workbench {
       pageCount: params.pageCount,
       importedAt: new Date().toISOString(),
       category: params.category ?? "Uncategorized",
+      ...(authors ? { authors } : {}),
+      ...(year ? { year } : {}),
     };
     await this.storage.writeAsset(this.data.manifest.brainId, assetId, params.bytes);
     this.data = {
@@ -800,6 +807,45 @@ export class Workbench {
     if (!Number.isFinite(pageCount) || pageCount <= 0) return;
     const sources = this.data.sources.slice();
     sources[idx] = { ...source, pageCount };
+    this.data = { ...this.data, sources };
+    await this.persist();
+  }
+
+  /**
+   * FEAT-002 backfill a Source's PDF metadata once the Reader has run pdf.js
+   * (jsdom has no worker, so import-time extraction returns undefined). Mirrors
+   * updateSourcePageCount's "fill only when missing" discipline: pageCount is
+   * written only when the stored value is 0, and authors/year are written only
+   * when currently absent AND a non-empty value is supplied — a real stored
+   * value is never clobbered. Persists once when anything actually changed.
+   */
+  async updateSourceMetadata(
+    sourceId: SourceId,
+    meta: {
+      pageCount?: number | undefined;
+      authors?: string | undefined;
+      year?: string | undefined;
+    },
+  ): Promise<void> {
+    const idx = this.data.sources.findIndex((s) => s.id === sourceId);
+    if (idx < 0) return;
+    const source = this.data.sources[idx]!;
+    const next: { pageCount?: number; authors?: string; year?: string } = {};
+    if (
+      source.pageCount === 0 &&
+      meta.pageCount != null &&
+      Number.isFinite(meta.pageCount) &&
+      meta.pageCount > 0
+    ) {
+      next.pageCount = meta.pageCount;
+    }
+    const authors = meta.authors?.trim();
+    if (source.authors == null && authors) next.authors = authors;
+    const year = meta.year?.trim();
+    if (source.year == null && year) next.year = year;
+    if (Object.keys(next).length === 0) return;
+    const sources = this.data.sources.slice();
+    sources[idx] = { ...source, ...next };
     this.data = { ...this.data, sources };
     await this.persist();
   }

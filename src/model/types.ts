@@ -170,6 +170,19 @@ export interface Source {
    * re-import updates the record in place instead of duplicating it. Optional.
    */
   readonly externalId?: string;
+  /**
+   * FEAT-002 optional PDF document AUTHOR(s), extracted from pdf.js
+   * `getMetadata().info.Author` at ingest / first load. Optional/additive so
+   * existing serialized sources read fine; the Library prefers it over the
+   * title-regex fallback when present.
+   */
+  readonly authors?: string;
+  /**
+   * FEAT-002 optional 4-digit publication YEAR, parsed from pdf.js
+   * `info.CreationDate` / `info.ModDate` (falling back to a title regex in the
+   * UI). Optional/additive — stored as a string to stay regex-friendly.
+   */
+  readonly year?: string;
 }
 
 // ---------------------------------------------------------------------------
