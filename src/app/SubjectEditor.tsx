@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { EditorState, TextSelection } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { subjectKeymapPlugins } from "./subjectEditorKeymap";
@@ -50,6 +50,50 @@ export function SubjectEditor({
   const [savedTick, setSavedTick] = useState(0);
 
   const page = wb.rawData().pages.find((p) => p.id === pageId);
+  /**
+   * The stored documentJson object this editor last loaded or wrote. When the
+   * stored value differs, some OTHER path (e.g. "Insert into subject page…"
+   * from the reader menu) changed the page and the editor must re-hydrate
+   * instead of overwriting it with its stale state on the next keystroke.
+   */
+  const lastSyncedDoc = useRef<unknown>(null);
+  const storedDoc = useCallback(
+    () => wb.rawData().pages.find((p) => p.id === pageId)?.documentJson,
+    [wb, pageId],
+  );
+
+  /** Replace the editor state from stored JSON, keeping the cursor nearby. */
+  const rehydrateFromStore = useCallback(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    const json = wb.subjectDocJson(pageId) as DocumentJson;
+    const fresh = EditorState.create({
+      schema: subjectSchema,
+      doc: hydrateState(json).doc,
+      plugins: subjectKeymapPlugins(),
+    });
+    const pos = Math.min(view.state.selection.from, fresh.doc.content.size);
+    let next = fresh;
+    try {
+      next = fresh.apply(fresh.tr.setSelection(TextSelection.near(fresh.doc.resolve(pos))));
+    } catch {
+      // keep default selection
+    }
+    view.updateState(next);
+    lastSyncedDoc.current = storedDoc();
+    setStats(compositionStats(next.doc));
+  }, [wb, pageId, storedDoc]);
+
+  /** True (and the editor re-hydrated) when the stored doc changed elsewhere. */
+  const syncIfChangedElsewhere = useCallback((): boolean => {
+    if (!viewRef.current || storedDoc() === lastSyncedDoc.current) return false;
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    rehydrateFromStore();
+    return true;
+  }, [storedDoc, rehydrateFromStore]);
 
   const refreshStats = useCallback(() => {
     const view = viewRef.current;
@@ -59,17 +103,23 @@ export function SubjectEditor({
   const scheduleSave = useCallback(() => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
+      saveTimer.current = null;
       const view = viewRef.current;
       if (!view) return;
-      void wb
-        .saveSubjectDoc(pageId, serializeState(view.state))
+      // An external mutation already folded this editor's live content in
+      // (Workbench.pullLiveDoc); adopt the result rather than overwrite it.
+      if (syncIfChangedElsewhere()) return;
+      const pending = wb.saveSubjectDoc(pageId, serializeState(view.state));
+      // saveSubjectDoc updates memory synchronously; record what we wrote.
+      lastSyncedDoc.current = storedDoc();
+      void pending
         .then(() => {
           setSavedTick((t) => t + 1);
           bump();
         })
-        .catch((err) => console.error("subject save failed", err));
+        .catch(() => bump()); // surfaced by the Reader's save-error banner
     }, 150);
-  }, [wb, pageId, bump]);
+  }, [wb, pageId, bump, storedDoc, syncIfChangedElsewhere]);
 
   // Build the editor once per page id.
   useEffect(() => {
@@ -97,13 +147,28 @@ export function SubjectEditor({
     });
     view.dom.setAttribute("data-testid", "subject-prosemirror");
     viewRef.current = view;
+    lastSyncedDoc.current = storedDoc();
+    const detach = wb.attachLiveDoc(pageId, () => serializeState(view.state));
     setStats(compositionStats(state.doc));
     return () => {
-      if (saveTimer.current) clearTimeout(saveTimer.current);
+      // Flush a pending debounced save instead of dropping it: closing the page
+      // (or leaving for the library) right after typing must not lose text.
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+        void wb.saveSubjectDoc(pageId, serializeState(view.state)).catch(() => undefined);
+      }
+      detach();
       view.destroy();
       viewRef.current = null;
     };
-  }, [wb, pageId, onFollowSource, refreshStats, scheduleSave]);
+    // Built once per page: the callbacks used inside are stable for (wb, pageId).
+  }, [wb, pageId]);
+
+  // After every render, pick up changes made to this page by other paths.
+  useEffect(() => {
+    syncIfChangedElsewhere();
+  });
 
   // Insert a quote at the CURRENT cursor position from a chosen annotation.
   const insertAtCursor = useCallback(
@@ -113,12 +178,16 @@ export function SubjectEditor({
       const pos = view.state.selection.from;
       // Flush any pending composition edits first so the inserted-at position
       // reflects the latest text the user typed.
+      // (insertEvidenceIntoPage also pulls the live doc; failures surface via
+      // the save-error banner while the change stays in memory.)
       if (saveTimer.current) {
         clearTimeout(saveTimer.current);
         saveTimer.current = null;
-        await wb.saveSubjectDoc(pageId, serializeState(view.state));
+        await wb.saveSubjectDoc(pageId, serializeState(view.state)).catch(() => undefined);
       }
-      await wb.insertEvidenceIntoPage(annotationId, pageId, { pos, includeComment });
+      await wb
+        .insertEvidenceIntoPage(annotationId, pageId, { pos, includeComment })
+        .catch(() => undefined);
       // Re-hydrate the editor from the canonical stored JSON (source of truth).
       const json = wb.subjectDocJson(pageId) as DocumentJson;
       const nextState = EditorState.create({
@@ -127,11 +196,12 @@ export function SubjectEditor({
         plugins: subjectKeymapPlugins(),
       });
       view.updateState(nextState);
+      lastSyncedDoc.current = storedDoc();
       setStats(compositionStats(nextState.doc));
       setPicking(false);
       bump();
     },
-    [wb, pageId, bump],
+    [wb, pageId, bump, storedDoc],
   );
 
   // Move the block containing the cursor up or down (reorder, A04).
@@ -142,7 +212,13 @@ export function SubjectEditor({
       const $from = view.state.selection.$from;
       const blockIndex = $from.index(0);
       const target = blockIndex + dir;
-      await wb.moveSubjectBlock(pageId, blockIndex, target);
+      // moveSubjectBlock first pulls this editor's live (unsaved) content, so
+      // text typed moments ago is moved with the block, not discarded.
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+      }
+      await wb.moveSubjectBlock(pageId, blockIndex, target).catch(() => undefined);
       const json = wb.subjectDocJson(pageId) as DocumentJson;
       const nextState = EditorState.create({
         schema: subjectSchema,
@@ -157,19 +233,19 @@ export function SubjectEditor({
         nextState.tr.setSelection(TextSelection.create(nextState.doc, Math.min(pos, nextState.doc.content.size))),
       );
       view.updateState(withSel);
+      lastSyncedDoc.current = storedDoc();
       setStats(compositionStats(withSel.doc));
       view.focus();
       bump();
     },
-    [wb, pageId, bump],
+    [wb, pageId, bump, storedDoc],
   );
 
-  const annotations = useMemo(() => {
-    const data = wb.rawData();
-    const views: AnnotationView[] = [];
-    for (const s of data.sources) views.push(...wb.annotationsForSource(s.id));
-    return views;
-  }, [wb, savedTick, stats]);
+  // Recomputed every render: annotations made in the reader after this editor
+  // opened must appear in the picker (a memo keyed on editor state missed them).
+  void savedTick;
+  const annotations: AnnotationView[] = [];
+  for (const src of wb.rawData().sources) annotations.push(...wb.annotationsForSource(src.id));
 
   if (!page) {
     return <div data-testid="subject-editor">Subject not found.</div>;

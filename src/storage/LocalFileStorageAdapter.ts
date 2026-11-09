@@ -142,6 +142,36 @@ export class LocalFileStorageAdapter implements StorageAdapter {
       await tx.store.put(pointer);
       await tx.done;
     }
+
+    // (4) Only now that the pointer is advanced, drop superseded payloads for
+    // this brain. Every write stores a FULL brain copy, so without this the
+    // store grows by one complete snapshot per keystroke-save. Only strictly
+    // older revisions are removed; the live payload is never touched.
+    await this.collectSupersededPayloads(brainId, data.manifest.publicationRevision);
+  }
+
+  private async collectSupersededPayloads(brainId: BrainId, liveRevision: number): Promise<void> {
+    const db = await this.db();
+    const prefix = `${brainId}:staged:`;
+    const tx = db.transaction(STORE_PAYLOAD, "readwrite");
+    const keys = (await tx.store.getAllKeys(
+      IDBKeyRange.bound(prefix, `${prefix}￿`),
+    )) as string[];
+    for (const key of keys) {
+      const rev = Number(key.slice(prefix.length));
+      if (Number.isFinite(rev) && rev < liveRevision) await tx.store.delete(key);
+    }
+    await tx.done;
+  }
+
+  /** Test/diagnostic helper: the payload keys currently stored for a brain. */
+  async payloadKeysForTest(brainId: BrainId): Promise<string[]> {
+    const db = await this.db();
+    const prefix = `${brainId}:staged:`;
+    return (await db.getAllKeys(
+      STORE_PAYLOAD,
+      IDBKeyRange.bound(prefix, `${prefix}￿`),
+    )) as string[];
   }
 
   async readAsset(brainId: BrainId, assetId: string): Promise<Uint8Array | null> {

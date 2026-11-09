@@ -20,7 +20,7 @@ import { SubjectEditor } from "./SubjectEditor";
 
 /** A pending source-return request (spec section 8.2, A17). */
 interface ReturnTarget {
-  readonly sourceId: SourceId;
+  readonly sourceId: SourceId | null;
   readonly anchor: TextAnchor | null;
   readonly pageIndex: number;
   readonly resolution: AnchorResolution;
@@ -100,8 +100,9 @@ export function Reader({
   // Make sure the source the quote points at is actually open; if it is not in
   // the current workspace, open it alongside (still never replaces the subject).
   useEffect(() => {
-    if (returnTarget && !openSourceIds.includes(returnTarget.sourceId)) {
-      wb.openSource(returnTarget.sourceId);
+    // ADD the source alongside the open panes; never replace them.
+    if (returnTarget?.sourceId && !openSourceIds.includes(returnTarget.sourceId)) {
+      wb.ensureSourceOpen(returnTarget.sourceId);
       bump();
     }
   }, [returnTarget, openSourceIds, wb, bump]);
@@ -112,6 +113,8 @@ export function Reader({
   const paneScrollRefs = useRef<Map<string, HTMLElement>>(new Map());
   const bodyRef = useRef<HTMLDivElement>(null);
   const linesVisible = wb.snapshot().workspaceLayout.linesVisible;
+  const saveError = wb.snapshot().saveError;
+  const [retrying, setRetrying] = useState(false);
 
   // Narrow-screen (phone) responsive detection. A squeezed three-pane
   // miniature is explicitly NOT attempted; narrow screens get a documented
@@ -202,6 +205,30 @@ export function Reader({
             style={{ marginLeft: "0.5rem" }}
           >
             ×
+          </button>
+        </div>
+      )}
+
+      {saveError && (
+        <div data-testid="save-error-banner" role="alert" style={styles.saveError}>
+          Changes are not saved yet: {saveError.message}. They are kept in this
+          session — retry before closing the tab.
+          <button
+            data-testid="retry-save"
+            disabled={retrying}
+            style={{ marginLeft: "0.5rem" }}
+            onClick={() => {
+              setRetrying(true);
+              void wb
+                .retrySave()
+                .catch(() => undefined)
+                .finally(() => {
+                  setRetrying(false);
+                  bump();
+                });
+            }}
+          >
+            {retrying ? "Retrying…" : "Retry save"}
           </button>
         </div>
       )}
@@ -578,7 +605,12 @@ function SourcePane({
   const commitHighlight = useCallback(
     async (style: AnnotationStyle) => {
       if (!toolbar) return;
-      await wb.commitTextAnnotation({ sourceId, anchor: toolbar.anchor, style });
+      // A failed SAVE still leaves the annotation in memory (R12) and surfaces
+      // the save-error banner; the toolbar must close either way, otherwise a
+      // second click creates a duplicate annotation.
+      await wb
+        .commitTextAnnotation({ sourceId, anchor: toolbar.anchor, style })
+        .catch(() => undefined);
       window.getSelection()?.removeAllRanges();
       setToolbar(null);
       redrawOverlays();
@@ -588,11 +620,13 @@ function SourcePane({
   );
 
   const commitRange = useCallback(async () => {
-    await wb.commitRangeAnnotation({
-      sourceId,
-      startPageIndex: Math.min(rangeStart, rangeEnd),
-      endPageIndex: Math.max(rangeStart, rangeEnd),
-    });
+    await wb
+      .commitRangeAnnotation({
+        sourceId,
+        startPageIndex: Math.min(rangeStart, rangeEnd),
+        endPageIndex: Math.max(rangeStart, rangeEnd),
+      })
+      .catch(() => undefined);
     setRangeMode(false);
     redrawOverlays();
     bump();
@@ -732,6 +766,9 @@ function SourcePane({
 
       {openComment && (
         <CommentSurface
+          // Keyed so switching to another annotation starts from THAT
+          // annotation's comment, not the previous one's unsaved draft.
+          key={openComment}
           wb={wb}
           annotationId={openComment}
           onClose={() => setOpenComment(null)}
@@ -741,6 +778,7 @@ function SourcePane({
 
       {menu && (
         <AssociationMenu
+          key={menu.annotationId}
           wb={wb}
           menu={menu}
           onClose={() => setMenu(null)}
@@ -907,13 +945,17 @@ function AssociationMenu({
     p.title.toLowerCase().includes(query.toLowerCase()),
   );
 
+  // Save failures are reported by the Reader's save-error banner; the change
+  // itself is kept in memory, so the menu closes normally either way.
   const doAssociate = async (pageId: PageId): Promise<void> => {
-    await wb.associateWithSubject(menu.annotationId, pageId);
+    await wb.associateWithSubject(menu.annotationId, pageId).catch(() => undefined);
     bump();
     onClose();
   };
   const doInsert = async (pageId: PageId): Promise<void> => {
-    await wb.insertEvidenceIntoPage(menu.annotationId, pageId, { pos: null });
+    await wb
+      .insertEvidenceIntoPage(menu.annotationId, pageId, { pos: null })
+      .catch(() => undefined);
     // Open the subject for composition so the quote is visible in context.
     wb.openSubjectPage(pageId);
     bump();
@@ -923,8 +965,13 @@ function AssociationMenu({
   const doCreate = async (): Promise<void> => {
     const title = newTitle.trim();
     if (!title) return;
-    const { page } = await wb.createSubjectFromAnnotation(title, menu.annotationId);
-    wb.openSubjectPage(page.id);
+    // createSubjectFromAnnotation is two persists; on a failed save the page
+    // still exists in memory, so find it by the latest subject page.
+    const created = await wb
+      .createSubjectFromAnnotation(title, menu.annotationId)
+      .then((r) => r.page)
+      .catch(() => wb.rawData().pages.filter((p) => p.title === title).at(-1));
+    if (created) wb.openSubjectPage(created.id);
     bump();
     onClose();
   };
@@ -1080,6 +1127,7 @@ function HighlightsTab({
       </ul>
       {menuFor && (
         <AssociationMenu
+          key={menuFor.annotationId}
           wb={wb}
           menu={menuFor}
           onClose={() => setMenuFor(null)}
@@ -1118,6 +1166,20 @@ function HighlightRow({
       {view.isRange && (
         <span data-testid="range-badge" style={styles.rangeBadge}>
           range
+        </span>
+      )}
+      {view.resolution.kind !== "resolved" && (
+        <span
+          data-testid="resolution-badge"
+          data-resolution={view.resolution.kind}
+          title={
+            view.resolution.kind === "mismatched"
+              ? "Source edition changed since this highlight was made"
+              : view.resolution.reason
+          }
+          style={{ color: "#c5221f", fontSize: "0.75rem" }}
+        >
+          ⚠ {view.resolution.kind}
         </span>
       )}
       <span style={{ flex: 1, fontSize: "0.85rem" }}>{label}</span>
@@ -1159,7 +1221,7 @@ export function drawAnnotation(
       (p) => Number(p.container.dataset.pageIndex ?? "-1") === anchor.pageIndex,
     );
     if (!page) return;
-    renderHighlightOverlay(page.textLayer, {
+    const el = renderHighlightOverlay(page.textLayer, {
       kind: view.style.kind,
       color: view.style.color,
       rects: anchor.rects,
@@ -1167,6 +1229,7 @@ export function drawAnnotation(
       suppressMotion,
       annotationId: view.annotation.id,
     });
+    markResolution(el, view);
   } else {
     const { startPageIndex, endPageIndex } = view.annotation.scope.anchor;
     for (let pi = startPageIndex; pi <= endPageIndex; pi++) {
@@ -1174,7 +1237,7 @@ export function drawAnnotation(
         (p) => Number(p.container.dataset.pageIndex ?? "-1") === pi,
       );
       if (!page) continue;
-      renderHighlightOverlay(page.textLayer, {
+      const el = renderHighlightOverlay(page.textLayer, {
         kind: view.style.kind,
         color: view.style.color,
         rects: [],
@@ -1183,8 +1246,25 @@ export function drawAnnotation(
         annotationId: view.annotation.id,
         pageBorder: true,
       });
+      markResolution(el, view);
     }
   }
+}
+
+/**
+ * Make anchor health explicit on the overlay (never silently drawn as if it
+ * were fine): a highlight whose source edition changed is drawn at its stored
+ * position but visibly marked as possibly misplaced.
+ */
+function markResolution(el: HTMLElement, view: AnnotationView): void {
+  el.dataset.resolution = view.resolution.kind;
+  if (view.resolution.kind === "resolved") return;
+  el.style.opacity = "0.45";
+  el.style.outline = "2px dashed #c5221f";
+  el.title =
+    view.resolution.kind === "mismatched"
+      ? "Source edition changed since this highlight was made — its position may be wrong."
+      : `Highlight could not be located: ${view.resolution.reason}`;
 }
 
 function swatch(c: HighlightColor): string {
@@ -1448,6 +1528,13 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#fff",
     borderRadius: "4px",
     padding: "0 0.3rem",
+  },
+  saveError: {
+    padding: "0.5rem 1rem",
+    background: "#fdecea",
+    borderBottom: "1px solid #f5c2c0",
+    color: "#8a1c14",
+    fontSize: "0.85rem",
   },
   returnNotice: {
     padding: "0.5rem 1rem",

@@ -55,7 +55,7 @@ import {
   type DocumentJson,
   type EvidenceAttrs,
 } from "../editor";
-import type { StorageAdapter } from "../storage";
+import { resolveAnnotationAgainstSource, type StorageAdapter } from "../storage";
 
 /** An empty subject-page composition: one empty paragraph (never null). */
 function emptyDocJson(): DocumentJson {
@@ -96,6 +96,13 @@ export interface AnnotationView {
   readonly rangeLabel: string | null;
   /** Derived (annotation, destination) references with live status. */
   readonly references: readonly SubjectReference[];
+  /**
+   * LIVE anchor health against the source as it is now (not the value stored
+   * at creation time). A drifted source edition yields `mismatched`, so the
+   * reader can mark the highlight instead of silently drawing it over
+   * possibly-unrelated content.
+   */
+  readonly resolution: AnchorResolution;
 }
 
 /** A persisted save failure: retains the draft so it is never lost (R12). */
@@ -264,6 +271,19 @@ export class Workbench {
    * without needing to corrupt IndexedDB. Set via `failNextSaves`.
    */
   private failNextSaves = 0;
+  /**
+   * Writes are strictly serialized: a later persist() waits for the earlier one
+   * so revisions advance monotonically and an out-of-order completion can never
+   * overwrite newer in-memory state with an older snapshot.
+   */
+  private writeChain: Promise<void> = Promise.resolve();
+  /**
+   * Live-document providers for subject pages currently open in an editor. A
+   * structural mutation on such a page first pulls the editor's latest
+   * (possibly not-yet-saved) document so it is never overwritten by stale
+   * stored JSON, and the editor in turn re-hydrates from the result.
+   */
+  private liveDocs = new Map<PageId, () => DocumentJson>();
 
   private constructor(
     private readonly storage: StorageAdapter,
@@ -279,8 +299,15 @@ export class Workbench {
     if (brainId) {
       data = await storage.readBrain(brainId);
     } else {
+      // Several brains can exist (e.g. a double-mounted first launch created a
+      // second, empty one). Store key order is arbitrary, so pick the brain the
+      // user most recently worked in rather than whichever id sorts first.
       const ids = await storage.listBrains();
-      if (ids[0]) data = await storage.readBrain(ids[0]);
+      for (const id of ids) {
+        const candidate = await storage.readBrain(id);
+        if (!candidate) continue;
+        if (!data || candidate.manifest.updatedAt > data.manifest.updatedAt) data = candidate;
+      }
     }
     if (!data) {
       data = createEmptyBrainData();
@@ -402,6 +429,17 @@ export class Workbench {
   /** Open one document in the reading workspace (double-click/tap). */
   openSource(sourceId: SourceId): void {
     this.openSourceIds = [sourceId];
+  }
+
+  /**
+   * Make sure a source is open, ADDING it alongside the current panes if it is
+   * not (source-return into a closed paper). Never closes another pane or the
+   * subject page. Unknown source ids are ignored.
+   */
+  ensureSourceOpen(sourceId: SourceId): void {
+    if (this.openSourceIds.includes(sourceId)) return;
+    if (!this.data.sources.some((s) => s.id === sourceId)) return;
+    this.openSourceIds = [...this.openSourceIds, sourceId];
   }
 
   /**
@@ -655,8 +693,22 @@ export class Workbench {
 
   /** Delete an annotation and its style. Associating/citing never calls this. */
   async deleteAnnotation(id: AnnotationId): Promise<void> {
+    // Remove the annotation's quote nodes from every subject composition too,
+    // so no page keeps a chip whose provenance no longer exists.
+    const doomed = this.data.evidenceInstances.filter((e) => e.annotationId === id);
+    for (const pageId of new Set(doomed.map((e) => e.destinationPageId))) {
+      this.pullLiveDoc(pageId);
+    }
+    const pages = this.data.pages.map((page) => {
+      const ids = doomed.filter((e) => e.destinationPageId === page.id).map((e) => e.id);
+      if (ids.length === 0) return page;
+      let state = hydrateState((page.documentJson as DocumentJson) ?? emptyDocJson());
+      for (const evId of ids) state = removeEvidenceNode(state, evId);
+      return { ...page, documentJson: serializeState(state), updatedAt: new Date().toISOString() };
+    });
     this.data = {
       ...this.data,
+      pages,
       annotations: this.data.annotations.filter((a) => a.id !== id),
       evidenceInstances: this.data.evidenceInstances.filter((e) => e.annotationId !== id),
       subjectAssociations: this.data.subjectAssociations.filter(
@@ -730,7 +782,8 @@ export class Workbench {
   async saveSubjectDoc(pageId: PageId, json: DocumentJson): Promise<void> {
     const idx = this.data.pages.findIndex((p) => p.id === pageId);
     if (idx < 0) throw new Error("saveSubjectDoc: unknown page");
-    const canonical = serializeState(hydrateState(json));
+    const state = hydrateState(json);
+    const canonical = serializeState(state);
     const prev = this.data.pages[idx]!;
     const updated: Page = {
       ...prev,
@@ -739,8 +792,80 @@ export class Workbench {
     };
     const pages = this.data.pages.slice();
     pages[idx] = updated;
-    this.data = { ...this.data, pages };
+    this.data = {
+      ...this.data,
+      pages,
+      evidenceInstances: this.reconcileEvidence(pageId, state.doc),
+    };
     await this.persist();
+  }
+
+  /**
+   * Keep EvidenceInstances for a page in step with the evidence nodes actually
+   * present in its composition. Deleting a quote chip in the editor removes
+   * its instance (so the pair re-derives to tentative/none instead of staying
+   * falsely "cited"); a node that comes back (cut + paste) gets its instance
+   * back, provided its annotation still exists.
+   */
+  private reconcileEvidence(
+    pageId: PageId,
+    doc: ReturnType<typeof hydrateState>["doc"],
+  ): EvidenceInstance[] {
+    const present = new Map<string, EvidenceAttrs>();
+    doc.descendants((node) => {
+      if (node.type.name === "evidence") {
+        const attrs = node.attrs as unknown as EvidenceAttrs;
+        if (!present.has(attrs.evidenceId)) present.set(attrs.evidenceId, attrs);
+      }
+      return true;
+    });
+    const kept = this.data.evidenceInstances.filter(
+      (e) => e.destinationPageId !== pageId || present.has(e.id),
+    );
+    const known = new Set(kept.map((e) => e.id as string));
+    for (const [evId, attrs] of present) {
+      if (known.has(evId)) continue;
+      if (!this.data.annotations.some((a) => a.id === attrs.annotationId)) continue;
+      kept.push({
+        id: evId as EvidenceInstance["id"],
+        annotationId: attrs.annotationId,
+        destinationPageId: pageId,
+        quotedText: attrs.quotedText,
+        createdAt: new Date().toISOString(),
+      });
+    }
+    return kept;
+  }
+
+  /**
+   * Register the open editor's live document for a subject page. Returns a
+   * detach function. While attached, structural mutations of that page start
+   * from the editor's current content (see `pullLiveDoc`).
+   */
+  attachLiveDoc(pageId: PageId, provider: () => DocumentJson): () => void {
+    this.liveDocs.set(pageId, provider);
+    return () => {
+      if (this.liveDocs.get(pageId) === provider) this.liveDocs.delete(pageId);
+    };
+  }
+
+  /** Fold an attached editor's live document into memory before mutating. */
+  private pullLiveDoc(pageId: PageId): void {
+    const provider = this.liveDocs.get(pageId);
+    if (!provider) return;
+    const idx = this.data.pages.findIndex((p) => p.id === pageId);
+    if (idx < 0) return;
+    let json: DocumentJson;
+    try {
+      json = serializeState(hydrateState(provider()));
+    } catch {
+      return; // a broken editor state must not block the mutation
+    }
+    const prev = this.data.pages[idx]!;
+    if (JSON.stringify(json) === JSON.stringify(prev.documentJson)) return;
+    const pages = this.data.pages.slice();
+    pages[idx] = { ...prev, documentJson: json, updatedAt: new Date().toISOString() };
+    this.data = { ...this.data, pages };
   }
 
   /**
@@ -810,6 +935,7 @@ export class Workbench {
     if (!annotation) throw new Error("insertEvidenceIntoPage: unknown annotation");
     const pageIdx = this.data.pages.findIndex((p) => p.id === destinationPageId);
     if (pageIdx < 0) throw new Error("insertEvidenceIntoPage: unknown page");
+    this.pullLiveDoc(destinationPageId);
 
     const evidence: EvidenceInstance = {
       id: newEvidenceInstanceId(),
@@ -858,6 +984,7 @@ export class Workbench {
    * links (A04). Re-derives + persists the canonical JSON.
    */
   async moveSubjectBlock(pageId: PageId, from: number, to: number): Promise<void> {
+    this.pullLiveDoc(pageId);
     const page = this.data.pages.find((p) => p.id === pageId);
     if (!page) throw new Error("moveSubjectBlock: unknown page");
     const state = hydrateState((page.documentJson as DocumentJson) ?? emptyDocJson());
@@ -874,7 +1001,8 @@ export class Workbench {
    */
   resolveEvidenceSource(evidenceId: string):
     | {
-        readonly sourceId: SourceId;
+        /** null when the owning annotation no longer exists (nothing to open). */
+        readonly sourceId: SourceId | null;
         readonly anchor: TextAnchor | null;
         readonly scopeStartPageIndex: number;
         readonly resolution: AnchorResolution;
@@ -885,7 +1013,7 @@ export class Workbench {
     const annotation = this.data.annotations.find((a) => a.id === evidence.annotationId);
     if (!annotation) {
       return {
-        sourceId: evidence.annotationId as unknown as SourceId,
+        sourceId: null,
         anchor: null,
         scopeStartPageIndex: 0,
         resolution: { kind: "unresolved", reason: "source annotation no longer exists" },
@@ -1025,6 +1153,7 @@ export class Workbench {
    */
   async removeEvidence(evidenceId: string): Promise<void> {
     const evidence = this.data.evidenceInstances.find((e) => e.id === evidenceId);
+    if (evidence) this.pullLiveDoc(evidence.destinationPageId);
     let pages: readonly Page[] = this.data.pages;
     if (evidence) {
       const pageIdx = this.data.pages.findIndex((p) => p.id === evidence.destinationPageId);
@@ -1089,7 +1218,11 @@ export class Workbench {
       this.data.evidenceInstances,
       this.data.subjectAssociations,
     );
-    return { annotation, style, isRange, rangeLabel, references };
+    const resolution = resolveAnnotationAgainstSource(
+      annotation,
+      this.data.sources.find((s) => s.id === annotation.sourceId),
+    );
+    return { annotation, style, isRange, rangeLabel, references, resolution };
   }
 
   // -- persistence ----------------------------------------------------------
@@ -1099,32 +1232,63 @@ export class Workbench {
    * the publication revision. On failure, retain in-memory state and record a
    * SaveError — the caller/UI shows an actionable error and keeps the draft.
    */
-  private async persist(): Promise<void> {
-    const withStyles = writeStyles(this.data, this.styles);
-    const next: BrainData = {
-      ...withStyles,
-      manifest: {
-        ...withStyles.manifest,
-        publicationRevision: withStyles.manifest.publicationRevision + 1,
-        updatedAt: new Date().toISOString(),
-      },
-    };
-    try {
-      if (this.failNextSaves > 0) {
-        this.failNextSaves -= 1;
-        throw new Error("simulated save failure");
-      }
-      await this.storage.writeBrain(next);
-      this.data = next;
-      this.saveError = null;
-    } catch (err) {
-      // Keep this.data at its pre-persist value so the draft is not lost.
-      this.saveError = {
-        message: err instanceof Error ? err.message : String(err),
-        atISO: new Date().toISOString(),
+  private persist(): Promise<void> {
+    const run = async (): Promise<void> => {
+      // Snapshot at EXECUTION time so a queued write carries every change made
+      // while it waited (writes coalesce naturally).
+      const snapshot = this.data;
+      const withStyles = writeStyles(snapshot, this.styles);
+      const next: BrainData = {
+        ...withStyles,
+        manifest: {
+          ...withStyles.manifest,
+          publicationRevision: withStyles.manifest.publicationRevision + 1,
+          updatedAt: new Date().toISOString(),
+        },
       };
-      throw err;
-    }
+      try {
+        if (this.failNextSaves > 0) {
+          this.failNextSaves -= 1;
+          throw new Error("simulated save failure");
+        }
+        await this.storage.writeBrain(next);
+        // Never clobber mutations made while the write was in flight: adopt the
+        // written snapshot only if nothing changed, else just advance the
+        // revision bookkeeping on the newer in-memory data.
+        this.data =
+          this.data === snapshot
+            ? next
+            : {
+                ...this.data,
+                manifest: {
+                  ...this.data.manifest,
+                  publicationRevision: next.manifest.publicationRevision,
+                  updatedAt: next.manifest.updatedAt,
+                },
+              };
+        this.saveError = null;
+      } catch (err) {
+        // In-memory data keeps the change, so the draft is not lost; the next
+        // successful write (or retrySave) publishes it.
+        this.saveError = {
+          message: err instanceof Error ? err.message : String(err),
+          atISO: new Date().toISOString(),
+        };
+        throw err;
+      }
+    };
+    const result = this.writeChain.then(run, run);
+    this.writeChain = result.catch(() => undefined);
+    return result;
+  }
+
+  /**
+   * Re-attempt publishing the current in-memory state after a failed save
+   * (R12). Unsaved changes live in memory until a write succeeds; this is the
+   * explicit, user-triggered way to get them durable again.
+   */
+  retrySave(): Promise<void> {
+    return this.persist();
   }
 
   /** Normalized union bounding box for a set of rects (used for overlays). */
