@@ -14,7 +14,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type { SceneGraphInput } from "../network";
+import { buildScene, type SceneGraphInput } from "../network";
 import { mapGraphTo3D, revealPresentation } from "./threeScene.map";
 
 /** A small live-graph fixture: 5 nodes, 2 categories, 1 relationship. */
@@ -155,7 +155,67 @@ describe("mapGraphTo3D — pure graph -> 3D scene descriptor", () => {
     expect(scene.particles).toHaveLength(0);
     expect(scene.hulls).toHaveLength(0);
     expect(scene.links).toHaveLength(0);
+    expect(scene.categoryLinks).toHaveLength(0);
     expect(scene.extent).toBe(0);
+  });
+
+  it("A14-M2 parity: a master category-link in buildScene appears in 3D with linkKind preserved", () => {
+    // Two categories whose MASTER pages (mA, mB) are joined by a relationship,
+    // plus plain members so each category has a squircle to anchor on.
+    const graph: SceneGraphInput = {
+      nodes: ["mA", "mB", "a", "b"].map((pageId) => ({
+        pageId,
+        title: pageId,
+        hidden: false,
+        position: null,
+      })),
+      links: [
+        {
+          relationshipId: "rMaster",
+          endpointPageIds: ["mA", "mB"],
+          label: "",
+          blendColor: "#4b5578",
+          hidden: false,
+        },
+      ],
+      categories: [
+        { categoryId: "catA", name: "A", colorCode: "#4b5578", memberPageIds: ["mA", "a"], masterPageId: "mA" },
+        { categoryId: "catB", name: "B", colorCode: "#b5653f", memberPageIds: ["mB", "b"], masterPageId: "mB" },
+      ],
+    };
+
+    // The 2D scene must have a single 'master' category-link.
+    const scene2d = buildScene(graph);
+    expect(scene2d.categoryLinks).toHaveLength(1);
+    const link2d = scene2d.categoryLinks[0]!;
+    expect(link2d.linkKind).toBe("master");
+
+    // The 3D descriptor surfaces the SAME link, lifted onto the y=0 plane with
+    // z=y, and preserves linkKind (2D/3D parity).
+    const scene3d = mapGraphTo3D(graph);
+    expect(scene3d.categoryLinks).toHaveLength(1);
+    const link3d = scene3d.categoryLinks[0]!;
+    expect(link3d.linkKind).toBe("master");
+    expect(link3d.fromCategoryId).toBe(link2d.fromCategoryId);
+    expect(link3d.toCategoryId).toBe(link2d.toCategoryId);
+    expect(link3d.from).toEqual({ x: link2d.from.x, y: 0, z: link2d.from.y });
+    expect(link3d.to).toEqual({ x: link2d.to.x, y: 0, z: link2d.to.y });
+  });
+
+  it("A14-M2 parity: a member bridge appears in 3D as a 'member' category-link", () => {
+    const graph: SceneGraphInput = {
+      nodes: ["a", "b"].map((pageId) => ({ pageId, title: pageId, hidden: false, position: null })),
+      links: [
+        { relationshipId: "r1", endpointPageIds: ["a", "b"], label: "", blendColor: "#808080", hidden: false },
+      ],
+      categories: [
+        { categoryId: "catA", name: "A", colorCode: "#4b5578", memberPageIds: ["a"] },
+        { categoryId: "catB", name: "B", colorCode: "#b5653f", memberPageIds: ["b"] },
+      ],
+    };
+    const scene3d = mapGraphTo3D(graph);
+    expect(scene3d.categoryLinks).toHaveLength(1);
+    expect(scene3d.categoryLinks[0]!.linkKind).toBe("member");
   });
 });
 

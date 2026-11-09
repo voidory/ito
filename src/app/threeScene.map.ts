@@ -53,11 +53,27 @@ export interface SceneLink3D {
   readonly endpoints: readonly Vec3[];
 }
 
+/**
+ * A category-to-category boundary link lifted to 3D (A14-M2 parity). The 3D view
+ * renders the SAME master/member boundary links as the 2D canvas: each 2D
+ * SceneCategoryLink is lifted onto the y=0 plane (z=y) like the category hulls,
+ * preserving its linkKind so master vs member stays distinguishable in 3D.
+ */
+export interface SceneCategoryLink3D {
+  readonly fromCategoryId: string;
+  readonly toCategoryId: string;
+  readonly linkKind: "master" | "member";
+  readonly from: Vec3;
+  readonly to: Vec3;
+}
+
 /** The full 3D scene descriptor the renderer consumes. */
 export interface Scene3D {
   readonly particles: readonly SceneParticle[];
   readonly hulls: readonly SceneHull[];
   readonly links: readonly SceneLink3D[];
+  /** Category-to-category boundary links lifted to 3D (A14-M2 parity). */
+  readonly categoryLinks: readonly SceneCategoryLink3D[];
   /** Overall bounding radius (for camera framing); 0 for an empty scene. */
   readonly extent: number;
 }
@@ -162,6 +178,16 @@ export function mapGraphTo3D(
     };
   });
 
+  // Category boundary links lifted onto the y=0 plane (z=y) like the hulls, so
+  // the 3D view renders the SAME master/member links as the 2D canvas (A14-M2).
+  const categoryLinks: SceneCategoryLink3D[] = scene.categoryLinks.map((cl) => ({
+    fromCategoryId: cl.fromCategoryId,
+    toCategoryId: cl.toCategoryId,
+    linkKind: cl.linkKind,
+    from: { x: cl.from.x, y: 0, z: cl.from.y },
+    to: { x: cl.to.x, y: 0, z: cl.to.y },
+  }));
+
   // Overall extent for camera framing: the farthest particle/hull from origin.
   let extent = 0;
   for (const p of particles) {
@@ -172,7 +198,7 @@ export function mapGraphTo3D(
     extent = Math.max(extent, d);
   }
 
-  return { particles, hulls, links, extent };
+  return { particles, hulls, links, categoryLinks, extent };
 }
 
 /** Planar coordinate equality with a tiny tolerance (positions are shared). */

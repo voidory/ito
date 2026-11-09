@@ -208,3 +208,93 @@ describe("FEAT-005 — category-scope graph filter (Nodes with a category)", () 
     expect(scoped.links.length).toBe(0);
   });
 });
+
+describe("Ruling 2 (N06, §7.2) — a placeholder per open UNCONNECTED source", () => {
+  let wb: Workbench;
+  beforeEach(async () => {
+    wb = await Workbench.open(new InMemoryStorageAdapter());
+  });
+
+  /** The headless mirror of what NodesView renders: one placeholder per open
+   *  unconnected source. */
+  function openUnconnectedPlaceholders(bench: Workbench): ReturnType<Workbench["nodePlaceholderFor"]>[] {
+    return bench
+      .snapshot()
+      .openSourceIds.filter((id) => !bench.sourceIsConnected(id))
+      .map((id) => bench.nodePlaceholderFor(id));
+  }
+
+  function graphRecordCount(bench: Workbench): {
+    pages: number;
+    relationships: number;
+    categories: number;
+  } {
+    const d = bench.rawData();
+    return {
+      pages: d.pages.length,
+      relationships: d.relationships.length,
+      categories: d.categories.length,
+    };
+  }
+
+  it("renders a placeholder for EVERY unconnected source opened together (not just one)", async () => {
+    const s1 = await importOne(wb, "First");
+    const s2 = await importOne(wb, "Second");
+    const s3 = await importOne(wb, "Third");
+    wb.openTogether([s1.id, s2.id, s3.id]);
+    wb.setViewMode("nodes");
+
+    const placeholders = openUnconnectedPlaceholders(wb);
+    expect(placeholders).toHaveLength(3);
+    expect(placeholders.map((p) => p.sourceId).sort()).toEqual(
+      [s1.id, s2.id, s3.id].sort(),
+    );
+    for (const p of placeholders) expect(p.transient).toBe(true);
+    // Producing placeholders creates ZERO durable records.
+    expect(graphRecordCount(wb)).toEqual({ pages: 0, relationships: 0, categories: 0 });
+  });
+
+  it("still yields exactly one placeholder for a single open unconnected source", async () => {
+    const s1 = await importOne(wb, "Solo");
+    wb.openSource(s1.id);
+    wb.setViewMode("nodes");
+    const placeholders = openUnconnectedPlaceholders(wb);
+    expect(placeholders).toHaveLength(1);
+    expect(placeholders[0]!.sourceId).toBe(s1.id);
+  });
+
+  it("connecting ONE source drops its placeholder while the other remains; zero records during the placeholder flow", async () => {
+    const s1 = await importOne(wb, "Will Connect");
+    const s2 = await importOne(wb, "Stays Unconnected");
+    wb.openTogether([s1.id, s2.id]);
+    wb.setViewMode("nodes");
+
+    // Both are unconnected: two placeholders, zero durable records so far.
+    expect(openUnconnectedPlaceholders(wb).map((p) => p.sourceId).sort()).toEqual(
+      [s1.id, s2.id].sort(),
+    );
+    expect(graphRecordCount(wb)).toEqual({ pages: 0, relationships: 0, categories: 0 });
+
+    // Explicitly connect s1 by citing one of its annotations into a subject
+    // page (this is a DELIBERATE user action that DOES create a Page — the N06
+    // placeholder flow itself created nothing).
+    const view = await wb.commitTextAnnotation({
+      sourceId: s1.id,
+      anchor: textAnchor(s1.id, s1.versionHash, "quick brown fox"),
+    });
+    await wb.createSubjectFromAnnotation("Subject", view.annotation.id as AnnotationId);
+
+    // s1 is now connected => its placeholder is gone; s2 still shows one.
+    const remaining = openUnconnectedPlaceholders(wb);
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]!.sourceId).toBe(s2.id);
+    expect(wb.sourceIsConnected(s1.id)).toBe(true);
+    expect(wb.sourceIsConnected(s2.id)).toBe(false);
+
+    // Re-producing the placeholder for the still-unconnected source creates no
+    // NEW records (count only changed by the deliberate citation, +1 page).
+    const before = graphRecordCount(wb);
+    openUnconnectedPlaceholders(wb);
+    expect(graphRecordCount(wb)).toEqual(before);
+  });
+});

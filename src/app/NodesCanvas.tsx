@@ -5,7 +5,7 @@ import {
   type Scene,
   type SceneGraphInput,
 } from "../network";
-import type { CategoryId, PageId, RelationshipId } from "../model";
+import type { CategoryId, PageId, RelationshipId, SourceId } from "../model";
 import type { ConceptGraph, Workbench } from "./workbench";
 import "./network.css";
 
@@ -45,6 +45,7 @@ export function NodesCanvas({
   wb,
   categoryScope = null,
   placeholder = null,
+  placeholders,
   suppressMotion,
   bump,
 }: {
@@ -54,12 +55,28 @@ export function NodesCanvas({
    * name = only that category's squircle + its local/overlapping network.
    */
   categoryScope?: string | null;
-  /** A transient "not connected yet" placeholder (N06), or null. */
+  /**
+   * A single transient "not connected yet" placeholder (N06), or null. Retained
+   * for backwards compatibility; prefer `placeholders` for the open-together
+   * case where every unconnected open source gets its own placeholder.
+   */
   placeholder?: NodePlaceholderProps | null;
+  /**
+   * Transient "not connected yet" placeholders (N06) — one per currently open
+   * UNCONNECTED source. When provided this takes precedence over the single
+   * `placeholder` prop. Each placeholder creates ZERO durable records.
+   */
+  placeholders?: readonly NodePlaceholderProps[];
   suppressMotion: boolean;
   bump: () => void;
 }): JSX.Element {
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
+
+  // N06: render one transient placeholder per open UNCONNECTED source. The
+  // `placeholders` array (open-together) takes precedence; the single
+  // `placeholder` prop is kept for backwards compatibility.
+  const effectivePlaceholders: readonly NodePlaceholderProps[] =
+    placeholders ?? (placeholder ? [placeholder] : []);
 
   // Read the live derived graph and map it to a rendered scene. Keyed on a
   // structural signature so the deterministic layout only re-runs when the
@@ -88,6 +105,7 @@ export function NodesCanvas({
       name: c.name,
       colorCode: c.colorCode,
       memberPageIds: c.memberPageIds,
+      ...(c.masterPageId != null ? { masterPageId: c.masterPageId } : {}),
     })),
   };
   const signature = JSON.stringify(graphInput);
@@ -160,37 +178,64 @@ export function NodesCanvas({
         </filter>
       </defs>
 
-      {placeholder ? (
-        <g
-          data-testid="node-placeholder"
-          data-transient={placeholder.transient ? "true" : "false"}
-          data-source-id={placeholder.sourceId}
-          className="node-placeholder"
-          // Clicking a placeholder is EPHEMERAL UI only: it creates no
-          // Page/Relationship/Category and performs no DB write (N06-M2). We
-          // deliberately do nothing persistent here.
-          onClick={() => {
-            /* intentionally no-op: placeholder persists nothing (N06-M2) */
-          }}
-        >
-          <circle className="node-placeholder-dot" r={9} cx={0} cy={0} />
-          <text
-            className="node-placeholder-label"
-            x={0}
-            y={28}
-            textAnchor="middle"
-          >
-            Not connected yet
-          </text>
-          <text
-            className="node-placeholder-title"
-            data-testid="node-placeholder-title"
-            x={0}
-            y={48}
-            textAnchor="middle"
-          >
-            {placeholder.title}
-          </text>
+      {effectivePlaceholders.length > 0 ? (
+        <g data-testid="node-placeholder-layer">
+          {effectivePlaceholders.map((ph, i) => {
+            // Offset each placeholder along a column so multiple open-together
+            // unconnected sources (N06) do not overlap. Purely presentational.
+            const offsetY = i * PLACEHOLDER_SPACING;
+            return (
+              <g
+                key={ph.sourceId}
+                data-testid="node-placeholder"
+                data-transient={ph.transient ? "true" : "false"}
+                data-source-id={ph.sourceId}
+                className="node-placeholder"
+                transform={`translate(0 ${offsetY})`}
+              >
+                <circle className="node-placeholder-dot" r={9} cx={0} cy={0} />
+                <text
+                  className="node-placeholder-label"
+                  x={0}
+                  y={28}
+                  textAnchor="middle"
+                >
+                  Not connected yet
+                </text>
+                <text
+                  className="node-placeholder-title"
+                  data-testid="node-placeholder-title"
+                  x={0}
+                  y={48}
+                  textAnchor="middle"
+                >
+                  {ph.title}
+                </text>
+                {/*
+                  Return-to-Reader (N06): switch back to the Files/Reader view
+                  focused on THIS source. This is EPHEMERAL navigation only — it
+                  calls setViewMode + openSource, creating ZERO durable
+                  Page/Relationship/Category records.
+                */}
+                <text
+                  className="placeholder-return-reader"
+                  data-testid="placeholder-return-reader"
+                  data-source-id={ph.sourceId}
+                  x={0}
+                  y={68}
+                  textAnchor="middle"
+                  role="button"
+                  onClick={() => {
+                    wb.setViewMode("files");
+                    wb.openSource(ph.sourceId as SourceId);
+                    bump();
+                  }}
+                >
+                  Return to Reader
+                </text>
+              </g>
+            );
+          })}
         </g>
       ) : scene.nodes.length === 0 && scene.squircles.length === 0 ? (
         <text className="nodes-empty" x={0} y={0} textAnchor="middle">
@@ -236,6 +281,7 @@ export function NodesCanvas({
             data-testid="category-link"
             data-from-category-id={cl.fromCategoryId}
             data-to-category-id={cl.toCategoryId}
+            data-link-kind={cl.linkKind}
             x1={cl.from.x}
             y1={cl.from.y}
             x2={cl.to.x}
@@ -295,6 +341,9 @@ export function NodesCanvas({
     </svg>
   );
 }
+
+/** Vertical spacing between stacked N06 placeholders (presentation only). */
+const PLACEHOLDER_SPACING = 96;
 
 function round(n: number): number {
   return Math.round(n * 1000) / 1000;

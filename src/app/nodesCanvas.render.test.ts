@@ -37,6 +37,7 @@ async function mount(
   extra: {
     categoryScope?: string | null;
     placeholder?: { sourceId: string; title: string; transient: boolean } | null;
+    placeholders?: readonly { sourceId: string; title: string; transient: boolean }[];
   } = {},
 ): Promise<HTMLElement> {
   container = document.createElement("div");
@@ -119,7 +120,24 @@ describe("NodesCanvas — renders from live Workbench records", () => {
     await wb.createRelationship([a!, b!]);
     const el = await mount(wb);
 
-    expect(el.querySelector('[data-testid="category-link"]')).not.toBeNull();
+    const link = el.querySelector('[data-testid="category-link"]');
+    expect(link).not.toBeNull();
+    // A member-bridging relationship (no master pages) is classed 'member'.
+    expect(link!.getAttribute("data-link-kind")).toBe("member");
+  });
+
+  it("renders a 'master' category-link when two categories' master pages are related (A14-M2)", async () => {
+    const wb = await Workbench.open(new InMemoryStorageAdapter());
+    const [a, b] = await makePages(wb, ["A", "B"]);
+    const catA = await wb.createCategory("CatA", "#4b5578", [a!]);
+    const catB = await wb.createCategory("CatB", "#b5653f", [b!]);
+    // Connect the two category BOUNDARIES (master page <-> master page).
+    await wb.connectCategoryBoundaries(catA.id, catB.id);
+    const el = await mount(wb);
+
+    const links = Array.from(el.querySelectorAll('[data-testid="category-link"]'));
+    expect(links.length).toBe(1);
+    expect(links[0]!.getAttribute("data-link-kind")).toBe("master");
   });
 
   it("FEAT-005: with a category scope, renders only that category + overlapping ones", async () => {
@@ -166,6 +184,79 @@ describe("NodesCanvas — renders from live Workbench records", () => {
       "Lonely Paper",
     );
     // Rendering the placeholder created no durable graph records.
+    const d = wb.rawData();
+    expect(d.pages.length).toBe(0);
+    expect(d.relationships.length).toBe(0);
+    expect(d.categories.length).toBe(0);
+  });
+
+  it("Ruling 2/N06: renders one placeholder group per open unconnected source, each with a Return-to-Reader control", async () => {
+    const wb = await Workbench.open(new InMemoryStorageAdapter());
+    const s1 = await wb.importSource({
+      title: "First Paper",
+      bytes: new Uint8Array([1, 2, 3, 4]),
+      versionHash: "h1",
+      pageCount: 2,
+    });
+    const s2 = await wb.importSource({
+      title: "Second Paper",
+      bytes: new Uint8Array([5, 6, 7, 8]),
+      versionHash: "h2",
+      pageCount: 2,
+    });
+    const placeholders = [wb.nodePlaceholderFor(s1.id), wb.nodePlaceholderFor(s2.id)];
+    const el = await mount(wb, { placeholders });
+
+    const groups = Array.from(el.querySelectorAll('[data-testid="node-placeholder"]'));
+    expect(groups).toHaveLength(2);
+    const sourceIds = groups.map((g) => g.getAttribute("data-source-id")).sort();
+    expect(sourceIds).toEqual([s1.id, s2.id].sort());
+    for (const g of groups) {
+      expect(g.getAttribute("data-transient")).toBe("true");
+      // Each placeholder carries a Return-to-Reader control.
+      expect(g.querySelector('[data-testid="placeholder-return-reader"]')).not.toBeNull();
+    }
+    // Two distinct return-to-reader controls across the layer.
+    expect(el.querySelectorAll('[data-testid="placeholder-return-reader"]').length).toBe(2);
+
+    // Rendering created zero durable graph records.
+    const d = wb.rawData();
+    expect(d.pages.length).toBe(0);
+    expect(d.relationships.length).toBe(0);
+    expect(d.categories.length).toBe(0);
+  });
+
+  it("Ruling 2/N06: clicking Return-to-Reader switches to Files focused on that source and creates no records", async () => {
+    const wb = await Workbench.open(new InMemoryStorageAdapter());
+    const s1 = await wb.importSource({
+      title: "First Paper",
+      bytes: new Uint8Array([1, 2, 3, 4]),
+      versionHash: "h1",
+      pageCount: 2,
+    });
+    const s2 = await wb.importSource({
+      title: "Second Paper",
+      bytes: new Uint8Array([5, 6, 7, 8]),
+      versionHash: "h2",
+      pageCount: 2,
+    });
+    wb.setViewMode("nodes");
+    const placeholders = [wb.nodePlaceholderFor(s1.id), wb.nodePlaceholderFor(s2.id)];
+    const el = await mount(wb, { placeholders });
+
+    const s2Group = el.querySelector(
+      `[data-testid="node-placeholder"][data-source-id="${s2.id}"]`,
+    )!;
+    const control = s2Group.querySelector(
+      '[data-testid="placeholder-return-reader"]',
+    ) as HTMLElement;
+    await act(async () => {
+      control.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    // Switched back to Files focused on s2; zero durable records created.
+    expect(wb.viewMode()).toBe("files");
+    expect(wb.snapshot().openSourceIds).toEqual([s2.id]);
     const d = wb.rawData();
     expect(d.pages.length).toBe(0);
     expect(d.relationships.length).toBe(0);

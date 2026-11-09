@@ -251,3 +251,92 @@ describe("FEAT-003 — node positions / zoom are durable presentation state", ()
     expect(reopened.rawData().presentation.dragOffsets?.[a!]).toEqual({ x: 5, y: 6 });
   });
 });
+
+describe("Ruling 1 (A14-M2, §12.2) — category master pages", () => {
+  let storage: InMemoryStorageAdapter;
+  let wb: Workbench;
+
+  beforeEach(async () => {
+    storage = new InMemoryStorageAdapter();
+    wb = await Workbench.open(storage);
+  });
+
+  it("getOrCreateCategoryMasterPage creates ONE real editable subject Page and sets masterPageId", async () => {
+    const cat = await wb.createCategory("Theory", "#4b5578");
+    expect(wb.categoryMasterPageId(cat.id)).toBeNull();
+    const pagesBefore = wb.rawData().pages.length;
+
+    const masterId = await wb.getOrCreateCategoryMasterPage(cat.id);
+
+    // A real subject page exists and is editable in the SubjectEditor path.
+    const page = wb.rawData().pages.find((p) => p.id === masterId)!;
+    expect(page).toBeDefined();
+    expect(page.kind).toBe("subject");
+    expect(page.title).toBe("Theory (master)");
+    expect(wb.rawData().pages.length).toBe(pagesBefore + 1);
+    // Category now references the master page immutably.
+    expect(wb.categoryMasterPageId(cat.id)).toBe(masterId);
+    // Membership semantics are unchanged (master page is NOT a member).
+    const stored = wb.rawData().categories.find((c) => c.id === cat.id)!;
+    expect(stored.memberPageIds).not.toContain(masterId);
+    // Editable via subject doc JSON (proves it is a normal Page).
+    expect(wb.subjectDocJson(masterId)).toBeTruthy();
+  });
+
+  it("is idempotent: a second call returns the same id and creates no second page", async () => {
+    const cat = await wb.createCategory("Theory");
+    const first = await wb.getOrCreateCategoryMasterPage(cat.id);
+    const pagesAfterFirst = wb.rawData().pages.length;
+
+    const second = await wb.getOrCreateCategoryMasterPage(cat.id);
+    expect(second).toBe(first);
+    expect(wb.rawData().pages.length).toBe(pagesAfterFirst);
+  });
+
+  it("persists masterPageId across reopen", async () => {
+    const brainId = wb.snapshot().brainId;
+    const cat = await wb.createCategory("Theory");
+    const masterId = await wb.getOrCreateCategoryMasterPage(cat.id);
+
+    const reopened = await Workbench.open(storage, brainId);
+    expect(reopened.categoryMasterPageId(cat.id)).toBe(masterId);
+    // The master page id also flows through the derived graph.
+    const graphCat = reopened.conceptGraph().categories.find((c) => c.categoryId === cat.id)!;
+    expect(graphCat.masterPageId).toBe(masterId);
+  });
+
+  it("connectCategoryBoundaries ensures both master pages and relates them (§12.2)", async () => {
+    const catA = await wb.createCategory("A");
+    const catB = await wb.createCategory("B");
+
+    const relId = await wb.connectCategoryBoundaries(catA.id, catB.id);
+
+    const masterA = wb.categoryMasterPageId(catA.id)!;
+    const masterB = wb.categoryMasterPageId(catB.id)!;
+    expect(masterA).not.toBeNull();
+    expect(masterB).not.toBeNull();
+
+    const rel = wb.rawData().relationships.find((r) => r.id === relId)!;
+    expect(relationshipEndpoints(rel)).toEqual([masterA, masterB]);
+  });
+
+  it("connectCategoryBoundaries reuses existing master pages (idempotent masters)", async () => {
+    const catA = await wb.createCategory("A");
+    const catB = await wb.createCategory("B");
+    const masterA = await wb.getOrCreateCategoryMasterPage(catA.id);
+    const masterB = await wb.getOrCreateCategoryMasterPage(catB.id);
+    const pagesBefore = wb.rawData().pages.length;
+
+    await wb.connectCategoryBoundaries(catA.id, catB.id);
+
+    // No new master pages were created (the two existing ones were reused).
+    expect(wb.rawData().pages.length).toBe(pagesBefore);
+    expect(wb.categoryMasterPageId(catA.id)).toBe(masterA);
+    expect(wb.categoryMasterPageId(catB.id)).toBe(masterB);
+  });
+
+  it("rejects connecting a category to itself", async () => {
+    const cat = await wb.createCategory("A");
+    await expect(wb.connectCategoryBoundaries(cat.id, cat.id)).rejects.toThrow(/distinct/);
+  });
+});

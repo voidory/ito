@@ -53,6 +53,13 @@ export interface SceneCategoryInput {
   readonly name: string;
   readonly colorCode: string;
   readonly memberPageIds: readonly string[];
+  /**
+   * The category's master page id (A14-M2), if one has been created. A direct
+   * master-page -> master-page relationship between two categories produces an
+   * explicit 'master' category-boundary link (§12.2), distinct from the
+   * implicit member-bridging 'member' link.
+   */
+  readonly masterPageId?: string;
 }
 
 /** The minimal graph the scene mapper consumes (matches ConceptGraph shape). */
@@ -108,6 +115,17 @@ export interface SceneSquircle {
 export interface SceneCategoryLink {
   readonly fromCategoryId: string;
   readonly toCategoryId: string;
+  /**
+   * How the link was derived (§12.2, A14-M2):
+   *   - 'master': an explicit relationship connects the two categories' MASTER
+   *     pages (the required "category master page connects to another category
+   *     boundary" capability), or
+   *   - 'member': an implicit member-bridging relationship joins a member page
+   *     of one category to a member page of the other (secondary signal).
+   * When BOTH exist for the same unordered category pair, 'master' wins and
+   * exactly one link is emitted.
+   */
+  readonly linkKind: "master" | "member";
   /** The point on the FROM squircle boundary (nearest the other center). */
   readonly from: Point;
   /** The point on the TO squircle boundary (nearest the other center). */
@@ -217,33 +235,91 @@ function boundaryPointToward(bounds: SquircleBounds, target: Point): Point {
 }
 
 /**
- * Derive category-to-category boundary connections from the DATA (A14-M2):
- * a category-link exists between two DISTINCT categories whenever a relationship
- * directly connects a member page of one to a member page of the other. This is
- * fully data-driven (no hardcoded pairs) and consistent with ADR-0008's
- * reference-by-id model: the relationship's endpoints resolve, via category
- * membership, to the two categories it bridges.
+ * Build a boundary-anchored SceneCategoryLink for an unordered category pair.
+ * The two categories are ordered deterministically (a < b) and each endpoint is
+ * anchored on the owning squircle's boundary nearest the other center.
+ */
+function categoryLinkFor(
+  a: string,
+  b: string,
+  linkKind: "master" | "member",
+  boundsByCategory: ReadonlyMap<string, SquircleBounds>,
+): SceneCategoryLink {
+  const [fromId, toId] = a < b ? [a, b] : [b, a];
+  const fromB = boundsByCategory.get(fromId)!;
+  const toB = boundsByCategory.get(toId)!;
+  return {
+    fromCategoryId: fromId,
+    toCategoryId: toId,
+    linkKind,
+    from: boundaryPointToward(fromB, { x: toB.cx, y: toB.cy }),
+    to: boundaryPointToward(toB, { x: fromB.cx, y: fromB.cy }),
+  };
+}
+
+/**
+ * Derive category-to-category boundary connections from the DATA (A14-M2). Two
+ * kinds of link are produced, with MASTER winning the per-pair dedupe (§12.2):
+ *
+ *   1. MASTER links (derived FIRST): an explicit relationship directly connects
+ *      one category's MASTER page to another category's MASTER page. This is the
+ *      required "category master page connects to another category boundary"
+ *      capability — a first-class signal, not merely a filter.
+ *   2. MEMBER links (derived SECOND): the pre-existing member-bridging signal —
+ *      a relationship joins a member page of one category to a member page of
+ *      the other. A member link is SKIPPED when a master link already covers
+ *      the same unordered category pair (master wins the dedupe).
+ *
+ * Fully data-driven (no hardcoded pairs) and consistent with ADR-0008's
+ * reference-by-id model. Deterministic: ordered category-pair keys keep the
+ * first-seen link. When no master pages exist the output is exactly the legacy
+ * member-bridging set (all 'member'), preserving prior behaviour.
  */
 export function deriveCategoryLinks(
   graph: SceneGraphInput,
   boundsByCategory: ReadonlyMap<string, SquircleBounds>,
 ): SceneCategoryLink[] {
-  // Which categories each page belongs to.
+  // Which categories each page belongs to (member bridging).
   const catsByPage = new Map<string, string[]>();
+  // Which category a page is the MASTER of (master bridging). A page can be the
+  // master of at most one category by construction.
+  const masterCatByPage = new Map<string, string>();
   for (const cat of graph.categories) {
     for (const pid of cat.memberPageIds) {
       const list = catsByPage.get(pid) ?? [];
       list.push(cat.categoryId);
       catsByPage.set(pid, list);
     }
+    if (cat.masterPageId != null) masterCatByPage.set(cat.masterPageId, cat.categoryId);
   }
 
   const seen = new Set<string>();
   const out: SceneCategoryLink[] = [];
+
+  const pairKey = (a: string, b: string): string => (a < b ? `${a}|${b}` : `${b}|${a}`);
+
+  // 1) MASTER links first.
   for (const link of graph.links) {
     if (link.hidden) continue;
     const eps = link.endpointPageIds;
-    // Consider every endpoint pair of the relationship.
+    for (let i = 0; i < eps.length; i++) {
+      for (let j = i + 1; j < eps.length; j++) {
+        const a = masterCatByPage.get(eps[i]!);
+        const b = masterCatByPage.get(eps[j]!);
+        if (a == null || b == null || a === b) continue;
+        const key = pairKey(a, b);
+        if (seen.has(key)) continue;
+        if (!boundsByCategory.get(a) || !boundsByCategory.get(b)) continue;
+        seen.add(key);
+        out.push(categoryLinkFor(a, b, "master", boundsByCategory));
+      }
+    }
+  }
+
+  // 2) MEMBER links second (skipping pairs already covered by a master link).
+  for (const link of graph.links) {
+    if (link.hidden) continue;
+    const eps = link.endpointPageIds;
     for (let i = 0; i < eps.length; i++) {
       for (let j = i + 1; j < eps.length; j++) {
         const aCats = catsByPage.get(eps[i]!) ?? [];
@@ -251,26 +327,17 @@ export function deriveCategoryLinks(
         for (const a of aCats) {
           for (const b of bCats) {
             if (a === b) continue;
-            const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+            const key = pairKey(a, b);
             if (seen.has(key)) continue;
-            const aB = boundsByCategory.get(a);
-            const bB = boundsByCategory.get(b);
-            if (!aB || !bB) continue;
+            if (!boundsByCategory.get(a) || !boundsByCategory.get(b)) continue;
             seen.add(key);
-            const [fromId, toId] = a < b ? [a, b] : [b, a];
-            const fromB = boundsByCategory.get(fromId)!;
-            const toB = boundsByCategory.get(toId)!;
-            out.push({
-              fromCategoryId: fromId,
-              toCategoryId: toId,
-              from: boundaryPointToward(fromB, { x: toB.cx, y: toB.cy }),
-              to: boundaryPointToward(toB, { x: fromB.cx, y: fromB.cy }),
-            });
+            out.push(categoryLinkFor(a, b, "member", boundsByCategory));
           }
         }
       }
     }
   }
+
   return out;
 }
 

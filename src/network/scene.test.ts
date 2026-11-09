@@ -202,6 +202,8 @@ describe("deriveCategoryLinks — A14-M2 (data-driven)", () => {
     expect(scene.categoryLinks).toHaveLength(1);
     const link = scene.categoryLinks[0]!;
     expect([link.fromCategoryId, link.toCategoryId].sort()).toEqual(["catA", "catB"]);
+    // A member-bridging link (no master pages) is classified 'member'.
+    expect(link.linkKind).toBe("member");
     // The endpoints sit on the two squircle boundaries, not at the centers.
     const aB = scene.squircles.find((s) => s.categoryId === link.fromCategoryId)!.bounds;
     const bB = scene.squircles.find((s) => s.categoryId === link.toCategoryId)!.bounds;
@@ -227,5 +229,76 @@ describe("deriveCategoryLinks — A14-M2 (data-driven)", () => {
   it("is driven purely by data (no hardcoded pairs)", () => {
     const empty = buildScene(graph({ nodes: [node("a")], categories: [] }));
     expect(empty.categoryLinks).toHaveLength(0);
+  });
+});
+
+describe("deriveCategoryLinks — master vs member boundary links (A14-M2, §12.2)", () => {
+  it("emits exactly one 'master' link when two categories' master pages are joined", () => {
+    const g: SceneGraphInput = {
+      // mA/mB are the master pages; a/b are plain members so each category has
+      // a squircle to anchor the boundary link on.
+      nodes: [node("mA"), node("mB"), node("a"), node("b")],
+      links: [
+        { relationshipId: "r1", endpointPageIds: ["mA", "mB"], label: "", blendColor: "#808080", hidden: false },
+      ],
+      categories: [
+        { categoryId: "catA", name: "A", colorCode: "#4b5578", memberPageIds: ["mA", "a"], masterPageId: "mA" },
+        { categoryId: "catB", name: "B", colorCode: "#b5653f", memberPageIds: ["mB", "b"], masterPageId: "mB" },
+      ],
+    };
+    const scene = buildScene(g);
+    expect(scene.categoryLinks).toHaveLength(1);
+    const link = scene.categoryLinks[0]!;
+    expect(link.linkKind).toBe("master");
+    expect([link.fromCategoryId, link.toCategoryId].sort()).toEqual(["catA", "catB"]);
+  });
+
+  it("classifies a member-bridging relationship (no master link) as 'member'", () => {
+    const g: SceneGraphInput = {
+      nodes: [node("mA"), node("mB"), node("a"), node("b")],
+      links: [
+        // r1 bridges MEMBERS a<->b, NOT the master pages.
+        { relationshipId: "r1", endpointPageIds: ["a", "b"], label: "", blendColor: "#808080", hidden: false },
+      ],
+      categories: [
+        { categoryId: "catA", name: "A", colorCode: "#4b5578", memberPageIds: ["mA", "a"], masterPageId: "mA" },
+        { categoryId: "catB", name: "B", colorCode: "#b5653f", memberPageIds: ["mB", "b"], masterPageId: "mB" },
+      ],
+    };
+    const scene = buildScene(g);
+    expect(scene.categoryLinks).toHaveLength(1);
+    expect(scene.categoryLinks[0]!.linkKind).toBe("member");
+  });
+
+  it("master wins the dedupe: one link when BOTH a master and a member bridge exist", () => {
+    const g: SceneGraphInput = {
+      nodes: [node("mA"), node("mB"), node("a"), node("b")],
+      links: [
+        // r1: member bridge a<->b; r2: master bridge mA<->mB. Same cat pair.
+        { relationshipId: "r1", endpointPageIds: ["a", "b"], label: "", blendColor: "#808080", hidden: false },
+        { relationshipId: "r2", endpointPageIds: ["mA", "mB"], label: "", blendColor: "#808080", hidden: false },
+      ],
+      categories: [
+        { categoryId: "catA", name: "A", colorCode: "#4b5578", memberPageIds: ["mA", "a"], masterPageId: "mA" },
+        { categoryId: "catB", name: "B", colorCode: "#b5653f", memberPageIds: ["mB", "b"], masterPageId: "mB" },
+      ],
+    };
+    const scene = buildScene(g);
+    expect(scene.categoryLinks).toHaveLength(1);
+    expect(scene.categoryLinks[0]!.linkKind).toBe("master");
+  });
+
+  it("does not emit a master link for a hidden master-page relationship", () => {
+    const g: SceneGraphInput = {
+      nodes: [node("mA"), node("mB"), node("a"), node("b")],
+      links: [
+        { relationshipId: "r1", endpointPageIds: ["mA", "mB"], label: "", blendColor: "#808080", hidden: true },
+      ],
+      categories: [
+        { categoryId: "catA", name: "A", colorCode: "#4b5578", memberPageIds: ["mA", "a"], masterPageId: "mA" },
+        { categoryId: "catB", name: "B", colorCode: "#b5653f", memberPageIds: ["mB", "b"], masterPageId: "mB" },
+      ],
+    };
+    expect(buildScene(g).categoryLinks).toHaveLength(0);
   });
 });

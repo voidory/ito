@@ -51,6 +51,7 @@ function graphToSceneInput(wb: Workbench): SceneGraphInput {
       name: c.name,
       colorCode: c.colorCode,
       memberPageIds: c.memberPageIds,
+      ...(c.masterPageId != null ? { masterPageId: c.masterPageId } : {}),
     })),
   };
 }
@@ -122,7 +123,12 @@ interface ItoTestApi {
       blendColor: string;
       hidden: boolean;
     }[];
-    categories: { categoryId: string; name: string; colorCode: string }[];
+    categories: {
+      categoryId: string;
+      name: string;
+      colorCode: string;
+      masterPageId: string | null;
+    }[];
   };
   /** Count of non-hidden pages participating in the network (§3.4). */
   activeNodeCount(): number;
@@ -164,6 +170,7 @@ interface ItoTestApi {
     categoryLinks: {
       fromCategoryId: string;
       toCategoryId: string;
+      linkKind: "master" | "member";
       from: { x: number; y: number };
       to: { x: number; y: number };
     }[];
@@ -180,6 +187,19 @@ interface ItoTestApi {
   webglAvailable(): boolean;
   /** The transient N06 "not connected yet" placeholder for a source id. */
   nodePlaceholderFor(sourceId: string): { sourceId: string; title: string; transient: boolean };
+  /**
+   * The transient N06 placeholders for EVERY currently open UNCONNECTED source
+   * (open-together). One descriptor per open source whose annotations are not
+   * yet cited — the headless mirror of what NodesView renders. Pure/ephemeral:
+   * creates ZERO durable records.
+   */
+  openUnconnectedPlaceholders(): { sourceId: string; title: string; transient: boolean }[];
+  /** The master page id of a category (A14-M2), or null if none created. */
+  categoryMasterPageId(categoryId: string): string | null;
+  /** Get or create a category's master page (A14-M2); returns the page id. */
+  getOrCreateCategoryMasterPage(categoryId: string): Promise<string>;
+  /** Connect two categories at their boundaries (A14-M2); returns the rel id. */
+  connectCategoryBoundaries(fromCategoryId: string, toCategoryId: string): Promise<string>;
   /** Create a category with a watercolor color (test setup convenience). */
   createCategory(name: string, colorCode?: string): Promise<string>;
   /** Create a relationship across N>=2 endpoints; returns the relationship id. */
@@ -387,6 +407,7 @@ export function installTestApi(wb: Workbench, bump: () => void): void {
           categoryId: c.categoryId,
           name: c.name,
           colorCode: c.colorCode,
+          masterPageId: c.masterPageId ?? null,
         })),
       };
     },
@@ -445,6 +466,7 @@ export function installTestApi(wb: Workbench, bump: () => void): void {
         categoryLinks: scene.categoryLinks.map((c) => ({
           fromCategoryId: c.fromCategoryId,
           toCategoryId: c.toCategoryId,
+          linkKind: c.linkKind,
           from: { x: c.from.x, y: c.from.y },
           to: { x: c.to.x, y: c.to.y },
         })),
@@ -471,6 +493,28 @@ export function installTestApi(wb: Workbench, bump: () => void): void {
     },
     nodePlaceholderFor(sourceId) {
       return wb.nodePlaceholderFor(sourceId);
+    },
+    openUnconnectedPlaceholders() {
+      return wb
+        .snapshot()
+        .openSourceIds.filter((id) => !wb.sourceIsConnected(id))
+        .map((id) => wb.nodePlaceholderFor(id));
+    },
+    categoryMasterPageId(categoryId) {
+      return wb.categoryMasterPageId(categoryId as CategoryId);
+    },
+    async getOrCreateCategoryMasterPage(categoryId) {
+      const id = await wb.getOrCreateCategoryMasterPage(categoryId as CategoryId);
+      bump();
+      return id;
+    },
+    async connectCategoryBoundaries(fromCategoryId, toCategoryId) {
+      const id = await wb.connectCategoryBoundaries(
+        fromCategoryId as CategoryId,
+        toCategoryId as CategoryId,
+      );
+      bump();
+      return id;
     },
     async createCategory(name, colorCode) {
       const category = await wb.createCategory(name, colorCode);

@@ -229,11 +229,12 @@ function ViewSwitch({
 /**
  * The Nodes view container (§3.3, FEAT-005). Shows the concept-network canvas.
  *
- * N06-M2: when exactly one source is open and it does NOT yet participate in
- * the network (no cited annotation → no node/relationship), it renders a
- * TRANSIENT "Not connected yet" placeholder sourced from
- * `wb.nodePlaceholderFor(sourceId)`. The placeholder creates NOTHING — clicking
- * it or leaving the view simply discards it (ephemeral UI only).
+ * N06-M2: for EVERY currently open source that does NOT yet participate in the
+ * network (no cited annotation → no node/relationship), it renders a TRANSIENT
+ * "Not connected yet" placeholder sourced from `wb.nodePlaceholderFor(sourceId)`
+ * — including the open-together (2+) case, not only a single open source. Each
+ * placeholder creates NOTHING and offers a Return-to-Reader action; leaving the
+ * view simply discards them (ephemeral UI only, zero durable records).
  *
  * The live `categoryScope` is passed into NodesCanvas so selecting a category
  * in Files carries into Nodes: no scope = the global network; a scope = only
@@ -252,13 +253,13 @@ function NodesView({
   suppressMotion: boolean;
   bump: () => void;
 }): JSX.Element {
-  // A single open, unconnected source drives the N06 placeholder. "Open
-  // together" (2+) or a connected source shows the real canvas.
-  const soloSourceId = openSourceIds.length === 1 ? openSourceIds[0]! : null;
-  const placeholder =
-    soloSourceId && !wb.sourceIsConnected(soloSourceId)
-      ? wb.nodePlaceholderFor(soloSourceId)
-      : null;
+  // N06: EVERY currently open source that does not yet participate in the
+  // network (no cited annotation) gets its own transient placeholder — not just
+  // when exactly one source is open. Each placeholder is ephemeral and creates
+  // ZERO durable Page/Relationship/Category records.
+  const placeholders = openSourceIds
+    .filter((id) => !wb.sourceIsConnected(id))
+    .map((id) => wb.nodePlaceholderFor(id));
 
   // §3.4 density reward: the "enter 3D" prompt is revealed ONLY once the live
   // graph reaches the density threshold (is3DUnlocked). Its presentation (glow
@@ -298,7 +299,7 @@ function NodesView({
             <NodesCanvas
               wb={wb}
               categoryScope={categoryScope}
-              placeholder={placeholder}
+              placeholders={placeholders}
               suppressMotion={suppressMotion}
               bump={bump}
             />

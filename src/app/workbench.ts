@@ -270,6 +270,12 @@ export interface ConceptCategory {
   readonly name: string;
   readonly colorCode: string;
   readonly memberPageIds: readonly PageId[];
+  /**
+   * The category's master page id (A14-M2), if one has been created via
+   * `getOrCreateCategoryMasterPage`. Feeds the scene mapper so an explicit
+   * master-page -> master-page relationship renders a 'master' category link.
+   */
+  readonly masterPageId?: PageId;
 }
 
 /** The full derived concept-network graph the view renders from. */
@@ -1389,6 +1395,80 @@ export class Workbench {
     return relationship;
   }
 
+  // -- category master pages (A14-M2, §12.2) --------------------------------
+
+  /**
+   * The master page id of a category, if one has been created (A14-M2). Pure
+   * getter — returns null when the category is unknown or has no master page.
+   */
+  categoryMasterPageId(categoryId: CategoryId): PageId | null {
+    const cat = this.data.categories.find((c) => c.id === categoryId);
+    return cat?.masterPageId ?? null;
+  }
+
+  /**
+   * Get or create a category's MASTER page (§12.2, A14-M2). Each category has
+   * one master page: a REAL subject Page (editable in the SubjectEditor) seeded
+   * with the category name. This is IDEMPOTENT — if the category already has a
+   * `masterPageId` and that Page still exists it is returned unchanged (no
+   * second Page is created). Otherwise a fresh subject Page is created and the
+   * Category's `masterPageId` is set immutably, then persisted.
+   *
+   * The master page is referenced via `Category.masterPageId`; it is NOT added
+   * to the category's `memberPageIds` (membership semantics are unchanged).
+   */
+  async getOrCreateCategoryMasterPage(categoryId: CategoryId): Promise<PageId> {
+    const idx = this.data.categories.findIndex((c) => c.id === categoryId);
+    if (idx < 0) throw new Error("getOrCreateCategoryMasterPage: unknown category");
+    const category = this.data.categories[idx]!;
+    const existingId = category.masterPageId;
+    if (existingId != null && this.data.pages.some((p) => p.id === existingId)) {
+      return existingId;
+    }
+    // Create a real subject Page seeded from the category name.
+    const now = new Date().toISOString();
+    const page: Page = {
+      id: newPageId(),
+      kind: "subject",
+      title: `${category.name} (master)`,
+      documentJson: emptyDocJson(),
+      createdAt: now,
+      updatedAt: now,
+    };
+    const updatedCategory: Category = { ...category, masterPageId: page.id };
+    const categories = this.data.categories.slice();
+    categories[idx] = updatedCategory;
+    this.data = {
+      ...this.data,
+      pages: [...this.data.pages, page],
+      categories,
+    };
+    await this.persist();
+    return page.id;
+  }
+
+  /**
+   * Connect two categories at their BOUNDARIES (§12.2, A14-M2): the explicit
+   * "a category master page may connect to another category boundary"
+   * capability. Ensures BOTH categories have a master page (creating them if
+   * needed) and then creates a Relationship whose endpoints are the two master
+   * page ids. Because master pages have real PageIds, this flows through the
+   * same `createRelationship`/`relationshipEndpoints` normalizer as any other
+   * relationship. Returns the new relationship id. Persists.
+   */
+  async connectCategoryBoundaries(
+    fromCategoryId: CategoryId,
+    toCategoryId: CategoryId,
+  ): Promise<RelationshipId> {
+    if (fromCategoryId === toCategoryId) {
+      throw new Error("connectCategoryBoundaries: categories must be distinct");
+    }
+    const fromMaster = await this.getOrCreateCategoryMasterPage(fromCategoryId);
+    const toMaster = await this.getOrCreateCategoryMasterPage(toCategoryId);
+    const rel = await this.createRelationship([fromMaster, toMaster]);
+    return rel.id;
+  }
+
   /**
    * The DERIVED concept-network graph the view renders from: nodes = pages
    * (with hidden flag + laid-out position), links = relationships with their
@@ -1428,6 +1508,7 @@ export class Workbench {
       name: category.name,
       colorCode: this.categoryColor(category),
       memberPageIds: category.memberPageIds,
+      ...(category.masterPageId != null ? { masterPageId: category.masterPageId } : {}),
     }));
 
     return { nodes, links, categories };
