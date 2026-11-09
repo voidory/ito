@@ -1,4 +1,4 @@
-# MILESTONE MATRIX — M0 + M1
+# MILESTONE MATRIX — M0 + M1 + M2 + M2.5
 
 The spec (section 22) requires an implemented / pending / unsupported matrix at
 every milestone. This is that matrix for the first two milestones. It is the
@@ -44,17 +44,20 @@ Last run on this working tree (all green):
 | ------------------------- | ------------------- | -------------------- |
 | TypeScript typecheck      | `npm run typecheck` | pass (0 errors)      |
 | Production build          | `npm run build`     | pass                 |
-| Unit / integration        | `npm run test`      | 163 passed / 19 files |
-| Runtime (real browser)    | `npm run test:e2e`  | 43 tests / 8 specs WRITTEN; host-run in the publishing environment (sandbox: e2e deferred, CDN block — see §9) |
+| Unit / integration        | `npm run test`      | 241 passed / 24 files (M2.5) |
+| Runtime (real browser)    | `npm run test:e2e`  | 50 tests / 8 specs WRITTEN; host-run in the publishing environment (sandbox: e2e deferred, CDN block — see §9) |
 
 E2E specs: `e2e/ready.spec.ts` (boot), `e2e/pdf-anchor.spec.ts` (anchor
 round-trip spike), `e2e/reader-workbench.spec.ts` (M1 reading workbench),
 `e2e/subject-editor.spec.ts` (M1 subject layer + continuous editor),
-`e2e/concept-network.spec.ts` (M2 NodesCanvas — A09/A10/A13/A14-M2),
-`e2e/view-switch.spec.ts` (M2 Files/Nodes switch + N06 placeholder),
+`e2e/concept-network.spec.ts` (M2 NodesCanvas — A09/A10/A13/A14-M2 + M2.5
+A13 explanatory-page promotion + A14 master|member category-links),
+`e2e/view-switch.spec.ts` (M2 Files/Nodes switch + N06 placeholder + M2.5
+multi-PDF N06, N04/N05 reference-directed locating, search),
 `e2e/three-d.spec.ts` (M2 §3.4 3D dimensional shift — density reward),
 `e2e/workspace.spec.ts` (M1 integrated three-pane workspace + context-preserving
-transitions).
+transitions). The e2e count grew 43 → 50 at M2.5 (+3 in
+`concept-network.spec.ts`, +4 in `view-switch.spec.ts`).
 
 ---
 
@@ -297,6 +300,43 @@ unlocked at 35, hide drops back below without deleting a Page).
 | (§3.4)  | 3D reads the SAME live `conceptGraph()` as 2D (no duplicated hardcoded scene); entering/exiting mutates ZERO graph records; exit returns to the 2D NodesCanvas | implemented (e2e deferred §9) | e2e + unit | `e2e/three-d.spec.ts` "the 3D scene reads the SAME live graph as 2D …", "… exiting returns to 2D"; `src/app/threeScene.map.test.ts` "reuses the 2D layout footprint …", "excludes hidden nodes …" |
 | A09-M2  | Full concept-network graph (nodes/edges) with no forced camera motion — delivered across 2D + 3D | implemented (e2e deferred §9) | e2e + unit | `e2e/concept-network.spec.ts`, `e2e/three-d.spec.ts`; `src/network/scene.test.ts`, `src/app/threeScene.map.test.ts` (deterministic idle positions) |
 
+## 8f. M2.5 completion + M3 preparation pass (FEAT-001..006)
+
+The M2.5 pass resolves the two M2 product rulings (A14 category master pages,
+N06 open-together placeholders), completes the M2 retrieval/navigation
+requirements omitted in the v3.0 summary (A10 search/neighbourhood, A13 full
+connecting pages, N04/N05/N07 reference-directed locating), and clears an M1
+schema-debt item (annotation styles were smuggled into `BrainData.captures`)
+that would have corrupted M3 backup validation. All additions are ADDITIVE and
+v1-safe: the new fields `Relationship.explanatoryPageId?`,
+`Category.masterPageId?`, and `PresentationState.annotationStyles?` are readonly
++ optional + safe-defaulted, so SCHEMA_VERSION stays `1` (ADR-0010, cross-refs
+ADR-0008 hub topology and ADR-0009 presentation/3D state). Rendering/interaction
+rows are covered by the real-browser Playwright specs `e2e/concept-network.spec.ts`
+and `e2e/view-switch.spec.ts` (host-run in the publishing environment; the
+sandbox cannot run Chromium — see §9) AND, so the sandbox proves correctness
+headlessly, by the Vitest files named per row.
+
+| ID     | Requirement (summary)                                                | Status      | Kind       | Covering test |
+| ------ | -------------------------------------------------------------------- | ----------- | ---------- | ------------- |
+| A13    | "The Bump" develops into a real Connecting Page (`explanatoryPageId`), opened in SubjectEditor, usable as a further relationship endpoint; idempotent | implemented (e2e deferred §9) | e2e + unit | `e2e/concept-network.spec.ts` "A13-M2: developing a relationship's connection promotes it to a real Connecting Page …"; `src/app/workbench.network.test.ts` "M2-FIX-1 (A13-M2, §12.1) — developRelationshipPage" (+ "persists the explanatoryPageId", "the explanatory page can be an endpoint in a further relationship"); `src/app/nodesCanvas.render.test.ts` "A13-M2: a rendered hub exposes an open-connecting-page control", "clicking open-connecting-page develops+opens the explanatory page" |
+| A14    | Each category has one master `Page` (`masterPageId`); a master page may connect another category's boundary; `deriveCategoryLinks` emits `data-link-kind="master"|"member"` (master wins dedupe); 2D + 3D parity | implemented (e2e deferred §9) | e2e + unit | `e2e/concept-network.spec.ts` "A14-M2: connecting two category master pages renders a data-link-kind=\"master\" category-link", "a member-bridging relationship yields a data-link-kind=\"member\" category-link"; `src/network/scene.test.ts` "deriveCategoryLinks — master vs member boundary links (A14-M2, §12.2)" (4 cases); `src/app/workbench.network.test.ts` "Ruling 1 (A14-M2, §12.2) — category master pages"; `src/app/nodesCanvas.render.test.ts` "renders a 'master' category-link …" |
+| A10    | Search across Page titles + body text, Category names, Annotation anchor + comment; filter by category + 1-hop neighbourhood; shell search surface opens the match | implemented (e2e deferred §9) | e2e + unit | `e2e/view-switch.spec.ts` "search: typing into the network search surfaces a matching page/category and selecting it opens it"; `src/network/search.test.ts` (search field matching + categoryId filter + neighbourhood, 17 cases); `src/app/workbench.search.test.ts` "Workbench.search — matches each searchable field", "Workbench.neighborhood — 1-hop …"; `src/app/networkSearch.render.test.ts` (render + select, 6 cases) |
+| N04    | Annotation cited into EXACTLY 1 subject page: Show-in-Nodes switches to Nodes with that node `data-focused="true"` (single explicit locate) | implemented (e2e deferred §9) | e2e + unit | `e2e/view-switch.spec.ts` "N04: Show-in-Nodes for an annotation cited into ONE subject page focuses that node"; `src/app/workbench.view.test.ts` "N04: an annotation cited into EXACTLY 1 subject page — locate sets viewMode + focusedPageId"; `src/app/nodesCanvas.render.test.ts` "N04/N05: with focusedPageId set, the matching graph-node has data-focused='true'" |
+| N05    | Annotation cited into >1 subject pages: a `nodes-destination-picker` lists them; choosing one focuses that node | implemented (e2e deferred §9) | e2e + unit | `e2e/view-switch.spec.ts` "N05: Show-in-Nodes for an annotation cited into TWO subject pages opens a destination picker"; `src/app/workbench.view.test.ts` "N05: an annotation cited into 2 subject pages returns BOTH (picker precondition)" |
+| N06    | On open-together, a transient placeholder (`data-transient="true"`, `data-source-id`) renders for EVERY open unconnected source, each with `placeholder-return-reader`; returning creates ZERO durable records | implemented (e2e deferred §9) | e2e + unit | `e2e/view-switch.spec.ts` "N06 (open-together): every open unconnected PDF renders its own transient placeholder; returning to Reader creates nothing"; `src/app/workbench.view.test.ts` "Ruling 2 (N06, §7.2) — a placeholder per open UNCONNECTED source" (3 cases); `src/app/nodesCanvas.render.test.ts` "Ruling 2/N06: renders one placeholder group per open unconnected source …", "clicking Return-to-Reader switches to Files …" |
+| N07    | Show-in-Nodes affordance appears ONLY when the annotation is cited into >= 1 subject page (absent at zero) | implemented (e2e deferred §9) | e2e + unit | `src/app/workbench.view.test.ts` "N07: an annotation cited into ZERO subject pages has no locate target"; `e2e/view-switch.spec.ts` N04/N05 (the `show-in-nodes` control + `data-cited-count`) |
+| D07    | Reference-directed locate never causes unexpected camera jumps during ordinary editing (explicit user action only; A09-M2 preserved) | implemented (e2e deferred §9) | unit       | `src/app/workbench.view.test.ts` "A09-M2 guard: ordinary editing transitions NEVER change focusedPageId", "setFocusedPageId(null) clears the locate target without writing a record" |
+| §14    | Annotation styles move to `presentation.annotationStyles`; load migration strips legacy sentinel `Capture` records so `captures` is clean for M3 backup validation | implemented | unit       | `src/app/workbench.styles.test.ts` "annotation styles live in presentation.annotationStyles" (8 cases incl. "strips a legacy sentinel Capture on load", "legacy migration does not overwrite an already-present presentation style") |
+
+Additive schema guarantees (ADR-0010), proven in Vitest:
+
+| Capability                                                            | Status      | Covering test |
+| --------------------------------------------------------------------- | ----------- | ------------- |
+| `Relationship.explanatoryPageId?`, `Category.masterPageId?`, `PresentationState.annotationStyles?` are readonly + optional; v1 shapes still load | implemented | `src/model/brain.test.ts`; `src/app/workbench.network.test.ts`; `src/app/workbench.styles.test.ts` |
+| `createEmptyBrainData()` seeds `annotationStyles: {}` | implemented | `src/model/brain.test.ts` |
+| SCHEMA_VERSION stays 1 (no migration; M7 per ADR-0004) | implemented | `src/model/brain.test.ts`; `src/test/model.test.ts` |
+
 ## 9. Sandbox verification note (M2)
 
 The Playwright Chromium binary CANNOT be downloaded in the build sandbox (the
@@ -304,7 +344,7 @@ proxy returns HTTP 403 on the Playwright CDN; the Microsoft mirror transfers
 zero bytes), so `npm run test:e2e` cannot run here — the e2e specs are WRITTEN
 and host-run in the publishing environment. All e2e specs
 (`concept-network.spec.ts`, `view-switch.spec.ts`, `three-d.spec.ts` plus the
-M1 suites, 43 tests / 8 specs) are the real deliverable; their non-trivial glue
+M1 suites, 50 tests / 8 specs at M2.5) are the real deliverable; their non-trivial glue
 is ALSO proven headlessly in the sandbox so correctness is provable without a
 browser:
 
@@ -322,14 +362,25 @@ browser:
   itself cannot run headlessly in the sandbox, so the ThreeScene renderer carries
   a WebGL guard with a 2D fallback that the e2e spec asserts conditionally.
 
-FINAL M2 gate results on this working tree (real runs, not fabricated):
+FINAL M2.5 gate results on this working tree (real runs, not fabricated):
 
 | Suite                  | Command             | Result            |
 | ---------------------- | ------------------- | ----------------- |
 | TypeScript typecheck   | `npm run typecheck` | pass (0 errors)   |
-| Unit / integration     | `npm run test`      | 163 passed / 19 files |
+| Unit / integration     | `npm run test`      | 241 passed / 24 files |
 | Production build        | `npm run build`     | pass (three.js bundled) |
-| Runtime (real browser) | `npm run test:e2e`  | 43 tests / 8 specs WRITTEN; host-run (sandbox e2e deferred — CDN block) |
+| Runtime (real browser) | `npm run test:e2e`  | 50 tests / 8 specs WRITTEN; host-run (sandbox e2e deferred — CDN block). Enumerated/compiled here via `npx playwright test --list`. |
+
+The M2.5 refinements (ADR-0010: `explanatoryPageId` / `masterPageId` /
+`annotationStyles`) add the following headless mirrors for the e2e behaviours:
+`src/network/search.test.ts` + `src/app/workbench.search.test.ts` +
+`src/app/networkSearch.render.test.ts` (A10 search/neighbourhood),
+`src/app/workbench.network.test.ts` (A13 developRelationshipPage + A14 master
+pages), `src/network/scene.test.ts` (A14 master|member category-links),
+`src/app/workbench.view.test.ts` (N04/N05/N07 locating + multi-PDF N06 + the
+D07 no-camera-jump guard), `src/app/nodesCanvas.render.test.ts` (open-connecting
+control, master link, placeholder-per-source, focused node), and
+`src/app/workbench.styles.test.ts` (§14 annotation-style migration).
 
 ## 8. Proposed next decisions (D-items)
 

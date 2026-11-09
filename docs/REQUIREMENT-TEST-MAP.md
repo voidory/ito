@@ -213,6 +213,36 @@ Decisions: ADR-0009 (PresentationState + §3.4 3D reward; resolves D19) and
 ADR-0008 (hub topology; addresses D20) back this feature; both are RESOLVED in
 `docs/MILESTONE-MATRIX.md` §8 D-items.
 
+## M2.5 completion + M3 preparation pass (FEAT-001..006, ADR-0010)
+
+The M2.5 pass resolves the two M2 rulings and the omitted M2
+retrieval/navigation requirements, and clears the M1 annotation-style schema
+debt. The acceptance IDs below use the Master Build Spec v2.0 §12/§13/§7
+letters as named in the M2.5 handoff (A10 search/retrieval §13; A13 full
+connecting pages §12.1; A14 category master pages §12.2; N04/N05/N07
+reference-directed locating §7.1/§7.2; N06 open-together placeholders §7.2; D07
+no unexpected camera jumps / A09-M2 preserved). All are ADDITIVE and v1-safe
+(ADR-0010; SCHEMA_VERSION stays 1). Each row names the REAL covering Vitest
+cases (sandbox-provable) and the Playwright e2e cases added in FEAT-006 (host-run
+in the publishing environment — see `docs/MILESTONE-MATRIX.md` §9; the specs are
+proven to COMPILE here via `npx playwright test --list`).
+
+| ID  | Behaviour                                                             | Test kind  | Test / location | Status |
+| --- | --------------------------------------------------------------------- | ---------- | --------------- | ------ |
+| A10 | Search across Page titles + body text, Category names, Annotation anchor + comment; category + 1-hop neighbourhood filters; shell search surface opens the match | e2e + unit | `e2e/view-switch.spec.ts` "search: …"; `src/network/search.test.ts`; `src/app/workbench.search.test.ts`; `src/app/networkSearch.render.test.ts` | implemented (e2e deferred §9) |
+| A13 | "The Bump" develops into a real Connecting Page (`explanatoryPageId`), opened in SubjectEditor, usable as a further relationship endpoint; idempotent | e2e + unit | `e2e/concept-network.spec.ts` "A13-M2: developing a relationship's connection promotes it to a real Connecting Page …"; `src/app/workbench.network.test.ts` "M2-FIX-1 (A13-M2, §12.1) — developRelationshipPage"; `src/app/nodesCanvas.render.test.ts` "A13-M2: … open-connecting-page …" | implemented (e2e deferred §9) |
+| A14 | Each category has one master `Page` (`masterPageId`) that may connect another category's boundary; `deriveCategoryLinks` emits `data-link-kind="master"|"member"` (master wins dedupe); 2D + 3D parity | e2e + unit | `e2e/concept-network.spec.ts` "A14-M2: connecting two category master pages … master", "… member-bridging … member"; `src/network/scene.test.ts` "deriveCategoryLinks — master vs member boundary links"; `src/app/workbench.network.test.ts` "Ruling 1 (A14-M2, §12.2) — category master pages"; `src/app/nodesCanvas.render.test.ts` "renders a 'master' category-link …" | implemented (e2e deferred §9) |
+| N04 | Annotation cited into EXACTLY 1 subject page: Show-in-Nodes switches to Nodes with that node `data-focused="true"` | e2e + unit | `e2e/view-switch.spec.ts` "N04: …"; `src/app/workbench.view.test.ts` "N04: … locate sets viewMode + focusedPageId"; `src/app/nodesCanvas.render.test.ts` "N04/N05: with focusedPageId set … data-focused='true'" | implemented (e2e deferred §9) |
+| N05 | Annotation cited into >1 subject pages: a `nodes-destination-picker` lists them; choosing one focuses that node | e2e + unit | `e2e/view-switch.spec.ts` "N05: …"; `src/app/workbench.view.test.ts` "N05: … returns BOTH (picker precondition)" | implemented (e2e deferred §9) |
+| N06 | On open-together, a transient placeholder renders for EVERY open unconnected source (`data-source-id`, `data-transient="true"`, `placeholder-return-reader`); returning creates ZERO durable records | e2e + unit | `e2e/view-switch.spec.ts` "N06 (open-together): …"; `src/app/workbench.view.test.ts` "Ruling 2 (N06, §7.2) — a placeholder per open UNCONNECTED source"; `src/app/nodesCanvas.render.test.ts` "Ruling 2/N06: … one placeholder group per open unconnected source …" | implemented (e2e deferred §9) |
+| N07 | Show-in-Nodes affordance appears ONLY when the annotation is cited into >= 1 subject page (absent at zero) | e2e + unit | `src/app/workbench.view.test.ts` "N07: … ZERO subject pages has no locate target"; `e2e/view-switch.spec.ts` N04/N05 (`data-cited-count`) | implemented (e2e deferred §9) |
+| D07 | Reference-directed locate is an explicit user action; ordinary editing never changes the focus target (A09-M2 preserved, no unexpected camera jumps) | unit | `src/app/workbench.view.test.ts` "A09-M2 guard: ordinary editing transitions NEVER change focusedPageId", "setFocusedPageId(null) clears … without writing a record" | implemented |
+| §14 | Annotation styles move to `presentation.annotationStyles`; load migration strips legacy sentinel `Capture` records so `captures` is clean for M3 backup validation | unit | `src/app/workbench.styles.test.ts` "annotation styles live in presentation.annotationStyles" (incl. "strips a legacy sentinel Capture on load") | implemented |
+
+ADR-0010 documents these three additive, v1-safe refinements
+(`explanatoryPageId` / `masterPageId` / `annotationStyles`) and cross-references
+ADR-0008 (hub topology) and ADR-0009 (presentation/3D state).
+
 ## Non-functional (N01–N08)
 
 | ID  | Requirement (summary)                        | Milestone | Status      |

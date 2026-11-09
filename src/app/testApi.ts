@@ -161,6 +161,13 @@ interface ItoTestApi {
   /** The subject page ids an annotation is cited into (N04/N05/N07 branching). */
   citedSubjectPagesForAnnotation(annotationId: string): string[];
   /**
+   * Cite an existing annotation into an existing subject Page (test setup for
+   * N04/N05): inserts a real EvidenceInstance via the SAME transition the UI
+   * uses (`insertEvidenceIntoPage`), so the annotation becomes "cited" into
+   * that subject page. Returns the created evidence id.
+   */
+  citeAnnotationIntoPage(annotationId: string, destinationPageId: string): Promise<string>;
+  /**
    * Case-insensitive substring search across Page titles + body text, Category
    * names, and Annotation anchor + comment (M2-FIX-2). Returns serializable
    * discriminated results; an optional categoryId restricts page hits.
@@ -490,6 +497,14 @@ export function installTestApi(wb: Workbench, bump: () => void): void {
     },
     citedSubjectPagesForAnnotation(annotationId) {
       return wb.citedSubjectPagesForAnnotation(annotationId as AnnotationId);
+    },
+    async citeAnnotationIntoPage(annotationId, destinationPageId) {
+      const evidence = await wb.insertEvidenceIntoPage(
+        annotationId as AnnotationId,
+        destinationPageId as PageId,
+      );
+      bump();
+      return evidence.id;
     },
     search(query, opts) {
       const results = wb.search(

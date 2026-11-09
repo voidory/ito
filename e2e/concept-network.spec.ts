@@ -204,3 +204,134 @@ test("clicking a hub opens the connecting-page label surface", async ({ page }) 
     .poll(() => page.evaluate((id) => window.__ito.relationshipLabel(id), relId))
     .toBe("Bridges P and Q");
 });
+
+test("A14-M2: connecting two category master pages renders a data-link-kind=\"master\" category-link", async ({
+  page,
+}) => {
+  await bootToNodesView(page);
+  // Each category needs at least one laid-out member so its squircle bounds
+  // exist for the boundary link to anchor to. Build two disjoint categories.
+  const { catA, catB } = await page.evaluate(async () => {
+    const mA = await window.__ito.createSubject("MemberA");
+    const mB = await window.__ito.createSubject("MemberB");
+    const catA = await window.__ito.createCategory("Alpha", "#4b5578");
+    const catB = await window.__ito.createCategory("Beta", "#b5653f");
+    await window.__ito.addPageToCategory(catA, mA);
+    await window.__ito.addPageToCategory(catB, mB);
+    return { catA, catB };
+  });
+
+  // Connect the two categories at their BOUNDARIES via their master pages
+  // (the §12.2 required capability). This creates real master Pages and a real
+  // relationship joining them — a durable transition on the live Workbench.
+  const relId = await page.evaluate(
+    ([a, b]) => window.__ito.connectCategoryBoundaries(a!, b!),
+    [catA, catB] as const,
+  );
+  expect(relId).toBeTruthy();
+
+  // Both master pages are REAL durable Page records referenced by the categories.
+  const masterA = await page.evaluate((c) => window.__ito.categoryMasterPageId(c), catA);
+  const masterB = await page.evaluate((c) => window.__ito.categoryMasterPageId(c), catB);
+  expect(masterA).toBeTruthy();
+  expect(masterB).toBeTruthy();
+
+  // A category-link with data-link-kind="master" renders between the two
+  // categories (read live DOM).
+  const link = page.getByTestId("category-link");
+  await expect(link).toHaveCount(1);
+  await expect(link).toHaveAttribute("data-link-kind", "master");
+
+  // Its endpoints sit on the two squircle boundaries (live geometry).
+  const geo = await page.evaluate(() => window.__ito.sceneGeometry());
+  const cl = geo.categoryLinks[0]!;
+  expect(cl.linkKind).toBe("master");
+  const onFrom = await page.evaluate(
+    ([c, x, y]) => window.__ito.squircleContainsPoint(c as string, x as number, y as number),
+    [cl.fromCategoryId, cl.from.x, cl.from.y] as const,
+  );
+  const onTo = await page.evaluate(
+    ([c, x, y]) => window.__ito.squircleContainsPoint(c as string, x as number, y as number),
+    [cl.toCategoryId, cl.to.x, cl.to.y] as const,
+  );
+  expect(onFrom).toBe(true);
+  expect(onTo).toBe(true);
+});
+
+test("A14-M2: a member-bridging relationship yields a data-link-kind=\"member\" category-link", async ({
+  page,
+}) => {
+  await bootToNodesView(page);
+  const [a, b] = await createPages(page, ["InA", "InB"]);
+  await page.evaluate(
+    async ([x, y]) => {
+      const catA = await window.__ito.createCategory("CatA", "#4b5578");
+      const catB = await window.__ito.createCategory("CatB", "#b5653f");
+      await window.__ito.addPageToCategory(catA, x!);
+      await window.__ito.addPageToCategory(catB, y!);
+      // A relationship bridging a MEMBER of each category (no master pages).
+      await window.__ito.createRelationship([x!, y!]);
+    },
+    [a, b] as const,
+  );
+
+  const link = page.getByTestId("category-link");
+  await expect(link).toHaveCount(1);
+  await expect(link).toHaveAttribute("data-link-kind", "member");
+  const geo = await page.evaluate(() => window.__ito.sceneGeometry());
+  expect(geo.categoryLinks[0]!.linkKind).toBe("member");
+});
+
+test("A13-M2: developing a relationship's connection promotes it to a real Connecting Page usable as an endpoint", async ({
+  page,
+}) => {
+  await bootToNodesView(page);
+  const [a, b] = await createPages(page, ["Cause", "Effect"]);
+  const relId = await page.evaluate(
+    ([x, y]) => window.__ito.createRelationship([x!, y!], "relates", "links cause and effect"),
+    [a, b] as const,
+  );
+
+  // Before developing: no explanatory page exists yet, and the page count is 2.
+  expect(await page.evaluate((id) => window.__ito.relationshipExplanatoryPageId(id), relId)).toBe(
+    null,
+  );
+  const pagesBefore = (await page.evaluate(() => window.__ito.graphRecordCount())).pages;
+  expect(pagesBefore).toBe(2);
+
+  // Develop the connection into a full page via the on-canvas control (A13-M2).
+  await page.getByTestId("open-connecting-page").click();
+
+  // A REAL explanatory Page is created, linked via explanatoryPageId, and opened
+  // in the SubjectEditor (open subject == the new page).
+  await expect
+    .poll(() => page.evaluate((id) => window.__ito.relationshipExplanatoryPageId(id), relId))
+    .not.toBeNull();
+  const explanatoryId = await page.evaluate(
+    (id) => window.__ito.relationshipExplanatoryPageId(id),
+    relId,
+  );
+  expect(explanatoryId).toBeTruthy();
+  expect(await page.evaluate(() => window.__ito.graphRecordCount())).toMatchObject({
+    pages: 3,
+  });
+  // The SubjectEditor has the explanatory page open.
+  expect(await page.evaluate(() => window.__ito.openSubjectId())).toBe(explanatoryId);
+
+  // Idempotent: developing again returns the SAME page, creating nothing new.
+  const again = await page.evaluate((id) => window.__ito.developRelationshipPage(id), relId);
+  expect(again).toBe(explanatoryId);
+  expect((await page.evaluate(() => window.__ito.graphRecordCount())).pages).toBe(3);
+
+  // Because the explanatory page has a real PageId it participates as an
+  // endpoint in a FURTHER relationship (connecting a connection to a subject).
+  const [further] = await createPages(page, ["Downstream"]);
+  const relId2 = await page.evaluate(
+    ([ep, d]) => window.__ito.createRelationship([ep!, d!]),
+    [explanatoryId, further] as const,
+  );
+  expect(relId2).toBeTruthy();
+  const graph = await page.evaluate(() => window.__ito.conceptGraph());
+  const link2 = graph.links.find((l) => l.relationshipId === relId2)!;
+  expect(link2.endpointPageIds).toContain(explanatoryId);
+});
