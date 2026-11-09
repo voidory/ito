@@ -3,6 +3,7 @@ import { runStartupChecks } from "./startup";
 import { useWorkbench } from "./useWorkbench";
 import { Library } from "./Library";
 import { Reader } from "./Reader";
+import { NodesCanvas } from "./NodesCanvas";
 import { installTestApi } from "./testApi";
 import type { SourceId } from "../model";
 import { loadDocument, hashBytes } from "../pdf";
@@ -39,6 +40,14 @@ export function App(): JSX.Element {
   const onToggleMotion = useCallback(
     (suppress: boolean) => {
       wb?.setSuppressMotion(suppress);
+      bump();
+    },
+    [wb, bump],
+  );
+
+  const onToggleNodesView = useCallback(
+    (active: boolean) => {
+      wb?.setNodesViewActive(active);
       bump();
     },
     [wb, bump],
@@ -112,23 +121,50 @@ export function App(): JSX.Element {
         {boot.detail}
       </span>
       {wb && state ? (
-        state.openSourceIds.length === 0 ? (
-          <Library
-            wb={wb}
-            categoryScope={state.categoryScope}
-            onScopeChange={(category) => {
-              wb.setCategoryScope(category);
-              bump();
-            }}
-            onOpen={(id: SourceId) => {
-              wb.openSource(id);
-              bump();
-            }}
-            onOpenTogether={(ids: SourceId[]) => {
-              wb.openTogether(ids);
-              bump();
-            }}
-          />
+        state.nodesViewActive ? (
+          <div
+            data-testid="nodes-view"
+            style={{ position: "fixed", inset: 0, display: "flex", flexDirection: "column" }}
+          >
+            <div style={{ padding: "0.5rem", borderBottom: "1px solid #e5e2dc" }}>
+              <button
+                data-testid="exit-nodes-view"
+                onClick={() => onToggleNodesView(false)}
+              >
+                ← Files
+              </button>
+            </div>
+            <div style={{ flex: 1, minHeight: 0 }}>
+              <NodesCanvas wb={wb} suppressMotion={state.suppressMotion} bump={bump} />
+            </div>
+          </div>
+        ) : state.openSourceIds.length === 0 ? (
+          <>
+            <div style={{ padding: "0.5rem 1rem" }}>
+              <button
+                data-testid="open-nodes-view"
+                onClick={() => onToggleNodesView(true)}
+              >
+                Nodes
+              </button>
+            </div>
+            <Library
+              wb={wb}
+              categoryScope={state.categoryScope}
+              onScopeChange={(category) => {
+                wb.setCategoryScope(category);
+                bump();
+              }}
+              onOpen={(id: SourceId) => {
+                wb.openSource(id);
+                bump();
+              }}
+              onOpenTogether={(ids: SourceId[]) => {
+                wb.openTogether(ids);
+                bump();
+              }}
+            />
+          </>
         ) : (
           <Reader
             wb={wb}

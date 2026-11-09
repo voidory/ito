@@ -145,6 +145,27 @@ Decisions recorded: `docs/decisions/ADR-0008-connecting-hub-topology.md`
 `docs/decisions/ADR-0009-presentation-and-3d-state.md` (PresentationState
 expansion + §3.4 3D reward; resolves D19).
 
+## M2 concept-network RENDERING (FEAT-004, spec §3 — SVG NodesCanvas)
+
+FEAT-004 adds the runtime 2D scene (`src/app/NodesCanvas.tsx`) driven by the
+real force-directed layout over LIVE Workbench records (pure mapper
+`src/network/scene.ts`). The rendering/interaction rows below are covered by the
+real-browser Playwright spec `e2e/concept-network.spec.ts` (runs in the
+publishing environment; the sandbox cannot run Chromium — see
+`docs/MILESTONE-MATRIX.md` §9) AND, so the sandbox proves correctness headlessly,
+by `src/network/scene.test.ts` (pure graph→props mapping) and
+`src/app/nodesCanvas.render.test.ts` (jsdom render of the real component against
+a real Workbench).
+
+| ID     | Behaviour                                                             | Test kind  | Test / location | Status |
+| ------ | --------------------------------------------------------------------- | ---------- | --------------- | ------ |
+| A13-M2 | 2-endpoint → lens hub; >=3-endpoint → star hub (count>=3), vertices point toward nodes | e2e + unit | `e2e/concept-network.spec.ts`; `src/network/scene.test.ts`; `src/app/nodesCanvas.render.test.ts` | implemented (e2e deferred §9) |
+| A09-M2 | Nodes render inside their category squircle bounds; idle positions stable (no forced camera motion) | e2e + unit | `e2e/concept-network.spec.ts`; `src/network/scene.test.ts` | implemented (e2e deferred §9) |
+| A10-M2 | A node in two categories renders in the intersection of BOTH squircles | e2e + unit | `e2e/concept-network.spec.ts`; `src/network/scene.test.ts` | implemented (e2e deferred §9) |
+| A14-M2 | A category-to-category reference renders a `category-link` between boundaries (data-driven) | e2e + unit | `e2e/concept-network.spec.ts`; `src/network/scene.test.ts`; `src/app/nodesCanvas.render.test.ts` | implemented (e2e deferred §9) |
+| §3.2   | `.category-squircle-fill` multiply blend + `#watercolor-turbulent-edge` filter; dotted-dashed border | e2e + unit | `src/app/network.css`; `src/app/nodesCanvas.render.test.ts` | implemented (e2e deferred §9) |
+| §3.1   | Clicking a hub opens the connecting-page label surface                | e2e        | `e2e/concept-network.spec.ts` | implemented (e2e deferred §9) |
+
 ## Non-functional (N01–N08)
 
 | ID  | Requirement (summary)                        | Milestone | Status      |

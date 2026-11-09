@@ -224,6 +224,8 @@ export interface WorkbenchState {
   readonly highlightsTabOpen: boolean;
   /** Global suppress-motion setting (in-app, independent of OS media query). */
   readonly suppressMotion: boolean;
+  /** Whether the Nodes (concept-network) view is active (transient, FEAT-004). */
+  readonly nodesViewActive: boolean;
   /** The integrated-workspace layout (pane widths + line visibility). */
   readonly workspaceLayout: WorkspaceLayout;
   /**
@@ -323,6 +325,7 @@ export class Workbench {
   private openSubjectPageId: PageId | null = null;
   private highlightsTabOpen = false;
   private suppressMotion = false;
+  private nodesView = false;
   private workspaceLayout: WorkspaceLayout = DEFAULT_WORKSPACE_LAYOUT;
   private activeCategoryScope: string | null = null;
   private saveError: SaveError | null = null;
@@ -368,6 +371,7 @@ export class Workbench {
       openSubjectPageId: this.openSubjectPageId,
       highlightsTabOpen: this.highlightsTabOpen,
       suppressMotion: this.suppressMotion,
+      nodesViewActive: this.nodesView,
       workspaceLayout: this.workspaceLayout,
       categoryScope: this.activeCategoryScope,
       saveError: this.saveError,
@@ -504,6 +508,38 @@ export class Workbench {
 
   setSuppressMotion(suppress: boolean): void {
     this.suppressMotion = suppress;
+  }
+
+  /**
+   * Whether the Nodes (concept-network) view is active vs the Files/reader view.
+   * TRANSIENT in M2: the full Files/Nodes view switch is formalized + persisted
+   * in FEAT-005; FEAT-004 only needs a minimal, reachable mount, so this is a
+   * presentation-only in-memory flag (never persisted, never a record change).
+   */
+  nodesViewActive(): boolean {
+    return this.nodesView;
+  }
+
+  /** Toggle the Nodes view (presentation only, transient — see above). */
+  setNodesViewActive(active: boolean): void {
+    this.nodesView = active;
+  }
+
+  /**
+   * Set a relationship's human label (the "Connecting Page" surface for M2,
+   * FEAT-004 step 1). This edits the durable Relationship's label field only —
+   * it never changes endpoints, never creates/deletes a record. Persists.
+   */
+  async setRelationshipLabel(relationshipId: RelationshipId, label: string): Promise<void> {
+    const idx = this.data.relationships.findIndex((r) => r.id === relationshipId);
+    if (idx < 0) return;
+    const prev = this.data.relationships[idx]!;
+    if (prev.label === label) return;
+    const updated: Relationship = { ...prev, label };
+    const relationships = this.data.relationships.slice();
+    relationships[idx] = updated;
+    this.data = { ...this.data, relationships };
+    await this.persist();
   }
 
   // -- workspace layout (pane config + lines) -------------------------------

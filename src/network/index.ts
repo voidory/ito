@@ -9,3 +9,5 @@ export * from "./layout";
 export * from "./hub";
 export * from "./squircle";
 export * from "./blend";
+export * from "./palette";
+export * from "./scene";

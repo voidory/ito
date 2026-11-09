@@ -1,0 +1,100 @@
+/*
+ * Concept-network (Nodes view) styling — FEAT-004, spec §3.
+ *
+ * The watercolor squircle fill uses a MULTIPLY blend so overlapping category
+ * areas pool darker in their intersections (§3.2), plus a turbulence-displaced
+ * edge filter so boundaries look hand-painted rather than vector-crisp. The
+ * border is a dotted-dashed stroke so the area reads as a soft region, not a
+ * hard container.
+ */
+
+.nodes-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  background: #fbfaf7;
+  touch-action: none;
+}
+
+/* Watercolor fill: translucent pigment that darkens where areas overlap. */
+.category-squircle-fill {
+  mix-blend-mode: multiply;
+  opacity: 0.15;
+  filter: url(#watercolor-turbulent-edge);
+}
+
+/* Dotted-dashed soft boundary (not a hard rectangle). */
+.category-squircle-border {
+  fill: none;
+  stroke-width: 1.5;
+  stroke-dasharray: 2 6;
+  stroke-linecap: round;
+  opacity: 0.55;
+}
+
+.category-squircle-label {
+  font: 600 13px system-ui, sans-serif;
+  fill: #55504a;
+  opacity: 0.8;
+  pointer-events: none;
+}
+
+/* Category-to-category boundary connection (A14-M2). */
+.category-link {
+  fill: none;
+  stroke: #8a7f70;
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+  opacity: 0.7;
+}
+
+/* Relationship hubs ("The Bump"): translucent, centered on the connection. */
+.graph-hub {
+  opacity: 0.4;
+  cursor: pointer;
+  stroke: rgba(40, 40, 40, 0.3);
+  stroke-width: 0.75;
+}
+
+.graph-hub:hover {
+  opacity: 0.6;
+}
+
+/* Circular dot nodes. */
+.graph-node {
+  cursor: pointer;
+}
+
+.graph-node circle {
+  fill: #3a3733;
+  stroke: #fbfaf7;
+  stroke-width: 1.5;
+}
+
+.graph-node-label {
+  font: 500 11px system-ui, sans-serif;
+  fill: #2a2825;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.graph-node:hover .graph-node-label {
+  opacity: 1;
+}
+
+/* Honor reduced motion / suppress-motion: no label transition. */
+.nodes-canvas[data-suppress-motion="true"] .graph-node-label {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .graph-node-label {
+    transition: none;
+  }
+}
+
+.nodes-empty {
+  font: 500 14px system-ui, sans-serif;
+  fill: #8a847c;
+}

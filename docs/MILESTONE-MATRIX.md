@@ -44,12 +44,13 @@ Last run on this working tree (all green):
 | ------------------------- | ------------------- | -------------------- |
 | TypeScript typecheck      | `npm run typecheck` | pass (0 errors)      |
 | Production build          | `npm run build`     | pass                 |
-| Unit / integration        | `npm run test`      | 122 passed / 15 files |
-| Runtime (real browser)    | `npm run test:e2e`  | 29 passed / 5 specs (sandbox: e2e deferred, see §9) |
+| Unit / integration        | `npm run test`      | 141 passed / 17 files |
+| Runtime (real browser)    | `npm run test:e2e`  | 29 passed / 5 specs + `concept-network.spec.ts` written (6 tests, sandbox: e2e deferred, see §9) |
 
 E2E specs: `e2e/ready.spec.ts` (boot), `e2e/pdf-anchor.spec.ts` (anchor
 round-trip spike), `e2e/reader-workbench.spec.ts` (M1 reading workbench),
 `e2e/subject-editor.spec.ts` (M1 subject layer + continuous editor),
+`e2e/concept-network.spec.ts` (M2 NodesCanvas — A09/A10/A13/A14-M2),
 `e2e/workspace.spec.ts` (M1 integrated three-pane workspace + context-preserving
 transitions).
 
@@ -201,16 +202,47 @@ Additive schema guarantees (ADR-0008, ADR-0009), proven in Vitest:
 | SCHEMA_VERSION stays 1 (no migration; M7 per ADR-0004)                 | implemented | `src/model/brain.test.ts`; `src/test/model.test.ts` |
 | `window.__ito` exposes conceptGraph/activeNodeCount/is3DUnlocked/nodePlaceholderFor | implemented | `src/app/testApi.ts` (drives the real Workbench; e2e deferred §9) |
 
+## 8c. M2 concept-network RENDERING (FEAT-004) — SVG NodesCanvas
+
+FEAT-004 delivers the runtime 2D SVG scene (`src/app/NodesCanvas.tsx`): circular
+dot nodes, procedural "Bump" hubs (lens N=2 / concave arched star N>=3 via
+`src/network/hub.ts`), overlapping watercolor squircle category areas
+(`src/network/squircle.ts`) with a multiply blend + `#watercolor-turbulent-edge`
+filter, and data-driven category-to-category connections. Node positions come
+from the REAL force-directed layout engine (`src/network/layout.ts`) over LIVE
+Workbench records via the pure `buildScene` mapper (`src/network/scene.ts`). The
+rendering/interaction rows are proven by the Playwright spec
+`e2e/concept-network.spec.ts` (runs in the publishing environment) AND, so the
+sandbox can prove correctness headlessly, by Vitest over the pure graph→props
+mapping (`src/network/scene.test.ts`) and a jsdom render of the real component
+against a real Workbench (`src/app/nodesCanvas.render.test.ts`).
+
+| ID      | Requirement (summary)                                                | Status      | Kind        | Covering test |
+| ------- | -------------------------------------------------------------------- | ----------- | ----------- | ------------- |
+| A13-M2  | 2-endpoint relationship renders a lens hub; >=3-endpoint renders a star hub (endpoint-count>=3) whose vertices point toward the connected nodes | implemented (e2e deferred §9) | e2e + unit  | `e2e/concept-network.spec.ts` "A13-M2 …"; `src/network/scene.test.ts` "hub topology"; `src/app/nodesCanvas.render.test.ts` |
+| A09-M2  | Nodes render inside their category squircle bounds; idle positions are stable (no forced camera motion) | implemented (e2e deferred §9) | e2e + unit  | `e2e/concept-network.spec.ts` "A09-M2 …"; `src/network/scene.test.ts` "deterministic … positions", "squircle contains its member nodes" |
+| A10-M2  | A node in TWO categories renders in the intersection of BOTH squircles (squircleContains against both bounds) | implemented (e2e deferred §9) | e2e + unit  | `e2e/concept-network.spec.ts` "A10-M2 …"; `src/network/scene.test.ts` "A10-M2 … inside BOTH squircles" |
+| A14-M2  | A category-to-category reference renders a `category-link` between the two squircle boundaries (data-driven) | implemented (e2e deferred §9) | e2e + unit  | `e2e/concept-network.spec.ts` "A14-M2 …"; `src/network/scene.test.ts` "deriveCategoryLinks …"; `src/app/nodesCanvas.render.test.ts` |
+| (§3.2)  | Category squircle `.category-squircle-fill` uses mix-blend-mode: multiply + `#watercolor-turbulent-edge`; dotted-dashed border | implemented (e2e deferred §9) | e2e + unit  | `src/app/network.css`; `src/app/nodesCanvas.render.test.ts` "watercolor fill class", "filter once in defs" |
+| (§3.1)  | Clicking a hub opens the connecting-page label surface                | implemented (e2e deferred §9) | e2e        | `e2e/concept-network.spec.ts` "clicking a hub opens the connecting-page label surface" |
+
 ## 9. Sandbox verification note (M2)
 
 The Playwright Chromium binary CANNOT be downloaded in the build sandbox (the
 proxy returns HTTP 403 on the Playwright CDN), so `npm run test:e2e` cannot run
 here and its result above is the last recorded run from the publishing
-environment. FEAT-003 contains NO rendering and is fully verifiable headlessly:
-its gates `npm run typecheck`, `npm run test` (Vitest) and `npm run build` are
-all green in the sandbox. Every behaviour a later e2e spec will cover (hub
-topology, blend, hide, density threshold, N06 zero-record guarantee) has Vitest
-coverage of its headless/pure logic so correctness is proven without a browser.
+environment. FEAT-003 contains NO rendering and is fully verifiable headlessly.
+FEAT-004 DOES render, so its Playwright spec `e2e/concept-network.spec.ts` is
+written (it runs in the publishing environment) but its non-trivial glue —
+graph→props mapping, layout-driven node positions, hub topology/path, squircle
+bounds + A10 intersection, A14 category-link derivation, blend pass-through — is
+ALSO proven headlessly in the sandbox by `src/network/scene.test.ts` (pure) and
+`src/app/nodesCanvas.render.test.ts` (jsdom render of the real component against
+a real Workbench). The gates `npm run typecheck`, `npm run test` (Vitest) and
+`npm run build` are all green in the sandbox. Every behaviour a later e2e spec
+will cover (hub topology, blend, hide, density threshold, N06 zero-record
+guarantee, squircle containment, category-link) has Vitest coverage of its
+headless/pure logic so correctness is proven without a browser.
 
 ## 8. Proposed next decisions (D-items)
 
