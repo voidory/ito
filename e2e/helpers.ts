@@ -11,8 +11,21 @@ import type { Locator, Page } from "@playwright/test";
  * click at its on-screen centre.
  */
 export async function clickCenter(page: Page, target: Locator): Promise<void> {
-  await target.scrollIntoViewIfNeeded();
-  const box = await target.boundingBox();
-  if (!box) throw new Error("clickCenter: target has no bounding box");
-  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  // Overlays are redrawn (detached + recreated) on refit/zoom/sidebar changes,
+  // so a single read can land in the gap. Re-resolve until a stable box exists.
+  const deadline = Date.now() + 5_000;
+  for (;;) {
+    try {
+      await target.scrollIntoViewIfNeeded({ timeout: 1_000 });
+      const box = await target.boundingBox();
+      if (box && box.width > 0 && box.height > 0) {
+        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+        return;
+      }
+    } catch {
+      // detached mid-redraw: retry
+    }
+    if (Date.now() > deadline) throw new Error("clickCenter: target never had a bounding box");
+    await page.waitForTimeout(100);
+  }
 }

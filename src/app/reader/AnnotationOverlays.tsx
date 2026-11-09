@@ -374,29 +374,63 @@ export function HighlightEditPopover({
   popover,
   onClose,
   bump,
+  resolveAnchor,
 }: {
   wb: Workbench;
   popover: EditPopoverState;
   onClose: () => void;
   bump: () => void;
+  /**
+   * Re-measure the live on-screen box of the annotation this popover belongs
+   * to. When given, the popover follows its highlight as the page scrolls or
+   * resizes instead of staying where it first opened.
+   */
+  resolveAnchor?: (annotationId: AnnotationId) => AnchorRect | null;
 }): JSX.Element {
   const POPOVER_WIDTH = 300;
-  const { left } = clampFixedAnchor(popover.rect, POPOVER_WIDTH);
+  // The anchor starts at the click/selection rect, then tracks the highlight.
+  const [anchor, setAnchor] = useState<AnchorRect>(popover.rect);
+  useEffect(() => setAnchor(popover.rect), [popover.rect]);
+  useEffect(() => {
+    if (!resolveAnchor || typeof window === "undefined") return;
+    let frame = 0;
+    const update = (): void => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const r = resolveAnchor(popover.annotationId);
+        if (r) setAnchor(r);
+      });
+    };
+    // Capture phase so scrolls of ANY inner container (the page stack) count.
+    window.addEventListener("scroll", update, true);
+    window.addEventListener("resize", update);
+    update();
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", update);
+    };
+  }, [resolveAnchor, popover.annotationId]);
+
+  const { left } = clampFixedAnchor(anchor, POPOVER_WIDTH);
   const popRef = useRef<HTMLDivElement>(null);
-  // Sit just below the anchored highlight; flip above when there is no room.
+  // Sit just below the anchored highlight; flip above when there is no room;
+  // if its highlight has scrolled out of view, pin to the nearest viewport edge
+  // (the draft must stay reachable, never drift off the page).
   // Measured after mount because the popover's height varies (figure, comment).
-  const [top, setTop] = useState<number>(popover.rect.bottom + 8);
+  const [top, setTop] = useState<number>(anchor.bottom + 8);
   useLayoutEffect(() => {
     const el = popRef.current;
     if (!el || typeof window === "undefined") return;
     const h = el.offsetHeight;
     const vh = window.innerHeight;
-    const below = popover.rect.bottom + 8;
+    const below = anchor.bottom + 8;
     let next = below;
     if (below + h > vh - 8) {
-      const above = popover.rect.top - h - 8;
+      const above = anchor.top - h - 8;
       next = above >= 8 ? above : Math.max(8, vh - h - 8);
     }
+    next = Math.min(Math.max(8, next), Math.max(8, vh - h - 8));
     setTop((t) => (t === next ? t : next));
   });
   const view = wb.viewFor(popover.annotationId);

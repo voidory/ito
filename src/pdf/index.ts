@@ -7,3 +7,4 @@
 export * from "./anchor";
 export * from "./render";
 export * from "./highlight";
+export * from "./pointerSelection";

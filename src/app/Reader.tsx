@@ -4,6 +4,7 @@ import {
   createAnchor,
   cropCanvasRegionToDataUrl,
   hitTestAnnotations,
+  installPointerSelection,
   loadDocument,
   renderPage,
   resolveAnchor,
@@ -806,6 +807,34 @@ function SourcePane({
   const isWebsite = source?.kind === "website" || source?.type === "website";
 
   const selectedRef = useRef<AnnotationId | null>(null);
+  // Live on-screen box of an annotation (union of its drawn fragments), so the
+  // edit popover can follow its highlight while the page scrolls.
+  const resolvePopoverAnchor = useCallback((id: AnnotationId): AnchorRect | null => {
+    const mount = mountRef.current;
+    if (!mount) return null;
+    const id_ = cssEscapeId(id);
+    // Only the drawn pieces (text fragments, area box, range border) — the
+    // `.ito-highlight` wrapper itself spans the whole page.
+    const els = mount.querySelectorAll(
+      `.ito-highlight[data-annotation-id="${id_}"] .ito-highlight-fragment, ` +
+        `.ito-highlight[data-annotation-id="${id_}"] .ito-highlight-area, ` +
+        `.ito-highlight[data-annotation-id="${id_}"] .ito-highlight-border`,
+    );
+    let left = Infinity;
+    let top = Infinity;
+    let right = -Infinity;
+    let bottom = -Infinity;
+    for (const el of Array.from(els)) {
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 && r.height === 0) continue;
+      left = Math.min(left, r.left);
+      top = Math.min(top, r.top);
+      right = Math.max(right, r.right);
+      bottom = Math.max(bottom, r.bottom);
+    }
+    if (!Number.isFinite(left)) return null;
+    return { left, top, right, bottom, width: right - left };
+  }, []);
   const redrawOverlays = useCallback(() => {
     const views = wb.annotationsForSource(sourceId);
     for (const page of pagesRef.current) {
@@ -1421,6 +1450,19 @@ function SourcePane({
     };
   }, [areaSelectActive, stageHitAt]);
 
+  // Pointer-driven selection: only text the pointer actually crosses gets
+  // selected (no snapping from blank margins, no whole-line grabs from gaps).
+  const pointerSelEnabledRef = useRef(true);
+  pointerSelEnabledRef.current = !areaSelectActive && !rangeMode && activeTool !== "note";
+  useEffect(() => {
+    const mount = mountRef.current;
+    if (!mount || isWebsite) return;
+    return installPointerSelection(mount, {
+      getLayers: () => pagesRef.current.map((p) => p.textLayer),
+      enabled: () => pointerSelEnabledRef.current,
+    });
+  }, [isWebsite, ready]);
+
   // Apply / clear the per-page user-select lock as activeSelectionPage changes.
   useEffect(() => {
     for (const page of pagesRef.current) {
@@ -1845,6 +1887,7 @@ function SourcePane({
           <HighlightEditPopover
             wb={wb}
             popover={editPopover}
+            resolveAnchor={resolvePopoverAnchor}
             onClose={() => {
               setEditPopover(null);
               setSelectedAnnotationId(null);
