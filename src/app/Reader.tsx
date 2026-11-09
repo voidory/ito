@@ -864,7 +864,7 @@ function CommentSurface({
         value={draft}
         placeholder="Add a quiet comment (optional)"
         onChange={(e) => setDraft(e.target.value)}
-        style={{ width: "100%", minHeight: "4rem" }}
+        style={{ width: "100%", maxWidth: "100%", minHeight: "4rem", boxSizing: "border-box" }}
       />
       {error && (
         <p data-testid="comment-error" role="alert" style={{ color: "#c5221f" }}>
