@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { clickCenter } from "./helpers";
 
 /**
  * M1 READING WORKBENCH — runtime validation in real chromium (spec section 24,
@@ -160,7 +161,7 @@ test("R02: a highlight saves quiet; comment is hidden until explicit reveal, the
   await expect(page.getByTestId("comment-surface")).toHaveCount(0);
 
   // Explicit reveal: click the annotation overlay.
-  await page.locator(".ito-highlight-fragment").first().click();
+  await clickCenter(page, page.locator(".ito-highlight-fragment").first());
   const surface = page.getByTestId("comment-surface");
   await expect(surface).toBeVisible();
   await page.getByTestId("comment-input").fill("a quiet thought");
@@ -169,7 +170,7 @@ test("R02: a highlight saves quiet; comment is hidden until explicit reveal, the
   await expect(surface).toHaveCount(0);
 
   // Reopen round-trip: the comment persists and re-reveals.
-  await page.locator(".ito-highlight-fragment").first().click();
+  await clickCenter(page, page.locator(".ito-highlight-fragment").first());
   await expect(page.getByTestId("comment-input")).toHaveValue("a quiet thought");
   await page.getByTestId("comment-cancel").click();
   await expect(page.getByTestId("comment-surface")).toHaveCount(0);
@@ -193,8 +194,18 @@ test("R03 + R04 + R16 + R17: a 3-page range annotation is one identity with bord
   const border = page.locator(".ito-highlight-border").first();
   await expect(border).toBeVisible();
 
-  // Also add a micro-highlight inside the range.
-  await page.evaluate((n) => window.__ito.selectText(n, 1), NEEDLE);
+  // Also add a micro-highlight inside the range. Scroll page 2 into view first:
+  // selectText drives the real mouseup but cannot scroll, and the selection
+  // popup anchors to the (otherwise off-screen) selection.
+  await page.evaluate(() =>
+    document
+      .querySelector('.pdf-page[data-page-index="1"]')
+      ?.scrollIntoView({ block: "start" }),
+  );
+  // Retry until page 2's text layer is rendered and the selection takes.
+  await expect
+    .poll(() => page.evaluate((n) => window.__ito.selectText(n, 1), NEEDLE))
+    .toBe(true);
   await page.getByTestId("commit-highlight").click();
 
   // R03/R04: one range identity + one independent micro-highlight = 2 records.
@@ -218,7 +229,7 @@ test("R03 + R04 + R16 + R17: a 3-page range annotation is one identity with bord
   await page.getByTestId("annotation-search").fill("");
 
   // Opening the range reveals the shared comment surface with the pp. label.
-  await page.locator('.ito-highlight-border').first().click();
+  await clickCenter(page, page.locator(".ito-highlight-border").first());
   await expect(page.getByTestId("range-label")).toHaveText("pp. 1-3");
 });
 
@@ -299,7 +310,7 @@ test("R12: a failed local save retains the draft and shows an actionable error",
   await openFirstDocument(page);
   await page.evaluate((n) => window.__ito.selectText(n, 0), NEEDLE);
   await page.getByTestId("commit-highlight").click();
-  await page.locator(".ito-highlight-fragment").first().click();
+  await clickCenter(page, page.locator(".ito-highlight-fragment").first());
 
   // Force the next persist to fail, then try to save the comment.
   await page.evaluate(() => window.__ito.forceNextSaveFailures(1));
@@ -317,7 +328,7 @@ test("R14: annotations + comments persist across close and reopen", async ({ pag
   await openFirstDocument(page);
   await page.evaluate((n) => window.__ito.selectText(n, 0), NEEDLE);
   await page.getByTestId("commit-highlight").click();
-  await page.locator(".ito-highlight-fragment").first().click();
+  await clickCenter(page, page.locator(".ito-highlight-fragment").first());
   await page.getByTestId("comment-input").fill("persist me");
   await page.getByTestId("comment-save").click();
   // The surface closes ONLY after the save+persist resolves, so waiting for it
@@ -337,6 +348,6 @@ test("R14: annotations + comments persist across close and reopen", async ({ pag
   await expect(page.locator(".ito-highlight-fragment").first()).toBeVisible({ timeout: 20_000 });
   const diag = await page.evaluate(() => window.__ito.counts());
   expect(diag.annotations, JSON.stringify(diag)).toBe(1);
-  await page.locator(".ito-highlight-fragment").first().click();
+  await clickCenter(page, page.locator(".ito-highlight-fragment").first());
   await expect(page.getByTestId("comment-input")).toHaveValue("persist me");
 });

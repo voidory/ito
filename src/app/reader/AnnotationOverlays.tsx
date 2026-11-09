@@ -282,7 +282,11 @@ export function SelectionToolbar({
 }): JSX.Element {
   const [color, setColor] = useState<HighlightColor>("yellow");
   const TOOLBAR_WIDTH = 260;
-  const { left, top } = clampFixedAnchor(toolbar.rect, TOOLBAR_WIDTH);
+  const { left, top: rawTop } = clampFixedAnchor(toolbar.rect, TOOLBAR_WIDTH);
+  // Keep the popup on screen vertically too (a selection scrolled partly out of
+  // view must never strand its controls off-screen).
+  const vh = (typeof window !== "undefined" && window.innerHeight) || 768;
+  const top = Math.min(Math.max(8, rawTop), vh - 56);
   return (
     <div
       data-testid="selection-toolbar"
@@ -800,12 +804,15 @@ export function CommentSurface({
     setError(null);
   }, [wb, annotationId]);
 
-  const save = async (): Promise<void> => {
+  // `closeAfter` is true for the explicit Save button. Autosave-on-blur passes
+  // false: leaving the textarea (to click the sidebar toggle, say) must keep the
+  // draft and the popover, never dismiss them.
+  const save = async (closeAfter = true): Promise<void> => {
     try {
       await wb.setComment(annotationId, draft);
       setError(null);
       bump();
-      onClose();
+      if (closeAfter) onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       bump();
@@ -831,7 +838,10 @@ export function CommentSurface({
         value={draft}
         placeholder="Add a quiet comment (optional)"
         onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => void save()}
+        onBlur={() => {
+          // Autosave only a real change; an untouched draft needs no write.
+          if (draft !== (wb.viewFor(annotationId)?.annotation.comment ?? "")) void save(false);
+        }}
         style={embedded ? undefined : { width: "100%", minHeight: "4rem" }}
       />
       {error && (
@@ -843,7 +853,13 @@ export function CommentSurface({
         <button data-testid="comment-cancel" onClick={onClose}>
           Close
         </button>
-        <button data-testid="comment-save" onClick={save}>
+        <button
+          data-testid="comment-save"
+          // Keep focus in the textarea so Save is ONE save (no blur-autosave
+          // racing the click).
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => void save()}
+        >
           Save
         </button>
       </div>

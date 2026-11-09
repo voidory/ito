@@ -24,6 +24,9 @@ async function bootToNodesView(page: Page): Promise<void> {
   await expect(page.getByTestId("app-status")).toHaveAttribute("data-state", "ready", {
     timeout: 15_000,
   });
+  // The test API is installed once the workbench has opened, which can land
+  // just after the boot status flips to "ready".
+  await page.waitForFunction(() => !!window.__ito);
   // Reach the Nodes view via the live presentation flag (FEAT-005 formalizes
   // the full Files/Nodes switch; FEAT-004 only needs it reachable).
   await page.evaluate(() => window.__ito.setNodesView(true));

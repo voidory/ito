@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { clickCenter } from "./helpers";
 
 /**
  * FEAT-005 — M1 INTEGRATED THREE-PANE WORKSPACE + CONTEXT-PRESERVING LAYOUT
@@ -146,7 +147,7 @@ test("R19 + N08: opening/closing the highlights tab preserves the visible passag
   // Open the quiet comment surface with an UNSAVED draft first, then scroll to
   // a meaningful passage. Measuring AFTER both are set isolates the toggle as
   // the only thing that could disturb them.
-  await page.locator(".ito-highlight-fragment").first().click();
+  await clickCenter(page, page.locator(".ito-highlight-fragment").first());
   await expect(page.getByTestId("comment-surface")).toBeVisible();
   await page.getByTestId("comment-input").fill("an unsaved draft thought");
 

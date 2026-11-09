@@ -3892,7 +3892,20 @@ export class Workbench {
         throw new Error("simulated save failure");
       }
       await this.storage.writeBrain(next);
-      this.data = next;
+      // Do NOT assign `next` wholesale: `this.data` may have been mutated while
+      // the write was in flight (a page created, an annotation committed...).
+      // Replacing it with the pre-await snapshot would silently drop those
+      // edits from memory. Adopt only the revision bookkeeping we just wrote;
+      // the mutator that made the concurrent edit queues its own persist, which
+      // re-reads the latest data.
+      this.data = {
+        ...this.data,
+        manifest: {
+          ...this.data.manifest,
+          publicationRevision: next.manifest.publicationRevision,
+          updatedAt: next.manifest.updatedAt,
+        },
+      };
       this.saveError = null;
     } catch (err) {
       // Keep this.data at its pre-persist value so the draft is not lost.

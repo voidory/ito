@@ -294,7 +294,11 @@ export function NodesCanvas({
       const drag = dragRef.current;
       if (!drag) return;
       const { dx, dy } = toSceneDelta(e.clientX - drag.startX, e.clientY - drag.startY);
-      if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) drag.moved = true;
+      if (!drag.moved && (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5)) {
+        drag.moved = true;
+        // Now it is a real pan: keep receiving moves even off the canvas.
+        if (drag.kind === "pan") svgRef.current?.setPointerCapture?.(e.pointerId);
+      }
       if (drag.kind === "node") {
         setLiveDrag({ pageId: drag.pageId!, dx, dy });
       } else {
@@ -328,7 +332,10 @@ export function NodesCanvas({
   const onBackgroundPointerDown = useCallback(
     (e: React.PointerEvent<SVGSVGElement>): void => {
       // Only start a pan on an empty-canvas press (nodes stop propagation).
-      svgRef.current?.setPointerCapture?.(e.pointerId);
+      // Do NOT capture the pointer yet: capturing on press retargets the
+      // following `click` to the <svg>, so plain clicks on anything inside it
+      // that isn't a node (e.g. a placeholder's "Return to Reader") never fire.
+      // The capture is taken once the press actually turns into a drag.
       dragRef.current = {
         kind: "pan",
         startX: e.clientX,
