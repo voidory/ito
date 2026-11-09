@@ -50,7 +50,15 @@ import {
   type SubjectReferenceStatus,
   type TextAnchor,
 } from "../model";
-import { deriveHubBlendColor } from "../network";
+import {
+  deriveHubBlendColor,
+  neighborhood as computeNeighborhood,
+  search as runSearch,
+  type SearchEdge,
+  type SearchIndex,
+  type SearchOptions,
+  type SearchResult,
+} from "../network";
 import {
   appendEvidence,
   compositionStats,
@@ -58,6 +66,7 @@ import {
   hydrateState,
   insertEvidenceAt,
   moveBlock,
+  plainText,
   removeEvidenceNode,
   serializeState,
   type CompositionStats,
@@ -1641,6 +1650,100 @@ export class Workbench {
     }));
 
     return { nodes, links, categories };
+  }
+
+  // -- search / retrieval / neighbourhood (M2-FIX-2, §13, A10, D07) ---------
+
+  /**
+   * Extract a page's searchable body text from its stored ProseMirror
+   * `documentJson` via the editor layer (NOT a bespoke serialization): the JSON
+   * is re-hydrated and flattened with `plainText`, so composed quotes and
+   * written prose are both searchable. Empty/malformed docs yield "".
+   */
+  private pageBodyText(page: Page): string {
+    try {
+      const json = (page.documentJson as DocumentJson) ?? emptyDocJson();
+      return plainText(hydrateState(json).doc);
+    } catch {
+      return "";
+    }
+  }
+
+  /**
+   * The searchable anchor text for an annotation: the selected text for a
+   * text-scope highlight, or the `pp. X-Y` label for a page-range annotation.
+   */
+  private annotationAnchorText(annotation: Annotation): string {
+    if (annotation.scope.kind === "text") return annotation.scope.anchor.selectedText;
+    const a = annotation.scope.anchor;
+    return `pp. ${a.startPageIndex + 1}-${a.endPageIndex + 1}`;
+  }
+
+  /**
+   * Build the pure search index from the LIVE BrainData. Page body text comes
+   * from the editor layer (`pageBodyText`), category membership from
+   * `Category.memberPageIds`, and annotation anchor/comment from the model.
+   * This is the ONE place the Workbench translates its records into the
+   * module's minimal structural view — the matching logic lives in
+   * `src/network/search.ts`.
+   */
+  private buildSearchIndex(): SearchIndex {
+    const categoriesByPage = new Map<PageId, string[]>();
+    for (const category of this.data.categories) {
+      for (const pageId of category.memberPageIds) {
+        const list = categoriesByPage.get(pageId) ?? [];
+        list.push(category.id);
+        categoriesByPage.set(pageId, list);
+      }
+    }
+    return {
+      docs: this.data.pages.map((page) => ({
+        pageId: page.id,
+        title: page.title,
+        bodyText: this.pageBodyText(page),
+        categoryIds: categoriesByPage.get(page.id) ?? [],
+      })),
+      categories: this.data.categories.map((c) => ({
+        categoryId: c.id,
+        name: c.name,
+      })),
+      annotations: this.data.annotations.map((a) => ({
+        annotationId: a.id,
+        sourceId: a.sourceId,
+        anchorText: this.annotationAnchorText(a),
+        comment: a.comment,
+      })),
+    };
+  }
+
+  /**
+   * Case-insensitive substring search across Page titles + body text, Category
+   * names, and Annotation anchor text + comment (§13, A10, D07). Builds the
+   * index from live BrainData and DELEGATES all matching to
+   * `src/network/search.ts`; an optional `categoryId` restricts page hits to
+   * that category's members. Pure read — writes nothing, creates no records.
+   */
+  search(query: string, options: SearchOptions = {}): SearchResult[] {
+    return runSearch(query, this.buildSearchIndex(), options);
+  }
+
+  /**
+   * The 1-hop graph neighbourhood around a page (§13, D07): the connected
+   * PageIds and connecting RelationshipIds. Edges are derived via the single
+   * `relationshipEndpoints` normalizer so N=2 and N>=3 relationships behave
+   * identically; the matching logic is delegated to `src/network/search.ts`.
+   * Pure read.
+   */
+  neighborhood(pageId: PageId): { pageIds: PageId[]; relationshipIds: RelationshipId[] } {
+    const edges: SearchEdge[] = this.data.relationships.map((rel) => ({
+      relationshipId: rel.id,
+      endpointPageIds: relationshipEndpoints(rel),
+    }));
+    const n = computeNeighborhood(pageId, edges);
+    return {
+      pageIds: n.pageIds as PageId[],
+      relationshipIds: n.relationshipIds as RelationshipId[],
+    };
   }
 
   // -- concept-network presentation-only transitions ------------------------

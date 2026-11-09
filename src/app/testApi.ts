@@ -160,6 +160,26 @@ interface ItoTestApi {
   setFocusedPageId(pageId: string | null): void;
   /** The subject page ids an annotation is cited into (N04/N05/N07 branching). */
   citedSubjectPagesForAnnotation(annotationId: string): string[];
+  /**
+   * Case-insensitive substring search across Page titles + body text, Category
+   * names, and Annotation anchor + comment (M2-FIX-2). Returns serializable
+   * discriminated results; an optional categoryId restricts page hits.
+   */
+  search(
+    query: string,
+    opts?: { categoryId?: string },
+  ): {
+    kind: string;
+    id: string;
+    matchedField: string;
+    title?: string;
+    name?: string;
+    sourceId?: string;
+    anchorText?: string;
+    comment?: string;
+  }[];
+  /** The 1-hop graph neighbourhood of a page: connected pages + relationships. */
+  neighborhood(pageId: string): { pageIds: string[]; relationshipIds: string[] };
   /** Add a page to a category's membership (never duplicates the Page). */
   addPageToCategory(categoryId: string, pageId: string): Promise<void>;
   /**
@@ -470,6 +490,30 @@ export function installTestApi(wb: Workbench, bump: () => void): void {
     },
     citedSubjectPagesForAnnotation(annotationId) {
       return wb.citedSubjectPagesForAnnotation(annotationId as AnnotationId);
+    },
+    search(query, opts) {
+      const results = wb.search(
+        query,
+        opts?.categoryId != null ? { categoryId: opts.categoryId as CategoryId } : {},
+      );
+      return results.map((r) =>
+        r.kind === "page"
+          ? { kind: r.kind, id: r.id, matchedField: r.matchedField, title: r.title }
+          : r.kind === "category"
+            ? { kind: r.kind, id: r.id, matchedField: r.matchedField, name: r.name }
+            : {
+                kind: r.kind,
+                id: r.id,
+                matchedField: r.matchedField,
+                sourceId: r.sourceId,
+                anchorText: r.anchorText,
+                comment: r.comment,
+              },
+      );
+    },
+    neighborhood(pageId) {
+      const n = wb.neighborhood(pageId as PageId);
+      return { pageIds: [...n.pageIds], relationshipIds: [...n.relationshipIds] };
     },
     async addPageToCategory(categoryId, pageId) {
       await wb.addPageToCategory(categoryId as CategoryId, pageId as PageId);

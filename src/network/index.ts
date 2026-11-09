@@ -11,3 +11,4 @@ export * from "./squircle";
 export * from "./blend";
 export * from "./palette";
 export * from "./scene";
+export * from "./search";

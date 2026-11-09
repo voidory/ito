@@ -4,6 +4,7 @@ import { useWorkbench } from "./useWorkbench";
 import { Library } from "./Library";
 import { Reader } from "./Reader";
 import { NodesCanvas } from "./NodesCanvas";
+import { NetworkSearch } from "./NetworkSearch";
 import { ThreeScene } from "./ThreeScene";
 import { revealPresentation } from "./threeScene.map";
 import { installTestApi } from "./testApi";
@@ -129,7 +130,23 @@ export function App(): JSX.Element {
             the shell header so either view is one click away; categoryScope is
             shared between them (it lives on the Workbench, carried across).
           */}
-          <ViewSwitch viewMode={state.viewMode} onSetViewMode={onSetViewMode} />
+          <div
+            data-testid="shell-header"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "0.5rem",
+              borderBottom: "1px solid #e5e2dc",
+            }}
+          >
+            <ViewSwitch viewMode={state.viewMode} onSetViewMode={onSetViewMode} />
+            {/*
+              Shell-level search surface (FEAT-005): reachable in BOTH Files and
+              Nodes. Selecting a result opens the match via existing Workbench
+              transitions and creates ZERO durable records.
+            */}
+            <NetworkSearch wb={wb} categoryScope={state.categoryScope} bump={bump} />
+          </div>
           {state.viewMode === "nodes" ? (
             <NodesView
               wb={wb}

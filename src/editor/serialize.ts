@@ -56,6 +56,34 @@ export function collectEvidence(doc: PMNode): EvidenceAttrs[] {
 }
 
 /**
+ * Extract the plain text of a doc in document order as a single string, with a
+ * space between the text of successive top-level blocks. Unlike `outline`, this
+ * emits NO structural markers (no heading prefixes, no `⟦evidence⟧` tokens, no
+ * mark wrappers) — it is the body text used for search indexing (FEAT-005). A
+ * typed evidence node contributes its captured `quotedText` so a composed quote
+ * is searchable by its words. Pure: walks the given doc, touches no DOM.
+ */
+export function plainText(doc: PMNode): string {
+  const blocks: string[] = [];
+  doc.forEach((block) => {
+    const parts: string[] = [];
+    block.forEach((inline) => {
+      if (inline.type.name === "evidence") {
+        const a = inline.attrs as unknown as EvidenceAttrs;
+        if (typeof a.quotedText === "string" && a.quotedText.length > 0) {
+          parts.push(a.quotedText);
+        }
+      } else if (inline.isText && inline.text) {
+        parts.push(inline.text);
+      }
+    });
+    const line = parts.join("");
+    if (line.length > 0) blocks.push(line);
+  });
+  return blocks.join(" ");
+}
+
+/**
  * Produce a linear, human-readable outline of a doc's block + inline content in
  * document order. Evidence nodes render as `⟦evidence:<id>⟧` so the test can
  * assert that writing and evidence interleave in the EXACT composed order
