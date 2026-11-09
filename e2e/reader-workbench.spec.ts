@@ -134,9 +134,12 @@ test("R11: OS prefers-reduced-motion suppresses the commit animation but keeps t
 test("R11: the in-app suppress-motion setting also removes the animation", async ({
   page,
 }) => {
-  // OS motion preference left at default; use the in-app toggle instead.
+  // OS motion preference left at default; use the in-app toggle instead. The
+  // suppress-motion control now lives in the reader toolbar's overflow menu
+  // (M9 single-toolbar rework).
   await openFirstDocument(page);
-  await page.getByTestId("suppress-motion").check();
+  await page.getByTestId("pane-overflow-menu-btn").click();
+  await page.getByTestId("overflow-suppress-motion").click();
   await page.evaluate((n) => window.__ito.selectText(n, 0), NEEDLE);
   await page.getByTestId("commit-highlight").click();
   const frag = page.locator(".ito-highlight-fragment").first();

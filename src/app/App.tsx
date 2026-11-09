@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { runStartupChecks } from "./startup";
 import { useWorkbench } from "./useWorkbench";
 import { Library } from "./Library";
@@ -10,6 +10,8 @@ import { ThreeScene } from "./ThreeScene";
 import { BackupExportModal } from "./BackupExportModal";
 import { ImportStagingReport } from "./ImportStagingReport";
 import { SyncBanner } from "./SyncBanner";
+import { IconButton, Menu, type MenuItem } from "./ui/primitives";
+import type { KoofrStorageAdapter as KoofrAdapter } from "../storage";
 import { MobileReaderSheet } from "./MobileReaderSheet";
 import { CaptureProcessingQueue } from "./CaptureProcessingQueue";
 import { revealPresentation } from "./threeScene.map";
@@ -209,50 +211,35 @@ export function App(): JSX.Element {
               transitions and creates ZERO durable records.
             */}
             <NetworkSearch wb={wb} categoryScope={state.categoryScope} bump={bump} />
-            {/* M3 backup/restore triggers (A18/A19) + M4 sync banner + M5 mobile toggle. */}
-            <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "0.5rem", paddingRight: "1rem" }}>
-              {/* M4 (§16.1, A20) remote-sync status + publish/refresh. The remote
-                  adapter is wired at runtime once Koofr credentials exist; the
-                  banner still shows status (and disables actions) without one. */}
+            {/* M9 (FEAT-001 D): the individual Mobile / Backup / Restore /
+                Configure Sync / Publish / Refresh controls are collapsed into
+                ONE gear settings menu. Only the compact sync-status badge stays
+                inline. One header design everywhere (the shell header hosts
+                every view). */}
+            <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "0.5rem", paddingRight: "0.75rem" }}>
               <SyncBanner
                 wb={wb}
                 remote={remote}
                 onChange={bump}
+                compact
                 onConfigureRemote={(adapter) => {
                   setRemote(adapter);
                   bump();
                 }}
               />
-              {/* M5 (A21) deterministic Phone Reading toggle. */}
-              <button
-                data-testid="toggle-mobile-mode"
-                data-active={mobileMode}
-                onClick={() => setMobileMode((v) => !v)}
-              >
-                {mobileMode ? "Exit mobile" : "Mobile"}
-              </button>
-              <button data-testid="open-backup-export" onClick={() => setBackupModalOpen(true)}>
-                Backup
-              </button>
-              {/* FIX-RESTORE-BUTTON-STYLE (§3.5): the label is styled like
-                  .ito-btn/button in theme.css so "Restore" visually matches
-                  "Backup". The original restore-backup-label testid is kept for
-                  back-compat; open-restore-input is the §3.5-named selector. */}
-              <label
-                data-testid="open-restore-input"
-                data-legacy-testid="restore-backup-label"
-                className="ito-btn restore-backup-label"
-                style={{ cursor: "pointer" }}
-              >
-                Restore
-                <input
-                  data-testid="restore-backup-input"
-                  type="file"
-                  accept=".ito,.zip,.json,application/zip,application/json"
-                  style={{ display: "none" }}
-                  onChange={(e) => void onRestoreFile(e.target.files?.[0] ?? null)}
-                />
-              </label>
+              <SettingsMenu
+                wb={wb}
+                remote={remote}
+                mobileMode={mobileMode}
+                onToggleMobile={() => setMobileMode((v) => !v)}
+                onBackup={() => setBackupModalOpen(true)}
+                onRestoreFile={onRestoreFile}
+                onConfigureRemote={(adapter) => {
+                  setRemote(adapter);
+                  bump();
+                }}
+                bump={bump}
+              />
             </span>
           </div>
           {/* Always-visible save-error banner (R12): a failed persist retains
@@ -497,6 +484,148 @@ export function SubjectsLauncher({
           </ul>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * M9 (FEAT-001 D): the single gear SETTINGS menu. It collapses the individual
+ * shell-header controls (Configure Sync, Publish, Refresh, Backup, Restore,
+ * Mobile) into one keyboard-navigable {@link Menu}. One consistent header
+ * design across every view (the shell header hosts Library / Reader / Nodes).
+ *
+ * The data-testids of the collapsed controls are preserved on the menu items
+ * (and the hidden Restore file input) so the colocated/e2e flows keep resolving.
+ */
+export function SettingsMenu({
+  wb,
+  remote,
+  mobileMode,
+  onToggleMobile,
+  onBackup,
+  onRestoreFile,
+  onConfigureRemote,
+  bump,
+}: {
+  wb: NonNullable<ReturnType<typeof useWorkbench>["wb"]>;
+  remote?: KoofrAdapter | null;
+  mobileMode: boolean;
+  onToggleMobile: () => void;
+  onBackup: () => void;
+  onRestoreFile: (file: File | null) => void | Promise<void>;
+  onConfigureRemote?: (adapter: KoofrAdapter) => void;
+  bump: () => void;
+}): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const [syncOpen, setSyncOpen] = useState(false);
+  const restoreRef = useRef<HTMLInputElement | null>(null);
+
+  const items: MenuItem[] = [
+    {
+      id: "configure-sync",
+      label: "Configure Sync…",
+      testId: "settings-configure-sync",
+      onSelect: () => setSyncOpen(true),
+    },
+    {
+      id: "publish",
+      label: "Publish",
+      testId: "settings-publish",
+      disabled: !remote,
+      onSelect: () => {
+        if (remote) void wb.publishToRemote(remote).then(() => bump());
+      },
+    },
+    {
+      id: "refresh",
+      label: "Refresh",
+      testId: "settings-refresh",
+      disabled: !remote,
+      onSelect: () => {
+        if (remote) void wb.refreshFromRemote(remote).then(() => bump());
+      },
+    },
+    { id: "backup", label: "Backup…", testId: "open-backup-export", onSelect: onBackup },
+    {
+      id: "restore",
+      label: "Restore…",
+      testId: "open-restore-input",
+      onSelect: () => restoreRef.current?.click(),
+    },
+    {
+      id: "mobile",
+      label: mobileMode ? "Exit mobile" : "Mobile",
+      testId: "toggle-mobile-mode",
+      onSelect: onToggleMobile,
+    },
+  ];
+
+  return (
+    <div data-testid="settings-menu" style={{ position: "relative", display: "inline-flex" }}>
+      <IconButton
+        label="Settings"
+        data-testid="settings-menu-btn"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+          <circle cx="8" cy="8" r="2.2" />
+          <path d="M8 1.5v1.8M8 12.7v1.8M14.5 8h-1.8M3.3 8H1.5M12.6 3.4l-1.3 1.3M4.7 11.3l-1.3 1.3M12.6 12.6l-1.3-1.3M4.7 4.7 3.4 3.4" />
+        </svg>
+      </IconButton>
+      {open && (
+        <div style={{ position: "absolute", top: "100%", right: 0, zIndex: 40 }}>
+          <Menu
+            items={items}
+            ariaLabel="Settings"
+            testId="settings-menu-list"
+            onClose={() => setOpen(false)}
+          />
+        </div>
+      )}
+      {syncOpen && (
+        <div
+          data-testid="settings-sync-popover"
+          style={{
+            position: "absolute",
+            top: "100%",
+            right: 0,
+            zIndex: 45,
+            background: "var(--ito-bg-elevated)",
+            border: "1px solid var(--ito-border)",
+            borderRadius: "10px",
+            boxShadow: "var(--ito-shadow-lg)",
+            padding: "10px",
+          }}
+        >
+          <SyncBanner
+            wb={wb}
+            remote={remote ?? null}
+            onChange={bump}
+            onConfigureRemote={(adapter) => {
+              onConfigureRemote?.(adapter);
+              bump();
+            }}
+          />
+          <button
+            data-testid="settings-sync-close"
+            style={{ marginTop: "8px" }}
+            onClick={() => setSyncOpen(false)}
+          >
+            Close
+          </button>
+        </div>
+      )}
+      {/* Hidden Restore file input (the menu item clicks it). */}
+      <input
+        ref={restoreRef}
+        data-testid="restore-backup-input"
+        type="file"
+        accept=".ito,.zip,.json,application/zip,application/json"
+        style={{ display: "none" }}
+        onChange={(e) => void onRestoreFile(e.target.files?.[0] ?? null)}
+      />
     </div>
   );
 }

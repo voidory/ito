@@ -83,6 +83,8 @@ test("A21: the mobile reader shell preserves the source across the writing sheet
 
   const sourceBefore = await page.evaluate(() => window.__ito.openSourceIds());
 
+  // Phone Reading toggle now lives in the shell gear settings menu (M9).
+  await page.getByTestId("settings-menu-btn").click();
   await page.getByTestId("toggle-mobile-mode").click();
   await expect(page.getByTestId("mobile-reader-shell")).toBeVisible();
 

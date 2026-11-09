@@ -41,6 +41,31 @@
   /* Motion: a single crisp local-feedback curve + duration. */
   --ito-motion-fast: 160ms;
   --ito-motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* M9 (FEAT-001 B): the floating-surface stacking layer token so menus,
+   * popovers and the selection popup share ONE z-index above the reader. */
+  --ito-z-popover: 1000;
+
+  /* M9 annotation colour tokens (swatch fills reused by the reader overlays
+   * and the UI-kit colour dots). */
+  --ito-annot-yellow: #ffdd57;
+  --ito-annot-green: #7ad67a;
+  --ito-annot-blue: #6fb7ff;
+  --ito-annot-pink: #ff9bd0;
+}
+
+/*
+ * M9 (FEAT-001 B): fix the global serif-font bug once, for every native control
+ * including the ones rendered inside popovers/menus/the comment box. The theme
+ * already set `font:inherit` on `button` and `input,select,textarea` blocks
+ * individually; this consolidated rule is the canonical statement the handoff
+ * requires and guarantees no control falls back to the browser serif default.
+ */
+button,
+input,
+textarea,
+select {
+  font: inherit;
 }
 
 /* The warm paper backdrop + ink text applied app-wide. */
@@ -352,4 +377,196 @@ label[data-testid="open-restore-input"]:active {
 .daily-review-left,
 .daily-review-right {
   min-width: 0;
+}
+
+/* ====================================================================== */
+/* M9 (FEAT-001) UI KIT + READER CHROME                                   */
+/* ====================================================================== */
+
+/* --- UI kit: Button / IconButton -------------------------------------- */
+.ito-ui-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 6px;
+  line-height: 1;
+}
+
+.ito-ui-icon-btn[aria-pressed="true"] {
+  background: var(--ito-accent);
+  color: var(--ito-accent-ink);
+  border-color: var(--ito-accent);
+}
+
+.ito-ui-icon-btn svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+/* --- UI kit: Menu ------------------------------------------------------ */
+.ito-ui-menu {
+  display: flex;
+  flex-direction: column;
+  min-width: 13rem;
+  padding: 4px;
+  background: var(--ito-bg-elevated);
+  border: 1px solid var(--ito-border);
+  border-radius: var(--ito-radius-md);
+  box-shadow: var(--ito-shadow-md);
+}
+
+/* Menu items are full-width LEFT-aligned rows (no centred outlined buttons). */
+.ito-ui-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  box-shadow: none;
+  padding: 6px 8px;
+  border-radius: var(--ito-radius-sm);
+}
+
+.ito-ui-menu-item:hover:not(:disabled),
+.ito-ui-menu-item:focus-visible {
+  background: var(--ito-accent-soft);
+  border-color: transparent;
+  box-shadow: none;
+  outline: none;
+}
+
+.ito-ui-menu-item-icon {
+  display: inline-flex;
+  width: 16px;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--ito-muted);
+}
+
+.ito-ui-menu-item-label {
+  flex: 1;
+  white-space: nowrap;
+}
+
+.ito-ui-menu-item-shortcut {
+  margin-left: auto;
+  color: var(--ito-muted);
+  font-size: 0.8em;
+  padding-left: 12px;
+}
+
+/* --- UI kit: Popover + the shared fixed layer ------------------------- */
+.ito-ui-popover-layer {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  z-index: var(--ito-z-popover);
+}
+
+.ito-ui-popover {
+  position: fixed;
+  z-index: var(--ito-z-popover);
+  background: var(--ito-bg-elevated);
+  border: 1px solid var(--ito-border);
+  border-radius: var(--ito-radius-md);
+  box-shadow: var(--ito-shadow-lg);
+  padding: 8px;
+}
+
+/* --- Reader: the single toolbar (<= 44px) ----------------------------- */
+.ito-reader-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--ito-border);
+  background: var(--ito-bg-elevated);
+  overflow-x: auto;
+}
+
+.ito-reader-toolbar .ito-toolbar-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 6px 2px;
+  background: var(--ito-border);
+  flex-shrink: 0;
+}
+
+.ito-reader-toolbar .ito-toolbar-title {
+  flex: 1;
+  min-width: 40px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+
+.ito-reader-toolbar .ito-toolbar-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.ito-reader-toolbar .ito-page-input {
+  width: 3.2rem;
+  text-align: center;
+  padding: 2px 4px;
+}
+
+/* --- App header: a <= 36px strip while reading ------------------------ */
+.ito-shell-strip {
+  min-height: 0;
+  padding: 2px 8px;
+}
+
+/* --- Reader page canvas: centred, soft shadow, 12px gaps -------------- */
+.ito-page-canvas {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding-top: 12px;
+}
+
+.ito-page-canvas .ito-page-stage,
+.ito-page-canvas [data-page-index] {
+  box-shadow: var(--ito-shadow-md);
+  background: var(--ito-bg-elevated);
+}
+
+/* --- Annotation colour dots (shared by popup + popover + sidebar) ----- */
+.ito-color-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid var(--ito-border);
+  padding: 0;
+  box-shadow: none;
+}
+
+.ito-color-dot[aria-pressed="true"],
+.ito-color-dot[data-selected="true"] {
+  border: 2px solid var(--ito-ink);
+}
+
+/* --- Reader find: match highlighting in the text layer ---------------- */
+.ito-find-match {
+  background: rgba(255, 221, 87, 0.5);
+  border-radius: 2px;
+}
+
+.ito-find-active {
+  background: rgba(255, 150, 0, 0.7);
+  outline: 1px solid #ff7a00;
 }

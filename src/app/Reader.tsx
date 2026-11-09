@@ -5,7 +5,6 @@ import {
   cropCanvasRegionToDataUrl,
   hitTestAnnotations,
   loadDocument,
-  renderHighlightOverlay,
   renderPage,
   resolveAnchor,
   type HitTestTarget,
@@ -15,14 +14,81 @@ import type { NormalizedRect } from "../model";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import type { AnchorResolution, AnnotationId, PageId, SourceId, TextAnchor } from "../model";
 import {
-  HIGHLIGHT_COLORS,
   type AnnotationStyle,
-  type AnnotationView,
   type HighlightColor,
   type Workbench,
 } from "./workbench";
 import { SubjectEditor } from "./SubjectEditor";
 import { importPdfFiles } from "./pdfImport";
+import { ReaderToolbar, type ActiveTool } from "./reader/ReaderToolbar";
+import { AnnotationSidebar } from "./reader/AnnotationSidebar";
+import {
+  anchorRectFrom,
+  clampZoom,
+  cssEscapeId,
+  drawAnnotation,
+  sanitizeSnapshotHtml,
+  serializedRerender,
+  swatch,
+  styles,
+  AssociationMenu,
+  BinaryOffloadedPopover,
+  CommentSurface,
+  HighlightEditPopover,
+  LiveSelectionPreview,
+  ReaderContextMenu,
+  SelectionToolbar,
+  type AnchorRect,
+  type ContextMenuState,
+  type EditPopoverState,
+  type MenuState,
+  type OffloadedPopover as OffloadedPopoverState,
+  type ToolbarState,
+} from "./reader/AnnotationOverlays";
+
+/*
+ * M9 (FEAT-001): the reader annotation OVERLAYS, the right-panel SIDEBAR and the
+ * single TOOLBAR now live in src/app/reader/*. Reader.tsx remains the shell +
+ * state owner and re-exports the moved symbols so existing imports (tests +
+ * testApi.ts) keep resolving unchanged.
+ */
+export {
+  anchorRectFrom,
+  clampFixedAnchor,
+  clampZoom,
+  drawAnnotation,
+  sanitizeSnapshotHtml,
+  serializedRerender,
+  AssociationMenu,
+  BinaryOffloadedPopover,
+  CommentSurface,
+  HighlightEditPopover,
+  LiveSelectionPreview,
+  ReaderContextMenu,
+  SelectionToolbar,
+} from "./reader/AnnotationOverlays";
+export type {
+  AnchorRect,
+  ContextMenuState,
+  EditPopoverState,
+  MenuState,
+  OffloadedPopover,
+  ToolbarState,
+} from "./reader/AnnotationOverlays";
+
+/**
+ * Imperative commands the single reader toolbar drives on the primary source
+ * pane (zoom / paging / find). The pane registers an implementation via
+ * `registerCommands`; the shell calls them from the toolbar buttons.
+ */
+export interface PaneCommands {
+  readonly zoomIn: () => void;
+  readonly zoomOut: () => void;
+  readonly resetZoom: () => void;
+  readonly fitWidth: () => void;
+  readonly goToPage: (pageNumber: number) => void;
+  readonly openFind: () => void;
+}
 
 /** A pending source-return request (spec section 8.2, A17). */
 interface ReturnTarget {
@@ -32,21 +98,6 @@ interface ReturnTarget {
   readonly resolution: AnchorResolution;
   /** Monotonic nonce so repeat returns to the same quote re-trigger the scroll. */
   readonly nonce: number;
-}
-
-/**
- * The stored context shown when a followed quote resolves to 'binary-offloaded'
- * (A17). The citation still FUNCTIONS from this metadata; the popover offers
- * re-attachment of the PDF binary to restore the live render.
- */
-export interface OffloadedPopover {
-  readonly evidenceId: string;
-  readonly sourceId: SourceId;
-  readonly sourceTitle: string;
-  readonly quotedText: string;
-  readonly comment: string;
-  readonly pageNumber: number;
-  readonly reason: string;
 }
 
 /**
@@ -133,9 +184,65 @@ export function Reader({
   // popover that renders the stored quote + comment + page number + source
   // title and offers "Attach PDF Binary". The citation still functions from
   // this stored metadata; attaching re-hydrates the live render.
-  const [offloadedPopover, setOffloadedPopover] = useState<OffloadedPopover | null>(null);
+  const [offloadedPopover, setOffloadedPopover] = useState<OffloadedPopoverState | null>(null);
   const nonceRef = useRef(0);
   const readerPdfInputRef = useRef<HTMLInputElement>(null);
+
+  // FEAT-001/002 tool-first state owned by the reader shell. The active tool
+  // persists until toggled off or Esc; the active colour drives immediate
+  // highlight/underline commits (1-4) and the no-tool popup default.
+  const [activeTool, setActiveTool] = useState<ActiveTool>(null);
+  const [activeColor, setActiveColor] = useState<HighlightColor>("yellow");
+
+  // The primary source pane registers its imperative zoom/paging/find commands
+  // here so the single reader toolbar can drive them; it reports zoom/page back
+  // up via onNavChange. A single-document reader (the default) wires one pane.
+  const paneCommandsRef = useRef<PaneCommands | null>(null);
+  const [nav, setNav] = useState<{ zoom: number; page: number; pageCount: number }>({
+    zoom: 1,
+    page: 1,
+    pageCount: 1,
+  });
+
+  // Global keyboard: colours 1-4, tools H/U/N/A, Esc clears the tool. Ignored
+  // while typing in an input/textarea/contenteditable so the comment box and
+  // page input keep working.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      const t = e.target as HTMLElement | null;
+      const typing =
+        !!t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.tagName === "SELECT" ||
+          t.isContentEditable);
+      if (e.key === "Escape") {
+        setActiveTool(null);
+        return;
+      }
+      if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+      const colorKeys: Record<string, HighlightColor> = {
+        "1": "yellow",
+        "2": "green",
+        "3": "blue",
+        "4": "pink",
+      };
+      if (colorKeys[e.key]) {
+        setActiveColor(colorKeys[e.key]!);
+        return;
+      }
+      const toolKeys: Record<string, Exclude<ActiveTool, null>> = {
+        h: "highlight",
+        u: "underline",
+        n: "note",
+        a: "area",
+      };
+      const tool = toolKeys[e.key.toLowerCase()];
+      if (tool) setActiveTool((cur) => (cur === tool ? null : tool));
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // Local-PDF import from the Reader header (same hash + numPages + importSource
   // path as the Library button). Resets the input so the same file re-imports.
@@ -271,67 +378,79 @@ export function Reader({
     else paneScrollRefs.current.delete(slotId);
   }, []);
 
+  const primaryTitle =
+    (openSourceIds[0] && wb.rawData().sources.find((s) => s.id === openSourceIds[0])?.title) ||
+    "Reader";
+  const switchable = wb
+    .rawData()
+    .sources.filter((s) => !openSourceIds.includes(s.id));
+
   return (
     <div data-testid="reader" data-view="reader" style={styles.root}>
-      <header style={styles.toolbar}>
-        <button data-testid="back-to-library" onClick={onBackToLibrary}>
-          ← Library
-        </button>
-        <button
-          data-testid="import-pdf-btn"
-          style={{ fontWeight: 600 }}
-          onClick={() => readerPdfInputRef.current?.click()}
-        >
-          + Import PDF
-        </button>
-        <input
-          ref={readerPdfInputRef}
-          data-testid="import-pdf-input"
-          type="file"
-          accept=".pdf,application/pdf"
-          multiple
-          style={{ display: "none" }}
-          onChange={(e) => {
-            void importReaderFiles(e.target.files);
-            e.target.value = "";
-          }}
-        />
-        {together && (
-          <span data-testid="open-together-indicator" style={{ color: "#555" }}>
-            Shared workspace · no analysis
-          </span>
-        )}
-        <span style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
-          <label style={{ fontSize: "0.85rem", color: "#555" }}>
-            <input
-              type="checkbox"
-              data-testid="suppress-motion"
-              checked={suppressMotion}
-              onChange={(e) => onToggleMotion(e.target.checked)}
-            />{" "}
-            Suppress motion
-          </label>
-          <label style={{ fontSize: "0.85rem", color: "#555" }}>
-            <input
-              type="checkbox"
-              data-testid="toggle-lines"
-              checked={linesVisible}
-              onChange={(e) => {
-                wb.setLinesVisible(e.target.checked);
+      <ReaderToolbar
+        title={primaryTitle}
+        sidebarOpen={highlightsTabOpen}
+        onToggleSidebar={() => onToggleTab(!highlightsTabOpen)}
+        onBackToLibrary={onBackToLibrary}
+        activeTool={activeTool}
+        onToggleTool={(t) => setActiveTool((cur) => (cur === t ? null : t))}
+        activeColor={activeColor}
+        onSetColor={setActiveColor}
+        zoom={nav.zoom}
+        onZoomOut={() => paneCommandsRef.current?.zoomOut()}
+        onZoomIn={() => paneCommandsRef.current?.zoomIn()}
+        onResetZoom={() => paneCommandsRef.current?.resetZoom()}
+        onFitWidth={() => paneCommandsRef.current?.fitWidth()}
+        page={nav.page}
+        pageCount={nav.pageCount}
+        onGoToPage={(n) => paneCommandsRef.current?.goToPage(n)}
+        onPrevPage={() => paneCommandsRef.current?.goToPage(Math.max(1, nav.page - 1))}
+        onNextPage={() => paneCommandsRef.current?.goToPage(Math.min(nav.pageCount, nav.page + 1))}
+        onOpenFind={() => paneCommandsRef.current?.openFind()}
+        suppressMotion={suppressMotion}
+        linesVisible={linesVisible}
+        onToggleMotion={() => onToggleMotion(!suppressMotion)}
+        onToggleLines={() => {
+          wb.setLinesVisible(!linesVisible);
+          bump();
+        }}
+        onSwitchPaper={
+          switchable.length > 0
+            ? () => {
+                const to = switchable[0]!.id;
+                if (openSourceIds[0]) wb.switchReaderPane(openSourceIds[0], to);
                 bump();
-              }}
-            />{" "}
-            Show source lines
-          </label>
-          <button
-            data-testid="toggle-highlights-tab"
-            aria-pressed={highlightsTabOpen}
-            onClick={() => onToggleTab(!highlightsTabOpen)}
-          >
-            {highlightsTabOpen ? "Hide highlights" : "Show highlights"}
-          </button>
-        </span>
-      </header>
+              }
+            : undefined
+        }
+        onImportPdf={() => readerPdfInputRef.current?.click()}
+      />
+      <input
+        ref={readerPdfInputRef}
+        data-testid="import-pdf-input"
+        type="file"
+        accept=".pdf,application/pdf"
+        multiple
+        style={{ display: "none" }}
+        onChange={(e) => {
+          void importReaderFiles(e.target.files);
+          e.target.value = "";
+        }}
+      />
+      {together && (
+        <div
+          data-testid="open-together-indicator"
+          style={{
+            padding: "2px 10px",
+            fontSize: "0.78rem",
+            color: "var(--ito-muted)",
+            borderBottom: "1px solid var(--ito-border)",
+            background: "var(--ito-bg-paper)",
+          }}
+        >
+          Shared workspace · no analysis
+        </div>
+      )}
 
       {returnNotice && (
         <div data-testid="source-return-notice" role="alert" style={styles.returnNotice}>
@@ -424,6 +543,20 @@ export function Reader({
                   }
                   openSourceIds={openSourceIds}
                   registerScroll={(el) => registerPaneScroll(slot.slotId, el)}
+                  activeTool={activeTool}
+                  activeColor={activeColor}
+                  onClearTool={() => setActiveTool(null)}
+                  isPrimary={slot.sourceId === openSourceIds[0]}
+                  registerCommands={
+                    slot.sourceId === openSourceIds[0]
+                      ? (c) => {
+                          paneCommandsRef.current = c;
+                        }
+                      : undefined
+                  }
+                  onNavChange={
+                    slot.sourceId === openSourceIds[0] ? setNav : undefined
+                  }
                   bump={bump}
                 />
               ) : (
@@ -464,7 +597,7 @@ export function Reader({
 
         {/* Closed tab reserves ZERO width: the aside is not rendered at all. */}
         {highlightsTabOpen && (
-          <HighlightsTab wb={wb} openSourceIds={openSourceIds} bump={bump} />
+          <AnnotationSidebar wb={wb} openSourceIds={openSourceIds} bump={bump} />
         )}
       </div>
     </div>
@@ -554,115 +687,11 @@ function PaneGroup({
   );
 }
 
-export interface ToolbarState {
-  readonly sourceId: SourceId;
-  readonly anchor: TextAnchor;
-  /** Viewport-space anchor rect of the selection (for the fixed toolbar). */
-  readonly rect: AnchorRect;
-}
-
-export interface MenuState {
-  readonly annotationId: AnnotationId;
-  readonly sourceId: SourceId;
-  readonly x: number;
-  readonly y: number;
-}
-
-/**
- * FEAT-002 (2.1) a viewport-space rectangle used to anchor the fixed-position
- * selection toolbar and highlight edit popover. When a real
- * getBoundingClientRect is unavailable (jsdom returns width 0) the caller falls
- * back to the pointer clientX/clientY, which still yields a sensible anchor.
- */
-export interface AnchorRect {
-  readonly left: number;
-  readonly top: number;
-  readonly right: number;
-  readonly bottom: number;
-  readonly width: number;
-}
-
-/**
- * FEAT-002 (2.2a/2.2b) the anchored highlight edit popover + right-click
- * context menu state. Both are rendered on a FIXED viewport layer outside the
- * .pane-scroll so they are never clipped (2.1).
- */
-export interface EditPopoverState {
-  readonly annotationId: AnnotationId;
-  readonly sourceId: SourceId;
-  readonly rect: AnchorRect;
-}
-
-export type ContextMenuState =
-  | {
-      readonly variant: "annotation";
-      readonly annotationId: AnnotationId;
-      readonly sourceId: SourceId;
-      readonly x: number;
-      readonly y: number;
-    }
-  | {
-      readonly variant: "page";
-      readonly sourceId: SourceId;
-      readonly x: number;
-      readonly y: number;
-    };
-
 /** FEAT-002 (2.4b) the live rubber-band box while dragging an area selection. */
 interface AreaDragState {
   readonly pageIndex: number;
   /** Normalized (0..1) rect relative to the originating pdf-page-stage. */
   readonly rect: NormalizedRect;
-}
-
-/**
- * FEAT-002 (2.1) clamp an anchor rect into viewport-space fixed coordinates for
- * a floating surface of a given width. The formulas are exactly those in the
- * handoff: the surface is centred over the anchor and clamped 12px from each
- * viewport edge, and sits above the anchor when there is room (anchorTop > 64)
- * otherwise just below it.
- */
-export function clampFixedAnchor(
-  rect: AnchorRect,
-  surfaceWidth: number,
-): { left: number; top: number } {
-  const viewportWidth = (typeof window !== "undefined" && window.innerWidth) || 1024;
-  const anchorCenterX = rect.left + rect.width / 2;
-  const left = Math.max(
-    12,
-    Math.min(anchorCenterX - surfaceWidth / 2, viewportWidth - surfaceWidth - 12),
-  );
-  const top = rect.top > 64 ? rect.top - 48 : rect.bottom + 12;
-  return { left, top };
-}
-
-/**
- * Derive an AnchorRect from a DOMRect, falling back to the pointer position
- * when the rect has zero width (jsdom's getBoundingClientRect commonly returns
- * zeros). A small synthetic box is built around the pointer so the clamp math
- * still centres the surface near where the user clicked.
- */
-export function anchorRectFrom(
-  rect: DOMRect | null,
-  pointerX: number,
-  pointerY: number,
-): AnchorRect {
-  if (rect && rect.width > 0) {
-    return {
-      left: rect.left,
-      top: rect.top,
-      right: rect.right,
-      bottom: rect.bottom,
-      width: rect.width,
-    };
-  }
-  return {
-    left: pointerX,
-    top: pointerY,
-    right: pointerX,
-    bottom: pointerY,
-    width: 0,
-  };
 }
 
 function SourcePane({
@@ -673,6 +702,12 @@ function SourcePane({
   returnTarget,
   openSourceIds,
   registerScroll,
+  activeTool,
+  activeColor,
+  onClearTool,
+  isPrimary,
+  registerCommands,
+  onNavChange,
   bump,
 }: {
   wb: Workbench;
@@ -682,6 +717,12 @@ function SourcePane({
   returnTarget: ReturnTarget | null;
   openSourceIds: readonly SourceId[];
   registerScroll: (el: HTMLElement | null) => void;
+  activeTool: ActiveTool;
+  activeColor: HighlightColor;
+  onClearTool: () => void;
+  isPrimary: boolean;
+  registerCommands?: ((commands: PaneCommands) => void) | undefined;
+  onNavChange?: ((nav: { zoom: number; page: number; pageCount: number }) => void) | undefined;
   bump: () => void;
 }): JSX.Element {
   const onToggleMotionForPane = onToggleMotion;
@@ -702,10 +743,9 @@ function SourcePane({
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<AnnotationId | null>(null);
   // FEAT-002 (2.2b) the right-click context menu (annotation or page variant).
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
-  // FEAT-002 (2.2c) the compact header overflow menu.
-  const [overflowOpen, setOverflowOpen] = useState(false);
-  // FEAT-002 (2.4) Zotero-style area-select / figure cropper mode + live box.
-  const [areaSelectActive, setAreaSelectActive] = useState(false);
+  // FEAT-001/002 Zotero-style area cropper. Area-select is now driven by the
+  // tool-first model: it is active exactly when the shell's Area tool is on.
+  const areaSelectActive = activeTool === "area";
   const [areaDrag, setAreaDrag] = useState<AreaDragState | null>(null);
   const areaDragRef = useRef<{ pageIndex: number; startX: number; startY: number } | null>(null);
   // FEAT-002 (2.3) the page whose text selection is active (locks other pages).
@@ -985,17 +1025,39 @@ function SourcePane({
           pageBox: page.pageBox(),
           pageText: page.pageText,
         });
+        // FEAT-002 (2) tool-first: with a Highlight/Underline tool active, the
+        // annotation is created IMMEDIATELY with the active colour and NO
+        // popup. With no tool active, show the single fallback popup; it must
+        // never coexist with an open annotation popover.
+        if (activeTool === "highlight" || activeTool === "underline") {
+          void wb.commitTextAnnotation({
+            sourceId,
+            anchor,
+            style: { kind: activeTool, color: activeColor },
+          });
+          window.getSelection()?.removeAllRanges();
+          setToolbar(null);
+          redrawOverlays();
+          bump();
+          return;
+        }
+        if (activeTool === "note" || activeTool === "area") {
+          // Note/Area tools act on a page point/drag, not a text selection.
+          setToolbar(null);
+          return;
+        }
         const rect = anchorRectFrom(
           range.getBoundingClientRect(),
           e?.clientX ?? 0,
           e?.clientY ?? 0,
         );
+        setEditPopover(null);
         setToolbar({ sourceId, anchor, rect });
       } catch {
         setToolbar(null);
       }
     },
-    [rangeMode, areaSelectActive, source, sourceId],
+    [rangeMode, areaSelectActive, source, sourceId, activeTool, activeColor, wb, redrawOverlays, bump],
   );
 
   const commitHighlight = useCallback(
@@ -1088,6 +1150,35 @@ function SourcePane({
       if (sel && sel.isCollapsed === false) return; // a text selection drag
       const hit = stageHitAt(clientX, clientY);
       if (!hit) return;
+      // FEAT-002 (2) Note tool: clicking a page point drops a small pin via
+      // commitAreaAnnotation([nx, ny, 0.025, 0.025]) and opens the annotation
+      // popover focused on the comment input. No model/schema change.
+      if (activeTool === "note") {
+        const pin: NormalizedRect = { x: hit.nx, y: hit.ny, width: 0.025, height: 0.025 };
+        void (async () => {
+          const view = await wb.commitAreaAnnotation(sourceId, hit.pageIndex, pin);
+          onClearTool();
+          setToolbar(null);
+          setContextMenu(null);
+          setSelectedAnnotationId(view.annotation.id);
+          setEditPopover({
+            annotationId: view.annotation.id,
+            sourceId,
+            rect: anchorRectFrom(null, clientX, clientY),
+          });
+          redrawOverlays();
+          bump();
+          // Focus the comment input once the popover mounts.
+          requestAnimationFrame(() => {
+            (
+              document.querySelector(
+                '[data-testid="highlight-edit-popover"] [data-testid="comment-input"]',
+              ) as HTMLTextAreaElement | null
+            )?.focus();
+          });
+        })();
+        return;
+      }
       const id = hitTestAnnotations(hitTargetsForPage(hit.pageIndex), hit.nx, hit.ny);
       if (!id) return;
       const rect = anchorRectFrom(
@@ -1100,7 +1191,7 @@ function SourcePane({
       setContextMenu(null);
       setEditPopover({ annotationId: id as AnnotationId, sourceId, rect });
     },
-    [stageHitAt, hitTargetsForPage, sourceId],
+    [stageHitAt, hitTargetsForPage, sourceId, activeTool, wb, onClearTool, redrawOverlays, bump],
   );
 
   // FEAT-002 (2.2b) right-click: annotation variant over a hit, page variant
@@ -1136,7 +1227,8 @@ function SourcePane({
       );
       const imageDataUrl = cropCanvasRegionToDataUrl(page?.canvas ?? null, rect);
       await wb.commitAreaAnnotation(sourceId, pageIndex, rect, undefined, imageDataUrl);
-      setAreaSelectActive(false);
+      // The Area tool stays active until toggled off (FEAT-002 2.4); just clear
+      // the live rubber-band box.
       setAreaDrag(null);
       areaDragRef.current = null;
       redrawOverlays();
@@ -1373,6 +1465,126 @@ function SourcePane({
     return () => el.removeEventListener("wheel", handler);
   }, [ready]);
 
+  // FEAT-001 current page tracking via IntersectionObserver (NOT scroll-driven
+  // re-renders): the page whose stage is most visible is reported as current.
+  const [currentPage, setCurrentPage] = useState(1);
+  useEffect(() => {
+    if (!ready || !isPrimary) return;
+    const mount = mountRef.current;
+    if (!mount || typeof IntersectionObserver === "undefined") return;
+    const ratios = new Map<number, number>();
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          const pi = Number((e.target as HTMLElement).dataset.pageIndex ?? "-1");
+          ratios.set(pi, e.isIntersecting ? e.intersectionRatio : 0);
+        }
+        let best = -1;
+        let bestRatio = -1;
+        for (const [pi, r] of ratios) {
+          if (r > bestRatio) {
+            bestRatio = r;
+            best = pi;
+          }
+        }
+        if (best >= 0) setCurrentPage(best + 1);
+      },
+      { root: scrollRef.current, threshold: [0.1, 0.25, 0.5, 0.75] },
+    );
+    for (const page of pagesRef.current) io.observe(page.container);
+    return () => io.disconnect();
+  }, [ready, isPrimary]);
+
+  // FEAT-001 report zoom/page/count up to the shell toolbar (primary pane only)
+  // and register the imperative toolbar commands (zoom / paging / find).
+  const pageCount = source?.pageCount ?? pagesRef.current.length ?? 1;
+  useEffect(() => {
+    if (!isPrimary) return;
+    onNavChange?.({ zoom, page: currentPage, pageCount });
+  }, [isPrimary, zoom, currentPage, pageCount, onNavChange]);
+
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findMatches, setFindMatches] = useState<{ total: number; active: number }>({
+    total: 0,
+    active: 0,
+  });
+
+  const goToPage = useCallback((pageNumber: number) => {
+    const page = pagesRef.current.find(
+      (p) => Number(p.container.dataset.pageIndex ?? "-1") === pageNumber - 1,
+    );
+    page?.container.scrollIntoView({ behavior: "auto", block: "start" });
+  }, []);
+
+  useEffect(() => {
+    if (!isPrimary || !registerCommands) return;
+    registerCommands({
+      zoomIn: () => setZoom((z) => clampZoom(z + 0.1)),
+      zoomOut: () => setZoom((z) => clampZoom(z - 0.1)),
+      resetZoom: () => setZoom(1),
+      // Fit width resets the user zoom; the fit-to-pane effect applies the base
+      // fitted scale with zoom === 1.
+      fitWidth: () => setZoom(1),
+      goToPage,
+      openFind: () => setFindOpen(true),
+    });
+  }, [isPrimary, registerCommands, goToPage]);
+
+  // FEAT-001 inline find using pdf.js text layers. Ctrl/Cmd+F opens the bar;
+  // Enter / Shift+Enter move between matches; matches get a .ito-find-match
+  // class in the text layer.
+  useEffect(() => {
+    if (!isPrimary) return;
+    const onKey = (ev: KeyboardEvent): void => {
+      if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "f") {
+        ev.preventDefault();
+        setFindOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isPrimary]);
+
+  const runFind = useCallback(
+    (query: string, step: 1 | -1 | 0) => {
+      const q = query.trim().toLowerCase();
+      for (const page of pagesRef.current) {
+        page.textLayer
+          .querySelectorAll(".ito-find-match")
+          .forEach((el) => el.classList.remove("ito-find-match", "ito-find-active"));
+      }
+      if (!q) {
+        setFindMatches({ total: 0, active: 0 });
+        return;
+      }
+      const hits: HTMLElement[] = [];
+      for (const page of pagesRef.current) {
+        for (const span of Array.from(page.textLayer.querySelectorAll("span"))) {
+          if ((span.textContent ?? "").toLowerCase().includes(q)) {
+            span.classList.add("ito-find-match");
+            hits.push(span as HTMLElement);
+          }
+        }
+      }
+      if (hits.length === 0) {
+        setFindMatches({ total: 0, active: 0 });
+        return;
+      }
+      setFindMatches((prev) => {
+        const nextActive =
+          step === 0
+            ? 0
+            : (prev.active + step + hits.length) % hits.length;
+        const el = hits[nextActive];
+        el?.classList.add("ito-find-active");
+        el?.scrollIntoView({ behavior: "auto", block: "center" });
+        return { total: hits.length, active: nextActive };
+      });
+    },
+    [],
+  );
+
   // Other sources (not currently open in any pane) the user can switch THIS
   // pane to — keeps the same subject while a reader pane shows a third paper
   // (section 8.2 note).
@@ -1403,54 +1615,9 @@ function SourcePane({
               Snapshot cached
             </span>
           )}
-          {/* FEAT-002 (2.5) compact PDF zoom pill: steps 50%..300%, locked 1:1. */}
-          {!isWebsite && (
-            <span data-testid="pdf-zoom-pill" style={styles.zoomPill}>
-              <button
-                data-testid="pdf-zoom-out"
-                aria-label="Zoom out"
-                onClick={() => setZoom((z) => clampZoom(z - 0.1))}
-              >
-                −
-              </button>
-              <button
-                data-testid="pdf-zoom-reset"
-                aria-label="Reset zoom"
-                onClick={() => setZoom(1)}
-              >
-                {Math.round(zoom * 100)}%
-              </button>
-              <button
-                data-testid="pdf-zoom-in"
-                aria-label="Zoom in"
-                onClick={() => setZoom((z) => clampZoom(z + 0.1))}
-              >
-                +
-              </button>
-            </span>
-          )}
-          {/* FEAT-002 (2.4a) Zotero-style dashed-box area-select icon toggle. It
-              toggles area-select mode and NEVER spawns a rectangle. */}
-          {!isWebsite && (
-            <button
-              data-testid="toggle-area-select"
-              aria-label="Select figure or area"
-              aria-pressed={areaSelectActive}
-              title="Select figure or area"
-              onClick={() => {
-                setAreaSelectActive((v) => !v);
-                setAreaDrag(null);
-                areaDragRef.current = null;
-              }}
-              style={{ fontFamily: "monospace" }}
-            >
-              ⬚
-            </button>
-          )}
-          {/* FEAT-002 (2.2c) the canonical header actions are now COMPACT (the
-              verbose text labels moved into the overflow + right-click menus),
-              but the data-testids stay directly reachable so existing render +
-              e2e tests keep working. */}
+          {/* Page-range comment entry (kept reachable for the accessible flow +
+              e2e). Zoom / find / tools / overflow now live in the single reader
+              toolbar above. */}
           <button
             data-testid="start-range"
             onClick={() => setRangeMode((v) => !v)}
@@ -1479,109 +1646,6 @@ function SourcePane({
               ))}
             </select>
           )}
-          {/* 2.4a keeps the legacy add-area-annotation testid reachable as the
-              menu-equivalent of the icon toggle (it enters area-select mode and
-              never spawns a rectangle). */}
-          {!isWebsite && (
-            <button
-              data-testid="add-area-annotation"
-              onClick={() => setAreaSelectActive(true)}
-              title="Select a figure or area (Zotero box)"
-              style={{ display: "none" }}
-            >
-              Select Figure / Area
-            </button>
-          )}
-          {/* FEAT-002 (2.2c) single compact overflow menu that ALSO exposes the
-              relocated actions (every action reachable from here too). */}
-          <span style={{ position: "relative", display: "inline-flex" }}>
-            <button
-              data-testid="pane-overflow-menu-btn"
-              aria-label="More actions"
-              aria-haspopup="menu"
-              aria-expanded={overflowOpen}
-              onClick={() => setOverflowOpen((v) => !v)}
-            >
-              ⋯
-            </button>
-            {overflowOpen && (
-              <div
-                data-testid="pane-overflow-menu"
-                role="menu"
-                aria-label="Pane actions"
-                style={styles.overflowMenu}
-              >
-                <button
-                  data-testid="overflow-start-range"
-                  role="menuitem"
-                  onClick={() => {
-                    setRangeMode((v) => !v);
-                    setOverflowOpen(false);
-                  }}
-                >
-                  Comment on Page Range…
-                </button>
-                {!isWebsite && (
-                  <button
-                    data-testid="overflow-area-select"
-                    role="menuitem"
-                    onClick={() => {
-                      setAreaSelectActive(true);
-                      setOverflowOpen(false);
-                    }}
-                  >
-                    Select Figure / Area (Zotero Box)
-                  </button>
-                )}
-                {switchable.length > 0 && (
-                  <select
-                    data-testid="overflow-switch-paper"
-                    aria-label="Switch this pane to another paper (overflow)"
-                    value=""
-                    onChange={(e) => {
-                      const to = e.target.value;
-                      if (!to) return;
-                      wb.switchReaderPane(sourceId, to as SourceId);
-                      setOverflowOpen(false);
-                      bump();
-                    }}
-                  >
-                    <option value="">Switch Paper…</option>
-                    {switchable.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.title}
-                      </option>
-                    ))}
-                  </select>
-                )}
-                <label role="menuitem" style={{ fontSize: "0.82rem", display: "flex", gap: "0.3rem" }}>
-                  <input
-                    type="checkbox"
-                    data-testid="overflow-toggle-lines"
-                    checked={linesVisibleForPane}
-                    onChange={(e) => {
-                      wb.setLinesVisible(e.target.checked);
-                      setOverflowOpen(false);
-                      bump();
-                    }}
-                  />
-                  Toggle Source Lines
-                </label>
-                <label role="menuitem" style={{ fontSize: "0.82rem", display: "flex", gap: "0.3rem" }}>
-                  <input
-                    type="checkbox"
-                    data-testid="overflow-suppress-motion"
-                    checked={suppressMotion}
-                    onChange={(e) => {
-                      onToggleMotionForPane(e.target.checked);
-                      setOverflowOpen(false);
-                    }}
-                  />
-                  Toggle Motion Suppression
-                </label>
-              </div>
-            )}
-          </span>
         </span>
       </div>
 
@@ -1627,6 +1691,58 @@ function SourcePane({
         </div>
       )}
 
+      {isPrimary && findOpen && (
+        <div data-testid="find-bar" role="search" style={styles.findBar}>
+          <input
+            data-testid="find-input"
+            aria-label="Find in document"
+            autoFocus
+            value={findQuery}
+            placeholder="Find in document"
+            onChange={(e) => {
+              setFindQuery(e.target.value);
+              runFind(e.target.value, 0);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                runFind(findQuery, e.shiftKey ? -1 : 1);
+              } else if (e.key === "Escape") {
+                setFindOpen(false);
+                runFind("", 0);
+              }
+            }}
+          />
+          <span data-testid="find-count" style={{ fontSize: "0.8rem", color: "var(--ito-muted)" }}>
+            {findMatches.total === 0 ? "0/0" : `${findMatches.active + 1}/${findMatches.total}`}
+          </span>
+          <button
+            data-testid="find-prev"
+            aria-label="Previous match"
+            onClick={() => runFind(findQuery, -1)}
+          >
+            ‹
+          </button>
+          <button
+            data-testid="find-next"
+            aria-label="Next match"
+            onClick={() => runFind(findQuery, 1)}
+          >
+            ›
+          </button>
+          <button
+            data-testid="find-close"
+            aria-label="Close find"
+            onClick={() => {
+              setFindOpen(false);
+              runFind("", 0);
+            }}
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       <div
         ref={(el) => {
           scrollRef.current = el;
@@ -1641,7 +1757,9 @@ function SourcePane({
           ref={mountRef}
           data-testid="pdf-mount"
           data-area-select={areaSelectActive ? "true" : "false"}
-          className={areaSelectActive ? "ito-area-select-active" : undefined}
+          className={["ito-page-canvas", areaSelectActive ? "ito-area-select-active" : null]
+            .filter(Boolean)
+            .join(" ")}
           style={{ ...styles.mount, cursor: areaSelectActive ? "crosshair" : undefined }}
           onMouseUp={onMouseUp}
           onPointerDown={onAreaPointerDown}
@@ -1702,7 +1820,9 @@ function SourcePane({
             onPageAction={(action) => {
               setContextMenu(null);
               if (action === "range") setRangeMode(true);
-              else if (action === "area") setAreaSelectActive(true);
+              // The Area tool is now selected from the single reader toolbar
+              // (tool-first model); the page context menu no longer toggles a
+              // separate area-select flag.
               else if (action === "lines") {
                 wb.setLinesVisible(!linesVisibleForPane);
                 bump();
@@ -1733,71 +1853,6 @@ function SourcePane({
           bump={bump}
         />
       )}
-    </div>
-  );
-}
-
-/**
- * Compact selection controls (R01). ONLY highlight/underline + color — no
- * comment editor, node picker, category selector, or subject page.
- */
-export function SelectionToolbar({
-  toolbar,
-  onCommit,
-  onDismiss,
-}: {
-  toolbar: ToolbarState;
-  onCommit: (style: AnnotationStyle) => void;
-  onDismiss: () => void;
-}): JSX.Element {
-  const [color, setColor] = useState<HighlightColor>("yellow");
-  // FEAT-002 (2.1) fixed-position + clamped near the selection anchor rect.
-  const TOOLBAR_WIDTH = 260;
-  const { left, top } = clampFixedAnchor(toolbar.rect, TOOLBAR_WIDTH);
-  return (
-    <div
-      data-testid="selection-toolbar"
-      role="toolbar"
-      aria-label="Highlight controls"
-      style={{
-        ...styles.fixedFloating,
-        left,
-        top,
-      }}
-    >
-      <button
-        data-testid="commit-highlight"
-        onClick={() => onCommit({ kind: "highlight", color })}
-      >
-        Highlight
-      </button>
-      <button
-        data-testid="commit-underline"
-        onClick={() => onCommit({ kind: "underline", color })}
-      >
-        Underline
-      </button>
-      <div data-testid="color-controls" style={{ display: "flex", gap: "0.25rem" }}>
-        {HIGHLIGHT_COLORS.map((c) => (
-          <button
-            key={c}
-            data-testid={`color-${c}`}
-            aria-label={`Color ${c}`}
-            aria-pressed={color === c}
-            onClick={() => setColor(c)}
-            style={{
-              width: 18,
-              height: 18,
-              borderRadius: "50%",
-              border: color === c ? "2px solid #333" : "1px solid #bbb",
-              background: swatch(c),
-            }}
-          />
-        ))}
-      </div>
-      <button data-testid="dismiss-toolbar" aria-label="Dismiss" onClick={onDismiss}>
-        ×
-      </button>
     </div>
   );
 }
@@ -1867,1044 +1922,6 @@ function AreaDragPreview({
       }}
     />
   );
-}
-
-/**
- * FEAT-002 (2.3a) the live watercolor selection preview: soft-rounded,
- * translucent pills mirrored over the current selection's client rects on the
- * fixed layer, tinted with the active highlight color so selecting text feels
- * dynamic and on-theme. Presentation only; pointer-events:none.
- */
-export function LiveSelectionPreview({
-  preview,
-}: {
-  preview: { color: string; rects: AnchorRect[] };
-}): JSX.Element {
-  return (
-    <div data-testid="live-selection-preview" aria-hidden="true">
-      {preview.rects.map((r, i) => (
-        <div
-          key={i}
-          className="ito-selection-live-preview"
-          style={{
-            position: "fixed",
-            left: r.left,
-            top: r.top,
-            width: r.width,
-            height: r.bottom - r.top,
-            background: preview.color,
-            opacity: 0.35,
-            borderRadius: "6px",
-            pointerEvents: "none",
-            zIndex: 999,
-          }}
-        />
-      ))}
-    </div>
-  );
-}
-
-/**
- * FEAT-002 (2.2a) the anchored 1-click highlight EDIT popover. It embeds the
- * quiet CommentSurface (so comment-input / comment-save keep working) plus
- * color swatches, a highlight/underline toggle, the Associate / Insert into
- * Subject actions, Show in Nodes, and both Delete options. Rendered on the
- * fixed layer and clamped near the clicked highlight's anchor rect.
- */
-export function HighlightEditPopover({
-  wb,
-  popover,
-  onClose,
-  bump,
-}: {
-  wb: Workbench;
-  popover: EditPopoverState;
-  onClose: () => void;
-  bump: () => void;
-}): JSX.Element {
-  const POPOVER_WIDTH = 300;
-  const { left, top } = clampFixedAnchor(popover.rect, POPOVER_WIDTH);
-  const view = wb.viewFor(popover.annotationId);
-  const imageDataUrl =
-    view && view.annotation.scope.kind === "area"
-      ? view.annotation.scope.anchor.imageDataUrl
-      : undefined;
-  const [menuMode, setMenuMode] = useState<null | "associate" | "insert">(null);
-
-  const setColor = async (color: HighlightColor): Promise<void> => {
-    const kind = view?.style.kind ?? "highlight";
-    await wb.setAnnotationStyle(popover.annotationId, { kind, color });
-    bump();
-  };
-  const toggleStyle = async (): Promise<void> => {
-    const kind = view?.style.kind === "underline" ? "highlight" : "underline";
-    const color = view?.style.color ?? "yellow";
-    await wb.setAnnotationStyle(popover.annotationId, { kind, color });
-    bump();
-  };
-
-  return (
-    <div
-      data-testid="highlight-edit-popover"
-      data-annotation-id={popover.annotationId}
-      role="dialog"
-      aria-label="Edit highlight"
-      style={{ ...styles.fixedFloating, left, top, width: POPOVER_WIDTH, display: "block" }}
-    >
-      {imageDataUrl && (
-        <img
-          data-testid="area-figure-preview"
-          src={imageDataUrl}
-          alt="Captured figure"
-          style={styles.figurePreview}
-        />
-      )}
-      {/* Comment input + Save (reuses comment-surface / comment-input / save). */}
-      <CommentSurface
-        wb={wb}
-        annotationId={popover.annotationId}
-        onClose={onClose}
-        bump={bump}
-      />
-      {/* Color swatches + highlight/underline toggle. */}
-      <div data-testid="color-controls" style={{ display: "flex", gap: "0.25rem", marginTop: "0.4rem" }}>
-        {HIGHLIGHT_COLORS.map((c) => (
-          <button
-            key={c}
-            data-testid={`color-${c}`}
-            aria-label={`Color ${c}`}
-            onClick={() => void setColor(c)}
-            style={{
-              width: 18,
-              height: 18,
-              borderRadius: "50%",
-              border: view?.style.color === c ? "2px solid #333" : "1px solid #bbb",
-              background: swatch(c),
-            }}
-          />
-        ))}
-        <button data-testid="toggle-style-kind" onClick={() => void toggleStyle()}>
-          {view?.style.kind === "underline" ? "Underline" : "Highlight"}
-        </button>
-      </div>
-      {/* Associate / Insert into Subject + Show in Nodes. */}
-      {!menuMode && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "0.2rem", marginTop: "0.4rem" }}>
-          <button
-            data-testid="popover-associate-insert"
-            onClick={() => setMenuMode("associate")}
-          >
-            Associate / Insert into Subject…
-          </button>
-          <ShowInNodes wb={wb} annotationId={popover.annotationId} bump={bump} />
-        </div>
-      )}
-      {menuMode && (
-        <AssociationMenu
-          wb={wb}
-          menu={{
-            annotationId: popover.annotationId,
-            sourceId: popover.sourceId,
-            x: 0,
-            y: 0,
-          }}
-          embedded
-          onClose={() => {
-            setMenuMode(null);
-            onClose();
-          }}
-          bump={bump}
-        />
-      )}
-      {/* Delete options. */}
-      <div style={{ display: "flex", gap: "0.3rem", marginTop: "0.4rem" }}>
-        <button
-          data-testid="delete-highlight-only"
-          onClick={async () => {
-            await wb.deleteAnnotationOnly(popover.annotationId);
-            bump();
-            onClose();
-          }}
-        >
-          Delete Highlight Only
-        </button>
-        <button
-          data-testid="delete-highlight-and-quotes"
-          onClick={async () => {
-            await wb.deleteAnnotationAndQuotes(popover.annotationId);
-            bump();
-            onClose();
-          }}
-        >
-          Delete Highlight &amp; Quotes
-        </button>
-      </div>
-      <button data-testid="popover-close" aria-label="Close" onClick={onClose} style={{ marginTop: "0.3rem" }}>
-        Close
-      </button>
-    </div>
-  );
-}
-
-/**
- * FEAT-002 (2.2b) the right-click context menu. Two variants: an annotation
- * menu (Edit Comment, Color Swatches, Associate, Insert Quote, Show in Nodes,
- * Delete Only, Delete & Quotes) and a page menu (Comment on Page Range, Select
- * Figure / Area, Switch Paper, Toggle Source Lines, Toggle Motion Suppression).
- * Opens at the pointer on the fixed layer.
- */
-export function ReaderContextMenu({
-  wb,
-  menu,
-  onClose,
-  onEditComment,
-  onPageAction,
-  bump,
-}: {
-  wb: Workbench;
-  menu: ContextMenuState;
-  onClose: () => void;
-  onEditComment: (annotationId: AnnotationId, x: number, y: number) => void;
-  onPageAction: (action: "range" | "area" | "switch" | "lines" | "motion") => void;
-  bump: () => void;
-}): JSX.Element {
-  const [picking, setPicking] = useState<null | "associate" | "insert">(null);
-  const clampLeft = Math.max(
-    12,
-    Math.min(menu.x, ((typeof window !== "undefined" && window.innerWidth) || 1024) - 230),
-  );
-  const style: React.CSSProperties = { ...styles.fixedFloating, left: clampLeft, top: menu.y, width: 220, display: "flex", flexDirection: "column", gap: "0.15rem" };
-
-  if (menu.variant === "page") {
-    return (
-      <div data-testid="reader-context-menu" data-variant="page" role="menu" aria-label="Page actions" style={style}>
-        <button data-testid="ctx-comment-range" role="menuitem" onClick={() => onPageAction("range")}>
-          Comment on Page Range…
-        </button>
-        <button data-testid="ctx-select-area" role="menuitem" onClick={() => onPageAction("area")}>
-          Select Figure / Area (Zotero Box)
-        </button>
-        <button data-testid="ctx-switch-paper" role="menuitem" onClick={() => onPageAction("switch")}>
-          Switch Paper…
-        </button>
-        <button data-testid="ctx-toggle-lines" role="menuitem" onClick={() => onPageAction("lines")}>
-          Toggle Source Lines
-        </button>
-        <button data-testid="ctx-toggle-motion" role="menuitem" onClick={() => onPageAction("motion")}>
-          Toggle Motion Suppression
-        </button>
-        <button data-testid="ctx-close" role="menuitem" onClick={onClose}>
-          Cancel
-        </button>
-      </div>
-    );
-  }
-
-  if (picking) {
-    return (
-      <div data-testid="reader-context-menu" data-variant="annotation" role="menu" style={style}>
-        <AssociationMenu
-          wb={wb}
-          menu={{ annotationId: menu.annotationId, sourceId: menu.sourceId, x: 0, y: 0 }}
-          embedded
-          onClose={onClose}
-          bump={bump}
-        />
-      </div>
-    );
-  }
-
-  return (
-    <div data-testid="reader-context-menu" data-variant="annotation" role="menu" aria-label="Annotation actions" style={style}>
-      <button
-        data-testid="ctx-edit-comment"
-        role="menuitem"
-        onClick={() => onEditComment(menu.annotationId, menu.x, menu.y)}
-      >
-        Edit Comment
-      </button>
-      <ContextColorSwatches wb={wb} annotationId={menu.annotationId} bump={bump} />
-      <button data-testid="ctx-associate" role="menuitem" onClick={() => setPicking("associate")}>
-        Associate with Subject
-      </button>
-      <button data-testid="ctx-insert" role="menuitem" onClick={() => setPicking("insert")}>
-        Insert Quote into Subject
-      </button>
-      <ShowInNodes wb={wb} annotationId={menu.annotationId} bump={bump} />
-      <button
-        data-testid="delete-highlight-only"
-        role="menuitem"
-        onClick={async () => {
-          await wb.deleteAnnotationOnly(menu.annotationId);
-          bump();
-          onClose();
-        }}
-      >
-        Delete Highlight Only
-      </button>
-      <button
-        data-testid="delete-highlight-and-quotes"
-        role="menuitem"
-        onClick={async () => {
-          await wb.deleteAnnotationAndQuotes(menu.annotationId);
-          bump();
-          onClose();
-        }}
-      >
-        Delete Highlight &amp; Quotes
-      </button>
-      <button data-testid="ctx-close" role="menuitem" onClick={onClose}>
-        Cancel
-      </button>
-    </div>
-  );
-}
-
-/** Inline color swatches used inside the annotation context menu (2.2b). */
-function ContextColorSwatches({
-  wb,
-  annotationId,
-  bump,
-}: {
-  wb: Workbench;
-  annotationId: AnnotationId;
-  bump: () => void;
-}): JSX.Element {
-  const view = wb.viewFor(annotationId);
-  return (
-    <div data-testid="color-controls" role="group" aria-label="Color swatches" style={{ display: "flex", gap: "0.25rem" }}>
-      {HIGHLIGHT_COLORS.map((c) => (
-        <button
-          key={c}
-          data-testid={`color-${c}`}
-          aria-label={`Color ${c}`}
-          onClick={async () => {
-            const kind = view?.style.kind ?? "highlight";
-            await wb.setAnnotationStyle(annotationId, { kind, color: c });
-            bump();
-          }}
-          style={{
-            width: 18,
-            height: 18,
-            borderRadius: "50%",
-            border: view?.style.color === c ? "2px solid #333" : "1px solid #bbb",
-            background: swatch(c),
-          }}
-        />
-      ))}
-    </div>
-  );
-}
-
-/**
- * Quiet comment surface (R02, R10). Comments are hidden in normal reading and
- * revealed here only on explicit access. It is an anchored temporary surface
- * that leaves no persistent obstruction: closing it returns focus toward the
- * passage. On a failed save the draft is retained and an error is shown (R12).
- */
-export function CommentSurface({
-  wb,
-  annotationId,
-  onClose,
-  bump,
-}: {
-  wb: Workbench;
-  annotationId: AnnotationId;
-  onClose: () => void;
-  bump: () => void;
-}): JSX.Element {
-  const view = wb.viewFor(annotationId);
-  const [draft, setDraft] = useState(view?.annotation.comment ?? "");
-  const [error, setError] = useState<string | null>(null);
-
-  // Reset the draft whenever the surface switches to a DIFFERENT annotation so
-  // one highlight's in-progress comment can never leak into (or be saved onto)
-  // another highlight. Keyed on annotationId, not on every wb render.
-  useEffect(() => {
-    setDraft(wb.viewFor(annotationId)?.annotation.comment ?? "");
-    setError(null);
-  }, [wb, annotationId]);
-
-  const save = async (): Promise<void> => {
-    try {
-      await wb.setComment(annotationId, draft);
-      setError(null);
-      bump();
-      onClose();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      bump();
-    }
-  };
-
-  return (
-    <div
-      data-testid="comment-surface"
-      data-annotation-id={annotationId}
-      role="dialog"
-      aria-label="Annotation comment"
-      style={styles.commentSurface}
-    >
-      {view?.rangeLabel && (
-        <div data-testid="range-label" style={{ fontWeight: 600 }}>
-          {view.rangeLabel}
-        </div>
-      )}
-      <textarea
-        data-testid="comment-input"
-        value={draft}
-        placeholder="Add a quiet comment (optional)"
-        onChange={(e) => setDraft(e.target.value)}
-        style={{ width: "100%", minHeight: "4rem" }}
-      />
-      {error && (
-        <p data-testid="comment-error" role="alert" style={{ color: "#c5221f" }}>
-          Could not save: {error}. Your draft is kept.
-        </p>
-      )}
-      <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
-        <button data-testid="comment-cancel" onClick={onClose}>
-          Close
-        </button>
-        <button data-testid="comment-save" onClick={save}>
-          Save
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/**
- * Right-click / keyboard-menu equivalent (R15). Offers "Associate with
- * subject..." (tentative dotted) and a separate "Insert into subject page...".
- */
-export function AssociationMenu({
-  wb,
-  menu,
-  onClose,
-  bump,
-  embedded,
-}: {
-  wb: Workbench;
-  menu: MenuState;
-  onClose: () => void;
-  bump: () => void;
-  /**
-   * FEAT-002 (2.2a/2.2b): when embedded inside the fixed edit popover or the
-   * context menu, render in normal flow (no absolute x/y positioning) so it
-   * stacks within the host surface instead of floating at menu.x/menu.y.
-   */
-  embedded?: boolean;
-}): JSX.Element {
-  const [picking, setPicking] = useState<null | "associate" | "insert">(null);
-  const [creating, setCreating] = useState(false);
-  const [newTitle, setNewTitle] = useState("");
-  const [query, setQuery] = useState("");
-  const pages = wb.rawData().pages.filter((p) => p.kind === "subject");
-  const matches = pages.filter((p) =>
-    p.title.toLowerCase().includes(query.toLowerCase()),
-  );
-
-  const doAssociate = async (pageId: PageId): Promise<void> => {
-    await wb.associateWithSubject(menu.annotationId, pageId);
-    bump();
-    onClose();
-  };
-  const doInsert = async (pageId: PageId): Promise<void> => {
-    await wb.insertEvidenceIntoPage(menu.annotationId, pageId, { pos: null });
-    // Open the subject for composition so the quote is visible in context.
-    wb.openSubjectPage(pageId);
-    bump();
-    onClose();
-  };
-  // DELIBERATE subject creation from the selected evidence (spec section 4.2).
-  const doCreate = async (): Promise<void> => {
-    const title = newTitle.trim();
-    if (!title) return;
-    const { page } = await wb.createSubjectFromAnnotation(title, menu.annotationId);
-    wb.openSubjectPage(page.id);
-    bump();
-    onClose();
-  };
-  // D02 "delete highlight only": removes the annotation, keeps every quote.
-  const doDeleteOnly = async (): Promise<void> => {
-    await wb.deleteAnnotationOnly(menu.annotationId);
-    bump();
-    onClose();
-  };
-  // D02 "delete highlight and its quotes": destructive, snapshots then strips.
-  const doDeleteAndQuotes = async (): Promise<void> => {
-    await wb.deleteAnnotationAndQuotes(menu.annotationId);
-    bump();
-    onClose();
-  };
-
-  return (
-    <div
-      data-testid="association-menu"
-      role="menu"
-      aria-label="Annotation actions"
-      style={
-        embedded
-          ? { position: "static", display: "flex", flexDirection: "column", gap: "0.25rem" }
-          : { ...styles.floating, left: menu.x, top: menu.y + window.scrollY }
-      }
-    >
-      {!picking && !creating && (
-        <>
-          <button
-            data-testid="menu-create-subject"
-            role="menuitem"
-            onClick={() => setCreating(true)}
-          >
-            Create new subject from this…
-          </button>
-          <button
-            data-testid="menu-associate"
-            role="menuitem"
-            onClick={() => setPicking("associate")}
-          >
-            Associate with subject…
-          </button>
-          <button
-            data-testid="menu-insert"
-            role="menuitem"
-            onClick={() => setPicking("insert")}
-          >
-            Insert into subject page…
-          </button>
-          {/* D02 two-mode deletion. "Delete highlight only" removes the
-              annotation but PRESERVES every quote (the cited text lives on in
-              its subject pages; the reference derives as 'unresolved').
-              "Delete highlight and its quotes" is the destructive variant that
-              also strips the inline quote nodes after a revision snapshot. */}
-          <button
-            data-testid="delete-highlight-only"
-            role="menuitem"
-            onClick={() => void doDeleteOnly()}
-          >
-            Delete highlight only
-          </button>
-          <button
-            data-testid="delete-highlight-and-quotes"
-            role="menuitem"
-            onClick={() => void doDeleteAndQuotes()}
-          >
-            Delete highlight and its quotes
-          </button>
-          <button data-testid="menu-close" role="menuitem" onClick={onClose}>
-            Cancel
-          </button>
-        </>
-      )}
-      {creating && (
-        <div data-testid="create-subject">
-          <input
-            data-testid="new-subject-title"
-            autoFocus
-            placeholder="New subject title…"
-            value={newTitle}
-            onChange={(e) => setNewTitle(e.target.value)}
-            aria-label="New subject title"
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void doCreate();
-            }}
-          />
-          <button data-testid="create-subject-confirm" onClick={() => void doCreate()}>
-            Create and cite
-          </button>
-        </div>
-      )}
-      {picking && (
-        <div data-testid="subject-picker">
-          <input
-            data-testid="subject-search"
-            autoFocus
-            placeholder="Search subjects…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            aria-label="Search subjects"
-          />
-          <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-            {matches.map((p) => (
-              <li key={p.id}>
-                <button
-                  data-testid="subject-option"
-                  data-page-id={p.id}
-                  onClick={() => (picking === "associate" ? doAssociate(p.id) : doInsert(p.id))}
-                >
-                  {p.title}
-                </button>
-              </li>
-            ))}
-            {matches.length === 0 && (
-              <li data-testid="subject-empty" style={{ color: "#888" }}>
-                No subjects
-              </li>
-            )}
-          </ul>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/**
- * The highlights tab (sidebar). Lists annotations, distinguishes range
- * annotations from micro-highlights, and provides the ACCESSIBLE (non
- * right-click) path to the association actions via a menu-button (R15).
- */
-function HighlightsTab({
-  wb,
-  openSourceIds,
-  bump,
-}: {
-  wb: Workbench;
-  openSourceIds: readonly SourceId[];
-  bump: () => void;
-}): JSX.Element {
-  const [filter, setFilter] = useState<"all" | "range" | "micro">("all");
-  const [menuFor, setMenuFor] = useState<MenuState | null>(null);
-
-  const views = openSourceIds.flatMap((id) => wb.annotationsForSource(id));
-  const filtered = views.filter((v) =>
-    filter === "all" ? true : filter === "range" ? v.isRange : !v.isRange,
-  );
-
-  return (
-    <aside
-      data-testid="highlights-tab"
-      aria-label="Highlights"
-      style={styles.sidebar}
-    >
-      <h3 style={{ marginTop: 0 }}>Highlights</h3>
-      <div data-testid="highlights-filter" style={{ marginBottom: "0.5rem" }}>
-        {(["all", "range", "micro"] as const).map((f) => (
-          <button
-            key={f}
-            data-testid={`filter-${f}`}
-            aria-pressed={filter === f}
-            onClick={() => setFilter(f)}
-          >
-            {f}
-          </button>
-        ))}
-      </div>
-      <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-        {filtered.map((v) => (
-          <HighlightRow
-            key={v.annotation.id}
-            wb={wb}
-            view={v}
-            bump={bump}
-            onMenu={(x, y) =>
-              setMenuFor({
-                annotationId: v.annotation.id,
-                sourceId: v.annotation.sourceId,
-                x,
-                y,
-              })
-            }
-          />
-        ))}
-        {filtered.length === 0 && (
-          <li data-testid="highlights-empty" style={{ color: "#888" }}>
-            No highlights
-          </li>
-        )}
-      </ul>
-      {menuFor && (
-        <AssociationMenu
-          wb={wb}
-          menu={menuFor}
-          onClose={() => setMenuFor(null)}
-          bump={bump}
-        />
-      )}
-    </aside>
-  );
-}
-
-function HighlightRow({
-  wb,
-  view,
-  bump,
-  onMenu,
-}: {
-  wb: Workbench;
-  view: AnnotationView;
-  bump: () => void;
-  onMenu: (x: number, y: number) => void;
-}): JSX.Element {
-  const label = view.isRange
-    ? view.rangeLabel
-    : view.annotation.scope.kind === "text"
-      ? view.annotation.scope.anchor.selectedText.slice(0, 40)
-      : "";
-  return (
-    <li
-      data-testid="highlight-row"
-      data-annotation-id={view.annotation.id}
-      data-range={view.isRange ? "true" : "false"}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "0.4rem",
-        padding: "0.3rem 0",
-        borderBottom: "1px solid #eee",
-      }}
-    >
-      {view.isRange && (
-        <span data-testid="range-badge" style={styles.rangeBadge}>
-          range
-        </span>
-      )}
-      {/* FEAT-002 (2.4c) the captured figure thumbnail for an area annotation. */}
-      {view.annotation.scope.kind === "area" && view.annotation.scope.anchor.imageDataUrl && (
-        <img
-          data-testid="area-figure-preview"
-          src={view.annotation.scope.anchor.imageDataUrl}
-          alt="Captured figure"
-          style={{ width: 40, height: 40, objectFit: "cover", borderRadius: "4px", border: "1px solid #ddd" }}
-        />
-      )}
-      <span style={{ flex: 1, fontSize: "0.85rem" }}>{label}</span>
-      {view.references.some((r) => r.status === "tentative") && (
-        <span data-testid="dotted-indicator" title="Tentative association">
-          ┄
-        </span>
-      )}
-      {view.references.some((r) => r.status === "cited") && (
-        <span data-testid="solid-indicator" title="Cited">
-          ━
-        </span>
-      )}
-      <ShowInNodes wb={wb} annotationId={view.annotation.id} bump={bump} />
-      <button
-        data-testid="row-actions"
-        aria-haspopup="menu"
-        aria-label="Annotation actions"
-        onClick={(e) => {
-          const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-          onMenu(r.left, r.bottom);
-        }}
-      >
-        ⋯
-      </button>
-    </li>
-  );
-}
-
-/**
- * Reference-directed locating in Nodes (N04/N05/N07, §7.1/§7.2). For an
- * annotation CITED into >= 1 subject page (an EvidenceInstance pointing at a
- * subject Page), this renders a "Show in Nodes" control; it renders NOTHING
- * for an annotation cited into zero subject pages (N07 precondition false).
- *
- * The locate transition is an EXPLICIT user action: clicking switches the view
- * to Nodes (`setViewMode('nodes')`) and sets the explicit camera-focus target
- * (`setFocusedPageId`), then bumps. It NEVER runs during ordinary editing, so
- * the camera never jumps unexpectedly (A09-M2).
- *
- *  - N04 (exactly 1 cited subject page): click locates straight to that page.
- *  - N05 (>1 cited subject pages): a lightweight destination picker lists the
- *    linked subject pages so the user chooses which node to center on.
- */
-function ShowInNodes({
-  wb,
-  annotationId,
-  bump,
-}: {
-  wb: Workbench;
-  annotationId: AnnotationId;
-  bump: () => void;
-}): JSX.Element | null {
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const citedPageIds = wb.citedSubjectPagesForAnnotation(annotationId);
-  // N07: no cited subject page => no Show-in-Nodes affordance at all.
-  if (citedPageIds.length === 0) return null;
-
-  const locate = (pageId: PageId): void => {
-    wb.setViewMode("nodes");
-    wb.setFocusedPageId(pageId);
-    setPickerOpen(false);
-    bump();
-  };
-
-  const onClick = (): void => {
-    if (citedPageIds.length === 1) {
-      // N04: single cited subject page — locate directly.
-      locate(citedPageIds[0]!);
-      return;
-    }
-    // N05: multiple cited subject pages — open the destination picker.
-    setPickerOpen((v) => !v);
-  };
-
-  return (
-    <span style={{ position: "relative", display: "inline-flex" }}>
-      <button
-        data-testid="show-in-nodes"
-        data-annotation-id={annotationId}
-        data-cited-count={String(citedPageIds.length)}
-        aria-label="Show in Nodes"
-        title="Show in Nodes"
-        onClick={onClick}
-      >
-        ◎
-      </button>
-      {pickerOpen && citedPageIds.length > 1 && (
-        <div
-          data-testid="nodes-destination-picker"
-          role="menu"
-          aria-label="Choose a subject node"
-          style={styles.destinationPicker}
-        >
-          {citedPageIds.map((pid) => {
-            const page = wb.rawData().pages.find((p) => p.id === pid);
-            return (
-              <button
-                key={pid}
-                data-testid="nodes-destination-option"
-                data-page-id={pid}
-                role="menuitem"
-                onClick={() => locate(pid)}
-                style={{ display: "block", width: "100%", textAlign: "left" }}
-              >
-                {page?.title ?? "Subject"}
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </span>
-  );
-}
-
-/**
- * The binary-offloaded citation popover (A17). The followed quote's source has
- * had its PDF binary evicted locally, so the live render is unavailable. The
- * popover still shows the citation's stored quote + comment + page number +
- * source title (the citation FUNCTIONS from this metadata) and offers an
- * "Attach PDF Binary" file action. Attaching runs `wb.attachSourceBinary`
- * (sha256-verified): a matching file re-hydrates the source back to resolved; a
- * mismatching file is rejected with an inline reason and writes nothing.
- */
-export function BinaryOffloadedPopover({
-  wb,
-  popover,
-  onClose,
-  onAttached,
-}: {
-  wb: Workbench;
-  popover: OffloadedPopover;
-  onClose: () => void;
-  onAttached: () => void;
-}): JSX.Element {
-  const [error, setError] = useState<string | null>(null);
-  const [attaching, setAttaching] = useState(false);
-
-  const onFile = async (file: File | null): Promise<void> => {
-    if (!file) return;
-    setAttaching(true);
-    setError(null);
-    try {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const result = await wb.attachSourceBinary(popover.sourceId, bytes);
-      if (!result.attached) {
-        setError(result.reason ?? "the file did not match this source");
-        return;
-      }
-      onAttached();
-    } finally {
-      setAttaching(false);
-    }
-  };
-
-  return (
-    <div
-      data-testid="binary-offloaded-popover"
-      data-return-resolution="binary-offloaded"
-      data-source-id={popover.sourceId}
-      data-evidence-id={popover.evidenceId}
-      role="dialog"
-      aria-label="Offloaded source citation"
-      style={styles.offloadedPopover}
-    >
-      <div style={styles.offloadedHeader}>
-        <strong data-testid="offloaded-source-title">{popover.sourceTitle}</strong>
-        <button data-testid="offloaded-popover-close" aria-label="Close" onClick={onClose}>
-          ×
-        </button>
-      </div>
-      <p style={styles.offloadedReason}>{popover.reason}</p>
-      <blockquote data-testid="offloaded-quote" style={styles.offloadedQuote}>
-        {popover.quotedText}
-      </blockquote>
-      {popover.comment !== "" && (
-        <p data-testid="offloaded-comment" style={{ fontSize: "0.82rem", color: "#555" }}>
-          {popover.comment}
-        </p>
-      )}
-      <div data-testid="offloaded-page" style={{ fontSize: "0.78rem", color: "#777" }}>
-        Page {popover.pageNumber}
-      </div>
-      {error && (
-        <p data-testid="attach-pdf-error" role="alert" style={{ color: "#c5221f", fontSize: "0.8rem" }}>
-          {error}
-        </p>
-      )}
-      <label data-testid="attach-pdf-binary" style={styles.attachLabel}>
-        {attaching ? "Attaching…" : "Attach PDF Binary"}
-        <input
-          data-testid="attach-pdf-input"
-          type="file"
-          accept=".pdf,application/pdf"
-          style={{ display: "none" }}
-          disabled={attaching}
-          onChange={(e) => void onFile(e.target.files?.[0] ?? null)}
-        />
-      </label>
-    </div>
-  );
-}
-
-/** Draw one annotation's overlay(s) across the rendered pages. */
-export function drawAnnotation(
-  view: AnnotationView,
-  pages: readonly RenderedPage[],
-  suppressMotion: boolean,
-  animate: boolean,
-): void {
-  if (view.annotation.scope.kind === "text") {
-    const anchor = view.annotation.scope.anchor;
-    const page = pages.find(
-      (p) => Number(p.container.dataset.pageIndex ?? "-1") === anchor.pageIndex,
-    );
-    if (!page) return;
-    // Overlays are measured + positioned relative to the STAGE (not the
-    // header-bearing wrapper), so they sit over the selected glyphs (3.1).
-    renderHighlightOverlay(page.stage, {
-      kind: view.style.kind,
-      color: view.style.color,
-      rects: anchor.rects,
-      animate,
-      suppressMotion,
-      annotationId: view.annotation.id,
-    });
-  } else if (view.annotation.scope.kind === "area") {
-    // M6 (D01) area annotation: a labeled rectangular region box on the stage.
-    const anchor = view.annotation.scope.anchor;
-    const page = pages.find(
-      (p) => Number(p.container.dataset.pageIndex ?? "-1") === anchor.pageIndex,
-    );
-    if (!page) return;
-    renderHighlightOverlay(page.stage, {
-      kind: view.style.kind,
-      color: view.style.color,
-      rects: [anchor.rect],
-      animate: false,
-      suppressMotion,
-      annotationId: view.annotation.id,
-      areaBox: true,
-      areaLabel: view.annotation.comment || "Area",
-    });
-  } else {
-    const { startPageIndex, endPageIndex } = view.annotation.scope.anchor;
-    for (let pi = startPageIndex; pi <= endPageIndex; pi++) {
-      const page = pages.find(
-        (p) => Number(p.container.dataset.pageIndex ?? "-1") === pi,
-      );
-      if (!page) continue;
-      renderHighlightOverlay(page.stage, {
-        kind: view.style.kind,
-        color: view.style.color,
-        rects: [],
-        animate: false,
-        suppressMotion,
-        annotationId: view.annotation.id,
-        pageBorder: true,
-      });
-    }
-  }
-}
-
-function swatch(c: HighlightColor): string {
-  return { yellow: "#ffdd57", green: "#82dc96", blue: "#82beff", pink: "#ff96c8" }[c];
-}
-
-/**
- * Per-page rerender serializer. The zoom effect and the fit-to-pane
- * ResizeObserver both drive `page.rerender()` on the SAME canvases; pdf.js
- * throws "Cannot use the same canvas during multiple render() operations" if
- * two renders overlap on one canvas. This coalesces concurrent requests per
- * page: at most one rerender runs at a time, and if newer requests arrive while
- * one is in flight only the LATEST target scale is rendered next (intermediate
- * targets are dropped, which is correct since each is a full re-render). The
- * returned promise resolves once the page has settled at a scale no older than
- * this request.
- */
-type RerenderState = { running: Promise<void> | null; pending: number | null };
-const rerenderStates = new WeakMap<RenderedPage, RerenderState>();
-
-export function serializedRerender(page: RenderedPage, scale: number): Promise<void> {
-  let state = rerenderStates.get(page);
-  if (!state) {
-    state = { running: null, pending: null };
-    rerenderStates.set(page, state);
-  }
-  if (state.running) {
-    // A render is in flight: remember only the newest target (latest wins).
-    state.pending = scale;
-    return state.running;
-  }
-  const run = (target: number): Promise<void> =>
-    page.rerender(target).then(() => {
-      const next = state!.pending;
-      state!.pending = null;
-      if (next !== null && next !== target) return run(next);
-      state!.running = null;
-      return undefined;
-    });
-  const started = run(scale);
-  state.running = started;
-  return started;
-}
-
-/** FEAT-002 (2.5) zoom bounds: step the PDF scale between 50% and 300%. */
-const ZOOM_MIN = 0.5;
-const ZOOM_MAX = 3;
-export function clampZoom(z: number): number {
-  // Round to avoid float drift (e.g. 1.0000000002) so the pill shows crisp %.
-  const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 100) / 100));
-  return next;
-}
-
-/** Escape an annotation id for use in a CSS attribute selector. */
-function cssEscapeId(value: string): string {
-  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
-    return CSS.escape(value);
-  }
-  return value.replace(/["\\]/g, "\\$&");
-}
-
-/**
- * Minimal defense-in-depth sanitizer for a stored website snapshot (A15, D11).
- * The snapshot was already sanitized at import time by the Workbench; this is a
- * render-time belt-and-braces pass that strips <script> blocks, inline event
- * handlers, and javascript: URLs so a snapshot can never execute script in the
- * reader. The remaining text stays fully selectable for highlighting/quoting.
- */
-export function sanitizeSnapshotHtml(html: string): string {
-  return html
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
-    // Strip inline event-handler attributes whether their value is
-    // double-quoted, single-quoted, OR UNQUOTED (e.g. onclick=alert(1)). The
-    // leading-whitespace capture group ($1) is preserved so adjacent attributes
-    // are not glued together after the strip.
-    .replace(/(\s)on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "$1")
-    .replace(/javascript:/gi, "");
 }
 
 /**
@@ -3056,255 +2073,3 @@ function PassageEvidenceLines({
     </svg>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  // FIX-TOP-BAR-CLIPPING (§3.5): fill the flex view-body (100%) rather than the
-  // full viewport (100vh) so the Reader sits below the shell header without the
-  // bottom being clipped by the app-shell's overflow:hidden.
-  root: { display: "flex", flexDirection: "column", height: "100%" },
-  toolbar: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: "1rem",
-    padding: "0.5rem 1rem",
-    borderBottom: "1px solid #ddd",
-    background: "#fafafa",
-  },
-  body: { display: "flex", flex: 1, overflow: "hidden" },
-  main: {
-    flex: 1,
-    position: "relative",
-    overflow: "hidden",
-    display: "flex",
-    alignItems: "stretch",
-  },
-  pane: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
-    minHeight: 0,
-    minWidth: 0,
-    borderRight: "1px solid #eee",
-  },
-  paneScroll: {
-    flex: 1,
-    minHeight: 0,
-    overflow: "auto",
-    padding: "1rem",
-  },
-  divider: {
-    flex: "0 0 8px",
-    cursor: "col-resize",
-    background: "#e6e6e6",
-    borderLeft: "1px solid #d4d4d4",
-    borderRight: "1px solid #d4d4d4",
-    alignSelf: "stretch",
-  },
-  responsiveStub: {
-    padding: "0.75rem 1rem",
-    margin: "0.5rem",
-    background: "#fff4e5",
-    border: "1px solid #f0c38a",
-    borderRadius: "6px",
-    color: "#7a4b00",
-    fontSize: "0.85rem",
-  },
-  paneHeader: {
-    // FIX-NARROW-PANE-TOOLBARS (§3.3): single-row header that never wraps in
-    // 2/3-pane layouts; the title ellipsizes and the action buttons stay on one
-    // line (see .ito-pane-header/.ito-pane-title/.ito-pane-actions in theme.css).
-    display: "flex",
-    alignItems: "center",
-    flexWrap: "nowrap",
-    gap: "6px",
-    overflowX: "auto",
-    marginBottom: "0.5rem",
-  },
-  rangeSelector: {
-    display: "flex",
-    gap: "0.75rem",
-    alignItems: "center",
-    padding: "0.5rem",
-    background: "#eef4ff",
-    borderRadius: "6px",
-    marginBottom: "0.5rem",
-  },
-  mount: { position: "relative" },
-  scopeStatus: {
-    padding: "0.5rem 0.75rem",
-    margin: "0 0 0.5rem",
-    background: "#fff4e5",
-    border: "1px solid #f0c38a",
-    borderRadius: "6px",
-    color: "#7a4b00",
-    fontSize: "0.82rem",
-  },
-  websiteBadge: {
-    fontSize: "0.72rem",
-    padding: "0.05rem 0.4rem",
-    borderRadius: "4px",
-    background: "#e6f0fb",
-    color: "#2c4a6f",
-  },
-  websiteSnapshot: {
-    maxWidth: "100%",
-    padding: "0.5rem",
-    background: "#fff",
-    lineHeight: 1.5,
-    userSelect: "text",
-  },
-  sidebar: {
-    width: "20rem",
-    minWidth: "20rem",
-    borderLeft: "1px solid #ddd",
-    padding: "1rem",
-    overflow: "auto",
-    background: "#fcfcfc",
-  },
-  floating: {
-    position: "absolute",
-    zIndex: 1000,
-    display: "flex",
-    gap: "0.4rem",
-    alignItems: "center",
-    padding: "0.35rem 0.5rem",
-    background: "#fff",
-    border: "1px solid #ccc",
-    borderRadius: "8px",
-    boxShadow: "0 4px 16px rgba(0,0,0,0.15)",
-    flexWrap: "wrap",
-  },
-  // FEAT-002 (2.1) the fixed viewport layer + fixed-position floating surfaces.
-  // The layer itself is a zero-size fixed anchor; children set their own fixed
-  // coordinates so nothing is clipped by the pane-scroll overflow.
-  fixedLayer: {
-    position: "fixed",
-    left: 0,
-    top: 0,
-    width: 0,
-    height: 0,
-    zIndex: 1000,
-  },
-  fixedFloating: {
-    position: "fixed",
-    zIndex: 1000,
-    display: "flex",
-    gap: "0.4rem",
-    alignItems: "center",
-    padding: "0.35rem 0.5rem",
-    background: "#fff",
-    border: "1px solid #ccc",
-    borderRadius: "8px",
-    boxShadow: "0 4px 16px rgba(0,0,0,0.15)",
-    flexWrap: "wrap",
-  },
-  overflowMenu: {
-    position: "absolute",
-    zIndex: 1004,
-    top: "100%",
-    right: 0,
-    minWidth: "14rem",
-    display: "flex",
-    flexDirection: "column",
-    gap: "0.25rem",
-    padding: "0.4rem",
-    background: "#fff",
-    border: "1px solid #ccc",
-    borderRadius: "8px",
-    boxShadow: "0 6px 24px rgba(0,0,0,0.2)",
-  },
-  zoomPill: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "2px",
-    border: "1px solid var(--ito-border, #ccc)",
-    borderRadius: "999px",
-    padding: "0 2px",
-  },
-  figurePreview: {
-    display: "block",
-    maxWidth: "100%",
-    maxHeight: "8rem",
-    marginBottom: "0.4rem",
-    border: "1px solid #ddd",
-    borderRadius: "4px",
-  },
-  commentSurface: {
-    position: "absolute",
-    zIndex: 1001,
-    top: "20%",
-    left: "50%",
-    transform: "translateX(-50%)",
-    width: "22rem",
-    padding: "0.75rem",
-    background: "#fff",
-    border: "1px solid #ccc",
-    borderRadius: "8px",
-    boxShadow: "0 6px 24px rgba(0,0,0,0.2)",
-  },
-  rangeBadge: {
-    fontSize: "0.65rem",
-    background: "#1a56db",
-    color: "#fff",
-    borderRadius: "4px",
-    padding: "0 0.3rem",
-  },
-  returnNotice: {
-    padding: "0.5rem 1rem",
-    background: "#fff4e5",
-    borderBottom: "1px solid #f0c38a",
-    color: "#7a4b00",
-    fontSize: "0.85rem",
-  },
-  destinationPicker: {
-    position: "absolute",
-    zIndex: 1002,
-    top: "100%",
-    right: 0,
-    minWidth: "12rem",
-    padding: "0.25rem",
-    background: "#fff",
-    border: "1px solid #ccc",
-    borderRadius: "6px",
-    boxShadow: "0 6px 24px rgba(0,0,0,0.2)",
-  },
-  offloadedPopover: {
-    position: "absolute",
-    zIndex: 1003,
-    top: "20%",
-    left: "50%",
-    transform: "translateX(-50%)",
-    width: "24rem",
-    maxWidth: "90vw",
-    padding: "0.9rem 1rem",
-    background: "#fff",
-    border: "1px solid #f0c38a",
-    borderRadius: "10px",
-    boxShadow: "0 8px 30px rgba(0,0,0,0.22)",
-  },
-  offloadedHeader: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: "0.35rem",
-  },
-  offloadedReason: { fontSize: "0.8rem", color: "#7a4b00", margin: "0 0 0.5rem" },
-  offloadedQuote: {
-    margin: "0 0 0.5rem",
-    padding: "0.35rem 0.6rem",
-    borderLeft: "3px solid #1a56db",
-    background: "#f6f8ff",
-    fontSize: "0.9rem",
-  },
-  attachLabel: {
-    display: "inline-block",
-    marginTop: "0.4rem",
-    padding: "0.35rem 0.75rem",
-    background: "#1a56db",
-    color: "#fff",
-    borderRadius: "6px",
-    cursor: "pointer",
-    fontSize: "0.85rem",
-  },
-};

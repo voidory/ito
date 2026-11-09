@@ -239,8 +239,10 @@ test("A08/R08 foundation: the passage-to-evidence line toggle changes presentati
   expect(lineDataBefore.length).toBeGreaterThan(0);
   expect(evidenceBefore).toBeGreaterThan(0);
 
-  // Toggle lines OFF via the real control.
-  await page.getByTestId("toggle-lines").uncheck();
+  // Toggle lines OFF via the real control (now in the reader toolbar overflow
+  // menu, M9 single-toolbar rework).
+  await page.getByTestId("pane-overflow-menu-btn").click();
+  await page.getByTestId("overflow-toggle-lines").click();
   await expect(layer).toHaveAttribute("data-visible", "false");
   // Presentation only: the layer is hidden but the line DATA and the evidence
   // relationships are untouched.
@@ -255,7 +257,8 @@ test("A08/R08 foundation: the passage-to-evidence line toggle changes presentati
   await expect(page.getByTestId("follow-source").first()).toBeVisible();
 
   // Toggling back on restores the drawn layer with the same data.
-  await page.getByTestId("toggle-lines").check();
+  await page.getByTestId("pane-overflow-menu-btn").click();
+  await page.getByTestId("overflow-toggle-lines").click();
   await expect(layer).toHaveAttribute("data-visible", "true");
   await expect.poll(() => page.locator('[data-testid="evidence-line"]').count()).toBeGreaterThan(0);
 });

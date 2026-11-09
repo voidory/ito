@@ -110,7 +110,8 @@ test("A18: the Targeted Backup Checklist drives the mode badge and omission stam
 }) => {
   await bootLibrary(page);
 
-  // Open the backup export modal from the shell trigger.
+  // Open the backup export modal from the shell gear settings menu (M9).
+  await page.getByTestId("settings-menu-btn").click();
   await page.getByTestId("open-backup-export").click();
   const modal = page.getByTestId("backup-export-modal");
   await expect(modal).toBeVisible();

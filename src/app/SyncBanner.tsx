@@ -24,11 +24,19 @@ export function SyncBanner({
   remote,
   onChange,
   onConfigureRemote,
+  compact,
 }: {
   wb: Workbench;
   /** The configured remote, or null when no Koofr endpoint is available. */
   remote?: KoofrStorageAdapter | null;
   onChange: () => void;
+  /**
+   * M9 (FEAT-001 D): when true, render ONLY the status badge; the individual
+   * Configure Sync / Publish / Refresh controls are relocated into the shell
+   * gear settings menu. Defaults to false so the banner still renders its own
+   * controls in isolation (and in its colocated render tests).
+   */
+  compact?: boolean;
   /**
    * Lift a freshly-configured remote adapter into the shell (App) so the
    * publish/refresh controls here (and anywhere else the adapter is wired)
@@ -108,27 +116,31 @@ export function SyncBanner({
       >
         {label}
       </span>
-      <button
-        data-testid="configure-sync-btn"
-        aria-expanded={configOpen}
-        onClick={() => setConfigOpen((v) => !v)}
-      >
-        Configure Sync
-      </button>
-      <button
-        data-testid="publish-remote-btn"
-        disabled={busy || !remote || status.state === "publishing"}
-        onClick={() => void publish()}
-      >
-        Publish
-      </button>
-      <button
-        data-testid="refresh-remote-btn"
-        disabled={busy || !remote}
-        onClick={() => void refresh()}
-      >
-        Refresh
-      </button>
+      {!compact && (
+        <>
+          <button
+            data-testid="configure-sync-btn"
+            aria-expanded={configOpen}
+            onClick={() => setConfigOpen((v) => !v)}
+          >
+            Configure Sync
+          </button>
+          <button
+            data-testid="publish-remote-btn"
+            disabled={busy || !remote || status.state === "publishing"}
+            onClick={() => void publish()}
+          >
+            Publish
+          </button>
+          <button
+            data-testid="refresh-remote-btn"
+            disabled={busy || !remote}
+            onClick={() => void refresh()}
+          >
+            Refresh
+          </button>
+        </>
+      )}
 
       {configOpen && (
         <div data-testid="sync-config-modal" style={styles.modal} role="dialog">
