@@ -10,7 +10,14 @@
  * ordinary selection→toolbar path runs exactly as a human's would.
  */
 
-import type { AnnotationId, PageId, SourceId } from "../model";
+import type {
+  AnnotationId,
+  CategoryId,
+  PageId,
+  RelationshipId,
+  RelationshipKind,
+  SourceId,
+} from "../model";
 import {
   hydrateState,
   outline,
@@ -18,7 +25,35 @@ import {
   compositionStatsFromJson,
   type DocumentJson,
 } from "../editor";
+import { buildScene, squircleContains, type SceneGraphInput } from "../network";
+import { isWebGLAvailable } from "./ThreeScene";
 import type { Workbench } from "./workbench";
+
+/** Map the live Workbench graph to the scene mapper's input shape. */
+function graphToSceneInput(wb: Workbench): SceneGraphInput {
+  const g = wb.conceptGraph();
+  return {
+    nodes: g.nodes.map((n) => ({
+      pageId: n.pageId,
+      title: n.title,
+      hidden: n.hidden,
+      position: n.position,
+    })),
+    links: g.links.map((l) => ({
+      relationshipId: l.relationshipId,
+      endpointPageIds: l.endpointPageIds,
+      label: l.label,
+      blendColor: l.blendColor,
+      hidden: l.hidden,
+    })),
+    categories: g.categories.map((c) => ({
+      categoryId: c.categoryId,
+      name: c.name,
+      colorCode: c.colorCode,
+      memberPageIds: c.memberPageIds,
+    })),
+  };
+}
 
 interface ItoTestApi {
   /** Current open source ids. */
@@ -77,6 +112,82 @@ interface ItoTestApi {
   categories(): string[];
   /** Count of Page + Relationship + Category records (invariant probe). */
   graphRecordCount(): { pages: number; relationships: number; categories: number };
+  /** The derived concept-network graph snapshot (nodes/links/categories). */
+  conceptGraph(): {
+    nodes: { pageId: string; title: string; hidden: boolean }[];
+    links: {
+      relationshipId: string;
+      endpointPageIds: string[];
+      topology: string;
+      blendColor: string;
+      hidden: boolean;
+    }[];
+    categories: { categoryId: string; name: string; colorCode: string }[];
+  };
+  /** Count of non-hidden pages participating in the network (§3.4). */
+  activeNodeCount(): number;
+  /** Whether the Nodes (concept-network) view is active. */
+  nodesViewActive(): boolean;
+  /** Activate/deactivate the Nodes view (presentation only, FEAT-004). */
+  setNodesView(active: boolean): void;
+  /** The top-level Files/Nodes view mode (§3.3, FEAT-005). */
+  viewMode(): string;
+  /** Switch the top-level Files/Nodes view (session view state, no record). */
+  setViewMode(mode: string): void;
+  /** Whether a source participates in the network (false = N06 placeholder). */
+  sourceIsConnected(sourceId: string): boolean;
+  /** Set a relationship's label (connecting-page surface). */
+  setRelationshipLabel(relationshipId: string, label: string): Promise<void>;
+  /** The durable label of a relationship. */
+  relationshipLabel(relationshipId: string): string;
+  /** Add a page to a category's membership (never duplicates the Page). */
+  addPageToCategory(categoryId: string, pageId: string): Promise<void>;
+  /**
+   * Geometry probe for the Nodes view (A09/A10/A13/A14-M2): the resolved scene
+   * from the SAME live graph + the SAME layout engine the canvas renders. Lets
+   * the e2e spec assert containment (squircleContains), hub vertex direction,
+   * and category-link endpoints against REAL positions — nothing mocked.
+   */
+  sceneGeometry(): {
+    nodes: { pageId: string; x: number; y: number }[];
+    hubs: {
+      relationshipId: string;
+      kind: string;
+      endpointCount: number;
+      center: { x: number; y: number };
+      endpoints: { x: number; y: number }[];
+    }[];
+    squircles: {
+      categoryId: string;
+      bounds: { cx: number; cy: number; rx: number; ry: number };
+    }[];
+    categoryLinks: {
+      fromCategoryId: string;
+      toCategoryId: string;
+      from: { x: number; y: number };
+      to: { x: number; y: number };
+    }[];
+  };
+  /** True iff a point is inside a category's squircle bounds (A10-M2 probe). */
+  squircleContainsPoint(categoryId: string, x: number, y: number): boolean;
+  /** Whether the 3D presentation is unlocked (activeNodeCount >= 35). */
+  is3DUnlocked(): boolean;
+  /** Whether the 3D presentation is currently active (user opted in). */
+  active3D(): boolean;
+  /** Set the active-3D flag (presentation only). */
+  setActive3D(on: boolean): Promise<void>;
+  /** Whether a WebGL context can be acquired here (3D vs 2D-fallback branch). */
+  webglAvailable(): boolean;
+  /** The transient N06 "not connected yet" placeholder for a source id. */
+  nodePlaceholderFor(sourceId: string): { sourceId: string; title: string; transient: boolean };
+  /** Create a category with a watercolor color (test setup convenience). */
+  createCategory(name: string, colorCode?: string): Promise<string>;
+  /** Create a relationship across N>=2 endpoints; returns the relationship id. */
+  createRelationship(endpointPageIds: string[], kind?: string, label?: string): Promise<string>;
+  /** Hide a node (presentation only; never deletes the Page). */
+  hideNode(pageId: string): Promise<void>;
+  /** Hide a relationship (presentation only; never deletes the Relationship). */
+  hideRelationship(relationshipId: string): Promise<void>;
   /** Test-only: force the next N persist() calls to fail (R12). */
   forceNextSaveFailures(count: number): void;
   /** Test-only: drift a source's stored version hash to trigger A17 mismatch. */
@@ -256,6 +367,132 @@ export function installTestApi(wb: Workbench, bump: () => void): void {
         relationships: d.relationships.length,
         categories: d.categories.length,
       };
+    },
+    conceptGraph() {
+      const g = wb.conceptGraph();
+      return {
+        nodes: g.nodes.map((n) => ({
+          pageId: n.pageId,
+          title: n.title,
+          hidden: n.hidden,
+        })),
+        links: g.links.map((l) => ({
+          relationshipId: l.relationshipId,
+          endpointPageIds: [...l.endpointPageIds],
+          topology: l.topology,
+          blendColor: l.blendColor,
+          hidden: l.hidden,
+        })),
+        categories: g.categories.map((c) => ({
+          categoryId: c.categoryId,
+          name: c.name,
+          colorCode: c.colorCode,
+        })),
+      };
+    },
+    activeNodeCount() {
+      return wb.activeNodeCount();
+    },
+    nodesViewActive() {
+      return wb.nodesViewActive();
+    },
+    setNodesView(active) {
+      wb.setNodesViewActive(active);
+      bump();
+    },
+    viewMode() {
+      return wb.viewMode();
+    },
+    setViewMode(mode) {
+      wb.setViewMode(mode as "files" | "nodes");
+      bump();
+    },
+    sourceIsConnected(sourceId) {
+      return wb.sourceIsConnected(sourceId);
+    },
+    async setRelationshipLabel(relationshipId, label) {
+      await wb.setRelationshipLabel(relationshipId as RelationshipId, label);
+      bump();
+    },
+    relationshipLabel(relationshipId) {
+      const rel = wb.rawData().relationships.find((r) => r.id === relationshipId);
+      return rel?.label ?? "";
+    },
+    async addPageToCategory(categoryId, pageId) {
+      await wb.addPageToCategory(categoryId as CategoryId, pageId as PageId);
+      bump();
+    },
+    sceneGeometry() {
+      const scene = buildScene(graphToSceneInput(wb), {});
+      return {
+        nodes: scene.nodes.map((n) => ({ pageId: n.pageId, x: n.x, y: n.y })),
+        hubs: scene.hubs.map((h) => ({
+          relationshipId: h.relationshipId,
+          kind: h.kind,
+          endpointCount: h.endpointCount,
+          center: { x: h.center.x, y: h.center.y },
+          endpoints: h.endpoints.map((p) => ({ x: p.x, y: p.y })),
+        })),
+        squircles: scene.squircles.map((s) => ({
+          categoryId: s.categoryId,
+          bounds: {
+            cx: s.bounds.cx,
+            cy: s.bounds.cy,
+            rx: s.bounds.rx,
+            ry: s.bounds.ry,
+          },
+        })),
+        categoryLinks: scene.categoryLinks.map((c) => ({
+          fromCategoryId: c.fromCategoryId,
+          toCategoryId: c.toCategoryId,
+          from: { x: c.from.x, y: c.from.y },
+          to: { x: c.to.x, y: c.to.y },
+        })),
+      };
+    },
+    squircleContainsPoint(categoryId, x, y) {
+      const scene = buildScene(graphToSceneInput(wb), {});
+      const sq = scene.squircles.find((s) => s.categoryId === categoryId);
+      if (!sq) return false;
+      return squircleContains(sq.bounds, { x, y });
+    },
+    is3DUnlocked() {
+      return wb.is3DUnlocked();
+    },
+    active3D() {
+      return wb.active3D();
+    },
+    async setActive3D(on) {
+      await wb.setActive3D(on);
+      bump();
+    },
+    webglAvailable() {
+      return isWebGLAvailable();
+    },
+    nodePlaceholderFor(sourceId) {
+      return wb.nodePlaceholderFor(sourceId);
+    },
+    async createCategory(name, colorCode) {
+      const category = await wb.createCategory(name, colorCode);
+      bump();
+      return category.id;
+    },
+    async createRelationship(endpointPageIds, kind, label) {
+      const rel = await wb.createRelationship(
+        endpointPageIds as PageId[],
+        (kind as RelationshipKind | undefined) ?? "relates",
+        label ?? "",
+      );
+      bump();
+      return rel.id;
+    },
+    async hideNode(pageId) {
+      await wb.hideNode(pageId as PageId);
+      bump();
+    },
+    async hideRelationship(relationshipId) {
+      await wb.hideRelationship(relationshipId as RelationshipId);
+      bump();
     },
     forceNextSaveFailures(count) {
       wb.forceNextSaveFailures(count);
