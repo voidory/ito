@@ -74,17 +74,94 @@ export function glyphCaretAtPoint(layer: HTMLElement, x: number, y: number): Car
   if (caret && caret.node.nodeType === Node.TEXT_NODE && span.contains(caret.node)) {
     return { node: caret.node as Text, offset: caret.offset };
   }
-  // The engine resolved to the element (or a neighbour): fall back to the
-  // span's first text node, choosing the nearer end by x.
+  // Some browser engines cannot resolve a caret reliably inside transformed
+  // PDF.js spans. Resolve it from per-character client geometry instead. The
+  // baseline axis comes from the span's transform, so 90°/270° text advances
+  // along Y rather than incorrectly comparing the pointer's X coordinate.
   const text = firstTextNode(span);
   if (!text) return null;
-  const r = span.getBoundingClientRect();
-  return { node: text, offset: x < r.left + r.width / 2 ? 0 : text.data.length };
+  return { node: text, offset: textOffsetAtPoint(span, text, x, y) };
 }
 
 function firstTextNode(el: Node): Text | null {
   const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
   return walker.nextNode() as Text | null;
+}
+
+function textBaselineAxis(span: HTMLElement): { x: number; y: number } {
+  const style = getComputedStyle(span);
+  if (style.transform !== "none" && typeof DOMMatrixReadOnly !== "undefined") {
+    try {
+      // A CSS matrix maps the text run's local X/baseline axis to (a, b).
+      const matrix = new DOMMatrixReadOnly(style.transform);
+      const length = Math.hypot(matrix.a, matrix.b);
+      if (length > 1e-6) return { x: matrix.a / length, y: matrix.b / length };
+    } catch {
+      // Fall through to writing-mode defaults on engines without DOMMatrix parsing.
+    }
+  }
+  return style.writingMode.startsWith("vertical")
+    ? { x: 0, y: 1 }
+    : { x: 1, y: 0 };
+}
+
+function distanceToInterval(value: number, min: number, max: number): number {
+  return value < min ? min - value : value > max ? value - max : 0;
+}
+
+/** Resolve a text-node offset using the visual geometry of each character. */
+function textOffsetAtPoint(span: HTMLElement, text: Text, x: number, y: number): number {
+  const axis = textBaselineAxis(span);
+  const normal = { x: -axis.y, y: axis.x };
+  const pointAlong = x * axis.x + y * axis.y;
+  const pointAcross = x * normal.x + y * normal.y;
+  let bestOffset = 0;
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  for (let i = 0; i < text.data.length; i++) {
+    const range = document.createRange();
+    range.setStart(text, i);
+    range.setEnd(text, i + 1);
+    const rect = range.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) continue;
+
+    const corners = [
+      [rect.left, rect.top],
+      [rect.right, rect.top],
+      [rect.left, rect.bottom],
+      [rect.right, rect.bottom],
+    ] as const;
+    const along = corners.map(([cx, cy]) => cx * axis.x + cy * axis.y);
+    const across = corners.map(([cx, cy]) => cx * normal.x + cy * normal.y);
+    const minAlong = Math.min(...along);
+    const maxAlong = Math.max(...along);
+    const minAcross = Math.min(...across);
+    const maxAcross = Math.max(...across);
+    const distance = Math.hypot(
+      distanceToInterval(pointAlong, minAlong, maxAlong),
+      distanceToInterval(pointAcross, minAcross, maxAcross),
+    );
+
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestOffset = pointAlong < (minAlong + maxAlong) / 2 ? i : i + 1;
+    }
+  }
+
+  if (bestDistance < Number.POSITIVE_INFINITY) return bestOffset;
+
+  // Last-resort fallback when a browser reports no character client rects.
+  const rect = span.getBoundingClientRect();
+  const corners = [
+    [rect.left, rect.top],
+    [rect.right, rect.top],
+    [rect.left, rect.bottom],
+    [rect.right, rect.bottom],
+  ] as const;
+  const projections = corners.map(([cx, cy]) => cx * axis.x + cy * axis.y);
+  return pointAlong < (Math.min(...projections) + Math.max(...projections)) / 2
+    ? 0
+    : text.data.length;
 }
 
 export interface PointerSelectionOptions {

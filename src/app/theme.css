@@ -720,6 +720,8 @@ label[data-testid="open-restore-input"]:active {
 .ito-ui-popover {
   position: fixed;
   z-index: var(--ito-z-popover);
+  box-sizing: border-box;
+  max-width: calc(100vw - 24px);
   background: var(--ito-bg-elevated);
   border: 1px solid var(--ito-border);
   border-radius: var(--ito-radius-md);
@@ -1005,8 +1007,12 @@ label[data-testid="open-restore-input"]:active {
 }
 
 [data-testid="highlight-edit-popover"] textarea {
+  display: block;
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   min-height: 64px;
+  box-sizing: border-box;
   resize: vertical;
   padding: 8px;
   border: 1px solid var(--ito-border);
@@ -1154,6 +1160,9 @@ label[data-testid="open-restore-input"]:active {
   left: 50%;
   transform: translateX(-50%);
   width: 22rem;
+  max-width: calc(100vw - 24px);
+  min-width: 0;
+  box-sizing: border-box;
   padding: 0.75rem;
   background: var(--ito-bg-elevated, #fff);
   border: 1px solid var(--ito-border, #ccc);
@@ -1162,8 +1171,13 @@ label[data-testid="open-restore-input"]:active {
 }
 
 .ito-comment-surface-floating textarea {
+  display: block;
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   min-height: 4rem;
+  box-sizing: border-box;
+  resize: vertical;
 }
 
 .ito-comment-surface-foot {

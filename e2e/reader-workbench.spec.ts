@@ -164,7 +164,40 @@ test("R02: a highlight saves quiet; comment is hidden until explicit reveal, the
   await clickCenter(page, page.locator(".ito-highlight-fragment").first());
   const surface = page.getByTestId("comment-surface");
   await expect(surface).toBeVisible();
-  await page.getByTestId("comment-input").fill("a quiet thought");
+  const commentInput = page.getByTestId("comment-input");
+  const originalViewport = page.viewportSize() ?? { width: 1280, height: 720 };
+
+  for (const width of [originalViewport.width, 320]) {
+    await page.setViewportSize({ width, height: originalViewport.height });
+    const layout = await page.evaluate(() => {
+      const popover = document.querySelector<HTMLElement>('[data-testid="highlight-edit-popover"]');
+      const textarea = document.querySelector<HTMLTextAreaElement>('[data-testid="comment-input"]');
+      if (!popover || !textarea) return null;
+      const popoverRect = popover.getBoundingClientRect();
+      const textareaRect = textarea.getBoundingClientRect();
+      const popoverStyle = getComputedStyle(popover);
+      const textareaStyle = getComputedStyle(textarea);
+      const innerLeft = popoverRect.left +
+        Number.parseFloat(popoverStyle.borderLeftWidth) +
+        Number.parseFloat(popoverStyle.paddingLeft);
+      const innerRight = popoverRect.right -
+        Number.parseFloat(popoverStyle.borderRightWidth) -
+        Number.parseFloat(popoverStyle.paddingRight);
+      return {
+        fitsWithinPopover: textareaRect.left >= innerLeft - 0.5 && textareaRect.right <= innerRight + 0.5,
+        fitsWithinViewport: popoverRect.left >= 0 && popoverRect.right <= window.innerWidth,
+        boxSizing: textareaStyle.boxSizing,
+        maxWidth: textareaStyle.maxWidth,
+      };
+    });
+    expect(layout?.fitsWithinPopover).toBe(true);
+    expect(layout?.fitsWithinViewport).toBe(true);
+    expect(layout?.boxSizing).toBe("border-box");
+    expect(layout?.maxWidth).toBe("100%");
+  }
+
+  await page.setViewportSize(originalViewport);
+  await commentInput.fill("a quiet thought");
   await page.getByTestId("comment-save").click();
   // Returns toward the passage, leaving no persistent obstruction.
   await expect(surface).toHaveCount(0);
