@@ -64,6 +64,10 @@ export class InMemoryStorageAdapter implements StorageAdapter {
     this.assets.set(`${brainId}/${assetId}`, bytes.slice());
   }
 
+  async deletePdfBinary(brainId: BrainId, assetId: string): Promise<void> {
+    this.assets.delete(`${brainId}/${assetId}`);
+  }
+
   async migrate(_manifest: BrainManifest, data: BrainData): Promise<BrainData> {
     return data;
   }

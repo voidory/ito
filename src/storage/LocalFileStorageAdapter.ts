@@ -1,5 +1,6 @@
 import { openDB, type IDBPDatabase } from "idb";
 import {
+  MIGRATIONS,
   SCHEMA_VERSION,
   type BrainData,
   type BrainId,
@@ -49,6 +50,10 @@ export class LocalFileStorageAdapter implements StorageAdapter {
   private readonly migrations: Map<number, Migration> = new Map();
 
   constructor(migrations?: Iterable<readonly [number, Migration]>) {
+    // Seed with the shared model-layer migration steps (the SAME registry the
+    // pure migrateBrainData runner uses) so a v1 brain read from IndexedDB and
+    // a restored backup migrate identically. Explicit overrides win.
+    for (const [from, fn] of MIGRATIONS) this.migrations.set(from, fn);
     if (migrations) {
       for (const [from, fn] of migrations) this.migrations.set(from, fn);
     }
@@ -165,6 +170,17 @@ export class LocalFileStorageAdapter implements StorageAdapter {
     if (!readBack || readBack.byteLength !== bytes.byteLength) {
       throw new WriteVerificationError(`asset ${key} read-back length mismatch`);
     }
+  }
+
+  /**
+   * Delete only the stored binary asset bytes (A17 offline eviction). No-op if
+   * the key is absent; never touches payloads/pointers (structured records).
+   */
+  async deletePdfBinary(brainId: BrainId, assetId: string): Promise<void> {
+    const db = await this.db();
+    const tx = db.transaction(STORE_ASSETS, "readwrite");
+    await tx.store.delete(assetKey(brainId, assetId));
+    await tx.done;
   }
 
   /**

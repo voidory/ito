@@ -47,10 +47,10 @@ describe("createEmptyBrainData — fresh brain with M2 presentation defaults", (
     expect(data.presentation.annotationStyles).toEqual({});
   });
 
-  it("uses SCHEMA_VERSION on the manifest, which is still 1 (no migration)", () => {
+  it("stamps the current SCHEMA_VERSION (2 in M3) on a fresh manifest", () => {
     const data = createEmptyBrainData();
-    expect(SCHEMA_VERSION).toBe(1);
-    expect(data.manifest.schemaVersion).toBe(1);
+    expect(SCHEMA_VERSION).toBe(2);
+    expect(data.manifest.schemaVersion).toBe(2);
   });
 });
 

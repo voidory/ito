@@ -92,6 +92,36 @@ export type SearchResult =
 export interface SearchOptions {
   /** Restrict PAGE results to members of this category id. */
   readonly categoryId?: string;
+  /**
+   * Restrict PAGE results to a category identified by EITHER its id OR its
+   * name (A19 cleanup). Resolved via `resolveCategoryScope` so a scope token
+   * works regardless of which form the caller passed. When both `categoryId`
+   * and `categoryScope` are given, `categoryId` wins.
+   */
+  readonly categoryScope?: string;
+}
+
+/**
+ * Resolve a category SCOPE token to a concrete category id (A19 cleanup).
+ *
+ * The token may be a Category.id OR a Category.name; this returns the matching
+ * category's id so page-result filtering always compares against membership
+ * ids. An id match is preferred (ids are durable + unique); a name match is the
+ * fallback. Returns null when the token matches no category so callers can
+ * treat an unknown scope as "no restriction" rather than silently hiding
+ * everything.
+ */
+export function resolveCategoryScope(
+  scope: string,
+  categories: readonly SearchCategory[],
+): string | null {
+  for (const c of categories) {
+    if (c.categoryId === scope) return c.categoryId;
+  }
+  for (const c of categories) {
+    if (c.name === scope) return c.categoryId;
+  }
+  return null;
 }
 
 /** The result of a 1-hop neighbourhood query. */
@@ -129,10 +159,19 @@ export function search(
   const q = query.trim().toLowerCase();
   if (q.length === 0) return [];
 
+  // Resolve the effective category id: an explicit id wins; otherwise a scope
+  // token is resolved against BOTH category id and name (A19 cleanup).
+  const effectiveCategoryId =
+    options.categoryId != null
+      ? options.categoryId
+      : options.categoryScope != null
+        ? resolveCategoryScope(options.categoryScope, index.categories)
+        : null;
+
   const results: SearchResult[] = [];
 
   for (const doc of index.docs) {
-    if (options.categoryId != null && !doc.categoryIds.includes(options.categoryId)) {
+    if (effectiveCategoryId != null && !doc.categoryIds.includes(effectiveCategoryId)) {
       continue;
     }
     const titleHit = contains(doc.title, q);

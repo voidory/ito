@@ -96,6 +96,14 @@ export interface ScopeAnchor {
 /**
  * Resolution status for an anchor against the currently loaded source.
  * "unresolved" and "mismatched" are explicit, first-class states.
+ *
+ * M3 (A17, spec section 4.3) adds a fourth first-class state,
+ * "binary-offloaded": the Source + Annotation records are intact and the stored
+ * versionHash still matches, but the PDF BINARY has been evicted locally to
+ * reclaim space (offline-first). The annotation/citation still FUNCTIONS from
+ * the stored quote/comment/page metadata; only the live page render is
+ * unavailable until the binary is re-attached. This is distinct from
+ * "unresolved" (a record is gone) and "mismatched" (a true edition drift).
  */
 export type AnchorResolution =
   | { readonly kind: "resolved" }
@@ -105,7 +113,8 @@ export type AnchorResolution =
       readonly reason: string;
       readonly expectedVersionHash: SourceVersionHash;
       readonly actualVersionHash: SourceVersionHash;
-    };
+    }
+  | { readonly kind: "binary-offloaded"; readonly reason: string };
 
 // ---------------------------------------------------------------------------
 // Source (spec section 20)
@@ -331,12 +340,27 @@ export interface Capture {
   readonly createdAt: Timestamp;
 }
 
-/** A named point-in-time snapshot of the brain's publication state. */
+/**
+ * A named point-in-time snapshot of the brain's publication state.
+ *
+ * M3 (spec section 2.2) extends a Revision so a DESTRUCTIVE action can record a
+ * reconstructable snapshot of exactly what it touched BEFORE it mutates, so the
+ * change can be reviewed or reversed. All new fields are OPTIONAL and readonly
+ * so existing revisions and v1 data still typecheck and load with no migration.
+ */
 export interface Revision {
   readonly id: RevisionId;
   readonly publicationRevision: number;
   readonly label: string;
   readonly createdAt: Timestamp;
+  /** Ids of the records this revision affected (e.g. the mutated page ids). */
+  readonly affectedObjectIds?: readonly string[];
+  /** Opaque snapshot of the affected records BEFORE the mutation. */
+  readonly beforeSnapshot?: unknown;
+  /** Opaque snapshot of the affected records AFTER the mutation (if captured). */
+  readonly afterSnapshot?: unknown;
+  /** Human-readable description of what the revision recorded. */
+  readonly summary?: string;
 }
 
 /**
@@ -441,6 +465,19 @@ export interface BrainManifest {
   readonly createdAt: Timestamp;
   readonly updatedAt: Timestamp;
   readonly assetIndex: readonly AssetIndexEntry[];
+  /**
+   * M3 backup descriptor (spec section 2.2, A18). "full" means the backup
+   * carried every record + binary; "targeted" means a deliberately scoped
+   * subset. Optional/readonly and v1-safe: absence means "not a backup / full".
+   */
+  readonly backupMode?: "full" | "targeted";
+  /**
+   * M3 backup omissions (spec section 2.2, A18): human-readable notes of what a
+   * targeted backup intentionally left out (e.g. offloaded source binaries), so
+   * a restore can report the gap rather than silently pretend completeness.
+   * Optional/readonly and v1-safe.
+   */
+  readonly omissions?: readonly string[];
 }
 
 /**

@@ -131,6 +131,25 @@ describe("Workbench.search — matches each searchable field from live data", ()
     await wb.createCategory("Beta cat", "#4b5578");
     expect(wb.search("beta")).toEqual(wb.search("beta"));
   });
+
+  it("scopes page results by a category token given as EITHER an id or a name (A19)", async () => {
+    const inCat = await wb.createSubjectPage("Gamma one");
+    await wb.createSubjectPage("Gamma two");
+    const cat = await wb.createCategory("Scoped Theme", "#4b5578", [inCat.id]);
+
+    const byId = wb
+      .search("gamma", { categoryScope: cat.id })
+      .filter((h) => h.kind === "page")
+      .map((h) => h.id);
+    const byName = wb
+      .search("gamma", { categoryScope: "Scoped Theme" })
+      .filter((h) => h.kind === "page")
+      .map((h) => h.id);
+
+    expect(byId).toEqual([inCat.id]);
+    expect(byName).toEqual([inCat.id]);
+    expect(byId).toEqual(byName);
+  });
 });
 
 describe("Workbench.neighborhood — 1-hop connected pages + relationships", () => {

@@ -24,6 +24,7 @@ import {
   newEvidenceInstanceId,
   newPageId,
   newRelationshipId,
+  newRevisionId,
   newSourceId,
   newSubjectAssociationId,
   relationshipEndpoints,
@@ -42,6 +43,7 @@ import {
   type Relationship,
   type RelationshipId,
   type RelationshipKind,
+  type Revision,
   type ScopeAnchor,
   type Source,
   type SourceId,
@@ -73,7 +75,7 @@ import {
   type DocumentJson,
   type EvidenceAttrs,
 } from "../editor";
-import type { StorageAdapter } from "../storage";
+import { sha256Hex, type StorageAdapter } from "../storage";
 
 /** An empty subject-page composition: one empty paragraph (never null). */
 function emptyDocJson(): DocumentJson {
@@ -356,6 +358,14 @@ export class Workbench {
    * without needing to corrupt IndexedDB. Set via `failNextSaves`.
    */
   private failNextSaves = 0;
+  /**
+   * Asset ids whose PDF binary is currently OFFLOADED locally (A17). Kept as a
+   * sync-readable cache so `resolveEvidenceSource` (and the node map / search,
+   * which read records, not bytes) stay synchronous. It is populated by
+   * `offloadSourceBinary`, cleared by `attachSourceBinary`, and rebuilt from
+   * the adapter at `open()` so offloaded status survives a reopen.
+   */
+  private offloadedAssetIds = new Set<string>();
 
   private constructor(
     private readonly storage: StorageAdapter,
@@ -385,7 +395,27 @@ export class Workbench {
     // and fold its styles into presentation.annotationStyles. A freshly created
     // brain can never carry the sentinel, so skip the extra persist for it.
     if (!createdFresh) await wb.migrateLegacyStyleCaptures();
+    // Rebuild the offloaded-binary cache (A17) so a source whose PDF bytes were
+    // evicted in a previous session still resolves as "binary-offloaded".
+    await wb.refreshBinaryAvailability();
     return wb;
+  }
+
+  /**
+   * Probe each source's asset availability and rebuild `offloadedAssetIds` so
+   * the sync `sourceBinaryStatus` / `resolveEvidenceSource` paths reflect the
+   * true adapter state across a reopen (A17). Pure read; changes no records.
+   */
+  private async refreshBinaryAvailability(): Promise<void> {
+    const offloaded = new Set<string>();
+    for (const source of this.data.sources) {
+      const bytes = await this.storage.readAsset(
+        this.data.manifest.brainId,
+        source.assetId,
+      );
+      if (!bytes) offloaded.add(source.assetId);
+    }
+    this.offloadedAssetIds = offloaded;
   }
 
   /**
@@ -493,6 +523,65 @@ export class Workbench {
     const source = this.data.sources.find((s) => s.id === sourceId);
     if (!source) return null;
     return this.storage.readAsset(this.data.manifest.brainId, source.assetId);
+  }
+
+  // -- offline-first binary eviction (A17) ----------------------------------
+
+  /**
+   * OFFLOAD a source's PDF binary to reclaim local space (A17). Deletes ONLY
+   * the stored asset bytes via the adapter; the Source and every Annotation +
+   * EvidenceInstance that depends on it stay 100% intact so citations keep
+   * functioning from their stored metadata. Persists so the change is durable
+   * (the manifest revision advances like any other mutation). A no-op for an
+   * unknown source.
+   */
+  async offloadSourceBinary(sourceId: SourceId): Promise<void> {
+    const source = this.data.sources.find((s) => s.id === sourceId);
+    if (!source) return;
+    await this.storage.deletePdfBinary(this.data.manifest.brainId, source.assetId);
+    this.offloadedAssetIds.add(source.assetId);
+    await this.persist();
+  }
+
+  /**
+   * Whether a source's PDF binary is locally available: "cached" when the
+   * adapter still holds the asset bytes, "binary-offloaded" when they were
+   * evicted (A17). Synchronous: it reads the `offloadedAssetIds` cache (kept in
+   * sync by offload/attach and rebuilt at open) so the UI + resolution paths
+   * need no await. Returns "binary-offloaded" for an unknown source.
+   */
+  sourceBinaryStatus(sourceId: SourceId): "cached" | "binary-offloaded" {
+    const source = this.data.sources.find((s) => s.id === sourceId);
+    if (!source) return "binary-offloaded";
+    return this.offloadedAssetIds.has(source.assetId) ? "binary-offloaded" : "cached";
+  }
+
+  /**
+   * Re-ATTACH a PDF binary to an offloaded source (A17). Computes sha256Hex of
+   * the supplied bytes and ONLY writes them when the digest matches the stored
+   * Source.versionHash, transitioning the source back to "cached". A mismatch
+   * (wrong file, or a different edition) returns { attached: false, reason }
+   * and writes NOTHING, so a drifted edition can never masquerade as the
+   * original. Returns { attached: false } for an unknown source.
+   */
+  async attachSourceBinary(
+    sourceId: SourceId,
+    bytes: Uint8Array,
+  ): Promise<{ attached: boolean; reason?: string }> {
+    const source = this.data.sources.find((s) => s.id === sourceId);
+    if (!source) {
+      return { attached: false, reason: "unknown source" };
+    }
+    const digest = await sha256Hex(bytes);
+    if (digest !== source.versionHash) {
+      return {
+        attached: false,
+        reason: "attached file does not match this source's version hash",
+      };
+    }
+    await this.storage.writeAsset(this.data.manifest.brainId, source.assetId, bytes);
+    this.offloadedAssetIds.delete(source.assetId);
+    return { attached: true };
   }
 
   /**
@@ -970,6 +1059,115 @@ export class Workbench {
     await this.persist();
   }
 
+  // -- two-mode highlight deletion (D02) ------------------------------------
+
+  /**
+   * D02 "delete highlight only": remove the Annotation record + its style but
+   * PRESERVE every EvidenceInstance that quotes it AND the inline evidence
+   * atom(s) in any Subject Page documentJson. The quoted text survives verbatim
+   * in the page; the (annotation, destination) pair then derives as
+   * "unresolved" with reason "source annotation no longer exists" purely
+   * because the annotation record is gone (resolveEvidenceSource already does
+   * this once the annotation vanishes). SubjectAssociations for the annotation
+   * are removed with it (they are reader-side intent that cannot outlive the
+   * annotation), but NO evidence is deleted. A no-op for an unknown id.
+   */
+  async deleteAnnotationOnly(id: AnnotationId): Promise<void> {
+    if (!this.data.annotations.some((a) => a.id === id)) return;
+    const { [id]: _removed, ...remainingStyles } =
+      this.data.presentation.annotationStyles ?? {};
+    this.data = {
+      ...this.data,
+      annotations: this.data.annotations.filter((a) => a.id !== id),
+      // Evidence + inline atoms are intentionally UNTOUCHED (the quote lives on).
+      subjectAssociations: this.data.subjectAssociations.filter(
+        (a) => a.annotationId !== id,
+      ),
+      presentation: { ...this.data.presentation, annotationStyles: remainingStyles },
+    };
+    await this.persist();
+  }
+
+  /**
+   * D02 "delete highlight and its quotes": a DESTRUCTIVE deletion that FIRST
+   * records a reconstructable Revision snapshot of every affected Subject Page
+   * (its documentJson BEFORE mutation) so the removal can be reviewed/reverted,
+   * THEN deletes the Annotation + its style, deletes the matching
+   * EvidenceInstance records, and strips ONLY the matching inline `evidence`
+   * atom node(s) from each affected page via the existing removeEvidenceNode
+   * helper — surrounding prose and any OTHER quotes in the same page are
+   * preserved exactly. Persists once. A no-op for an unknown id.
+   */
+  async deleteAnnotationAndQuotes(id: AnnotationId): Promise<void> {
+    if (!this.data.annotations.some((a) => a.id === id)) return;
+
+    // Evidence instances that quote this annotation, grouped by their page.
+    const doomedEvidence = this.data.evidenceInstances.filter(
+      (e) => e.annotationId === id,
+    );
+    const doomedEvidenceIds = new Set(doomedEvidence.map((e) => e.id));
+    const affectedPageIds = new Set(doomedEvidence.map((e) => e.destinationPageId));
+
+    // (1) Snapshot each affected page's documentJson BEFORE mutating, so the
+    // revision is reconstructable. Only pages that actually hold a matching
+    // atom are affected; a page could be missing (evidence without a page) so
+    // we filter to real pages.
+    const affectedPages = this.data.pages.filter((p) => affectedPageIds.has(p.id));
+    const now = new Date().toISOString();
+    const revisions = this.data.revisions.slice();
+    if (affectedPages.length > 0) {
+      const revision: Revision = {
+        id: newRevisionId(),
+        publicationRevision: this.data.manifest.publicationRevision,
+        label: "delete-highlight-and-quotes",
+        createdAt: now,
+        affectedObjectIds: affectedPages.map((p) => p.id),
+        beforeSnapshot: affectedPages.map((p) => ({
+          pageId: p.id,
+          documentJson: structuredClone(p.documentJson),
+        })),
+        summary: `Deleted annotation ${id} and its ${doomedEvidence.length} quote(s) across ${affectedPages.length} page(s)`,
+      };
+      revisions.push(revision);
+    }
+
+    // (2) Strip ONLY the matching inline evidence atoms from each affected page.
+    const pages = this.data.pages.map((page) => {
+      if (!affectedPageIds.has(page.id)) return page;
+      const evidenceOnThisPage = doomedEvidence.filter(
+        (e) => e.destinationPageId === page.id,
+      );
+      let state = hydrateState((page.documentJson as DocumentJson) ?? emptyDocJson());
+      for (const ev of evidenceOnThisPage) {
+        state = removeEvidenceNode(state, ev.id);
+      }
+      return {
+        ...page,
+        documentJson: serializeState(state),
+        updatedAt: now,
+      };
+    });
+
+    // (3) Delete the annotation + its style + the matching evidence + the
+    // annotation's reader-side associations. Persist once.
+    const { [id]: _removed, ...remainingStyles } =
+      this.data.presentation.annotationStyles ?? {};
+    this.data = {
+      ...this.data,
+      annotations: this.data.annotations.filter((a) => a.id !== id),
+      evidenceInstances: this.data.evidenceInstances.filter(
+        (e) => !doomedEvidenceIds.has(e.id),
+      ),
+      subjectAssociations: this.data.subjectAssociations.filter(
+        (a) => a.annotationId !== id,
+      ),
+      pages,
+      revisions,
+      presentation: { ...this.data.presentation, annotationStyles: remainingStyles },
+    };
+    await this.persist();
+  }
+
   // -- subject pages + association/citation state machine -------------------
 
   /**
@@ -1218,6 +1416,22 @@ export class Workbench {
           reason: "source version changed since the quote was captured",
           expectedVersionHash: expectedHash,
           actualVersionHash: source.versionHash,
+        },
+      };
+    }
+    // Source + annotation intact and the hash matches, but the PDF binary was
+    // evicted locally (A17): the citation still FUNCTIONS from stored metadata
+    // (quote/comment/page), only the live render is unavailable. Report it as a
+    // first-class "binary-offloaded" state rather than pretending it resolved.
+    if (this.sourceBinaryStatus(annotation.sourceId) === "binary-offloaded") {
+      return {
+        sourceId: annotation.sourceId,
+        anchor: annotation.scope.kind === "text" ? annotation.scope.anchor : null,
+        scopeStartPageIndex:
+          annotation.scope.kind === "pages" ? annotation.scope.anchor.startPageIndex : 0,
+        resolution: {
+          kind: "binary-offloaded",
+          reason: "the PDF binary was offloaded locally; re-attach it to view the page",
         },
       };
     }
