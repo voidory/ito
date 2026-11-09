@@ -1047,3 +1047,49 @@ label[data-testid="open-restore-input"]:active {
   transform: none;
   box-shadow: none;
 }
+
+/* --- Reader chrome polish --------------------------------------------- */
+[data-testid="source-pane"] {
+  position: relative;
+}
+
+/* Single document: the page-range control floats over the page's top-right
+   margin instead of costing a whole row; Switch paper lives in the ⋯ menu. */
+[data-pane-count="1"] .ito-pane-header {
+  position: absolute;
+  top: 6px;
+  right: 22px;
+  z-index: 4;
+  padding: 0;
+  overflow: visible;
+}
+
+[data-pane-count="1"] [data-testid="switch-paper"] {
+  display: none;
+}
+
+[data-pane-count="1"] [data-testid="start-range"] {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: var(--ito-radius-pill);
+  color: var(--ito-muted);
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: var(--ito-shadow-sm);
+}
+
+[data-pane-count="1"] [data-testid="start-range"][aria-pressed="true"] {
+  background: var(--ito-accent);
+  color: var(--ito-accent-ink);
+}
+
+/* Reading canvas reads as a desk the page sits on. */
+[data-testid="pane-scroll"] {
+  background: #ebe7dd;
+  padding: 12px 16px 40px !important;
+}
+
+[data-testid="view-switch"] {
+  background: rgba(30, 35, 42, 0.05);
+  padding: 3px;
+}

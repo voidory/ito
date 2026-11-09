@@ -927,6 +927,8 @@ function SourcePane({
   // base multiplier the zoom composes with, so it starts at BASE_ZOOM (the
   // unzoomed base scale) and is narrowed by the ResizeObserver refit.
   const fittedScaleRef = useRef<number>(BASE_ZOOM);
+  // Mirrors fittedScaleRef into state so the toolbar can show the real scale.
+  const [fitScale, setFitScale] = useState<number>(BASE_ZOOM);
   useEffect(() => {
     if (!ready || isWebsite) return;
     const mount = mountRef.current;
@@ -959,6 +961,7 @@ function SourcePane({
       const target = Math.min(FIT_MAX, Math.max(0.4, avail / intrinsicWidth));
       if (Math.abs(target - fittedScaleRef.current) < 0.02) return;
       fittedScaleRef.current = target;
+      setFitScale(target);
       // Compose the fit target with the CURRENT user zoom so a resize tick
       // after a zoom re-fits the width WITHOUT discarding the zoom. The applied
       // scale is the fit target scaled by the live zoom multiplier (zoom === 1
@@ -1542,8 +1545,10 @@ function SourcePane({
   const pageCount = source?.pageCount ?? pagesRef.current.length ?? 1;
   useEffect(() => {
     if (!isPrimary) return;
-    onNavChange?.({ zoom, page: currentPage, pageCount });
-  }, [isPrimary, zoom, currentPage, pageCount, onNavChange]);
+    // Report the EFFECTIVE scale (fit x user zoom) so the toolbar percentage
+    // matches what is on screen instead of a bare multiplier.
+    onNavChange?.({ zoom: (fitScale / 1) * zoom, page: currentPage, pageCount });
+  }, [isPrimary, zoom, fitScale, currentPage, pageCount, onNavChange]);
 
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState("");
