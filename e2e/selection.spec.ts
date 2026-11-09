@@ -167,6 +167,9 @@ test("rotated PDF selection follows visible glyph geometry at 90 and 270 degrees
     await page.mouse.move(path!.endPoint.x, path!.endPoint.y, { steps: 30 });
     await page.mouse.up();
 
+    await expect(page.getByTestId("live-selection-preview")).toBeVisible();
+    await expect(page.getByTestId("selection-toolbar")).toBeVisible();
+
     const measured = await page.evaluate(() => {
       const selection = window.getSelection();
       if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null;
@@ -206,8 +209,6 @@ test("rotated PDF selection follows visible glyph geometry at 90 and 270 degrees
       expect(Math.abs(measured!.previewBox![key] - measured!.rangeBox[key]), "preview " + key)
         .toBeLessThanOrEqual(1);
     }
-    await expect(page.getByTestId("live-selection-preview")).toBeVisible();
-    await page.getByTestId("selection-toolbar").waitFor({ state: "visible" });
     await page.evaluate(() => window.getSelection()?.removeAllRanges());
   }
 });
