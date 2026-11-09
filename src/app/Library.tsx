@@ -2,6 +2,125 @@ import { useMemo, useState } from "react";
 import type { Source, SourceId } from "../model";
 import type { Workbench } from "./workbench";
 
+/** Accepted snapshot file extensions for a website source (A15, D11). */
+const SNAPSHOT_ACCEPT = ".html,.htm,.md,.txt";
+
+function hasAcceptedExtension(name: string): boolean {
+  return /\.(html?|md|txt)$/i.test(name);
+}
+
+/**
+ * The "Add website" modal (A15, D11). A website source REQUIRES both a URL and
+ * a dropped/selected snapshot file; submitting a URL with no snapshot is
+ * rejected with an inline error. On success the snapshot is stored via the
+ * StorageAdapter and the source is tagged kind/type "website" +
+ * availabilityStatus "snapshot-cached".
+ */
+export function AddWebsiteModal({
+  wb,
+  onClose,
+  onImported,
+}: {
+  wb: Workbench;
+  onClose: () => void;
+  onImported: () => void;
+}): JSX.Element {
+  const [url, setUrl] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const takeFile = (f: File | null): void => {
+    if (!f) return;
+    if (!hasAcceptedExtension(f.name)) {
+      setError("Snapshot must be an .html, .htm, .md, or .txt file.");
+      return;
+    }
+    setError(null);
+    setFile(f);
+  };
+
+  const submit = async (): Promise<void> => {
+    if (url.trim() === "") {
+      setError("Enter the website URL.");
+      return;
+    }
+    // Reject URL-only submissions (A15, D11): a snapshot file is REQUIRED.
+    if (!file) {
+      setError("A snapshot file is required to add a website.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      await wb.importWebsiteSource({ url: url.trim(), snapshot: bytes, title: url.trim() });
+      onImported();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      data-testid="add-website-modal"
+      role="dialog"
+      aria-label="Add website"
+      style={styles.modal}
+    >
+      <h3 style={{ marginTop: 0 }}>Add a website</h3>
+      <label style={{ display: "block", marginBottom: "0.5rem" }}>
+        Website URL
+        <input
+          data-testid="website-url-input"
+          type="url"
+          placeholder="https://example.com/article"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          style={{ display: "block", width: "100%", marginTop: "0.25rem" }}
+        />
+      </label>
+      {/* Dropzone sits DIRECTLY underneath the URL input (D11). */}
+      <label
+        data-testid="website-snapshot-dropzone"
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          e.preventDefault();
+          takeFile(e.dataTransfer.files?.[0] ?? null);
+        }}
+        style={styles.dropzone}
+      >
+        {file ? `Snapshot: ${file.name}` : "Drop or choose a snapshot file (.html, .htm, .md, .txt)"}
+        <input
+          data-testid="website-snapshot-input"
+          type="file"
+          accept={SNAPSHOT_ACCEPT}
+          style={{ display: "none" }}
+          onChange={(e) => takeFile(e.target.files?.[0] ?? null)}
+        />
+      </label>
+      {error && (
+        <p
+          data-testid="website-snapshot-required-error"
+          role="alert"
+          style={{ color: "#c5221f", fontSize: "0.85rem" }}
+        >
+          {error}
+        </p>
+      )}
+      <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
+        <button data-testid="add-website-cancel" onClick={onClose} disabled={busy}>
+          Cancel
+        </button>
+        <button data-testid="add-website-submit" onClick={() => void submit()} disabled={busy}>
+          {busy ? "Adding…" : "Add website"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /**
  * The Library is the DEFAULT entry (spec section 5). It lists all imported PDFs
  * organized by category and sorted, opens a document on double-click/tap, and
@@ -14,15 +133,19 @@ export function Library({
   onScopeChange,
   onOpen,
   onOpenTogether,
+  onImported,
 }: {
   wb: Workbench;
   categoryScope: string | null;
   onScopeChange: (category: string | null) => void;
   onOpen: (id: SourceId) => void;
   onOpenTogether: (ids: SourceId[]) => void;
+  /** Called after a website import so the shell can re-render the list. */
+  onImported?: () => void;
 }): JSX.Element {
   const [sortBy, setSortBy] = useState<"title" | "importedAt">("title");
   const [selected, setSelected] = useState<Set<SourceId>>(new Set());
+  const [addWebsiteOpen, setAddWebsiteOpen] = useState(false);
   const categories = useMemo(() => wb.categories(), [wb, wb.rawData()]);
   const sections = useMemo(
     () => wb.librarySections(sortBy),
@@ -77,8 +200,26 @@ export function Library({
           >
             Open together ({selected.size})
           </button>
+          <button
+            data-testid="add-website"
+            style={{ marginLeft: "0.75rem" }}
+            onClick={() => setAddWebsiteOpen(true)}
+          >
+            Add website…
+          </button>
         </div>
       </header>
+
+      {addWebsiteOpen && (
+        <AddWebsiteModal
+          wb={wb}
+          onClose={() => setAddWebsiteOpen(false)}
+          onImported={() => {
+            setAddWebsiteOpen(false);
+            onImported?.();
+          }}
+        />
+      )}
 
       {sections.length === 0 && (
         <p data-testid="library-empty" style={{ color: "#777" }}>
@@ -218,5 +359,24 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: "1rem",
     cursor: "pointer",
     color: "#1a56db",
+  },
+  modal: {
+    margin: "0 0 1.25rem",
+    padding: "1rem",
+    background: "#fff",
+    border: "1px solid #dcd6c8",
+    borderRadius: "10px",
+    boxShadow: "0 6px 24px rgba(0,0,0,0.12)",
+  },
+  dropzone: {
+    display: "block",
+    marginTop: "0.5rem",
+    padding: "1rem",
+    border: "2px dashed #c3bdaf",
+    borderRadius: "8px",
+    textAlign: "center",
+    color: "#666",
+    cursor: "pointer",
+    fontSize: "0.85rem",
   },
 };

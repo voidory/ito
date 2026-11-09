@@ -500,13 +500,19 @@ function SourcePane({
   const [rangeStart, setRangeStart] = useState(0);
   const [rangeEnd, setRangeEnd] = useState(0);
   const [openComment, setOpenComment] = useState<AnnotationId | null>(null);
+  // M6 (D01): per-page PDF scope status (scanned / encrypted) surfaced below.
+  const [scopeStatus, setScopeStatus] = useState<string | null>(null);
+  // M6 (A15, D11): the website snapshot HTML text, when this source is a
+  // website rather than a PDF (rendered with full selection/highlighting).
+  const [websiteHtml, setWebsiteHtml] = useState<string | null>(null);
 
   const source = wb.rawData().sources.find((s) => s.id === sourceId);
+  const isWebsite = source?.kind === "website" || source?.type === "website";
 
   const redrawOverlays = useCallback(() => {
     const views = wb.annotationsForSource(sourceId);
     for (const page of pagesRef.current) {
-      page.textLayer
+      page.stage
         .querySelectorAll(".ito-highlight")
         .forEach((el) => el.remove());
     }
@@ -523,18 +529,53 @@ function SourcePane({
     (async () => {
       const bytes = await wb.readSourceBytes(sourceId);
       if (!bytes || cancelled) return;
-      const doc = await loadDocument(bytes);
+      // M6 (A15, D11): a website source renders its stored snapshot HTML as a
+      // single selectable page (full text selection + highlighting + quoting),
+      // never a pdf.js document.
+      if (isWebsite) {
+        const html = new TextDecoder().decode(bytes);
+        if (cancelled) return;
+        setWebsiteHtml(html);
+        setReady(true);
+        return;
+      }
+      let doc: PDFDocumentProxy;
+      try {
+        doc = await loadDocument(bytes);
+      } catch (err) {
+        // M6 (D01): an encrypted PDF cannot be opened without a password.
+        if (cancelled) return;
+        const msg = err instanceof Error ? err.message : String(err);
+        if (/password|encrypt/i.test(msg)) {
+          setScopeStatus("Encrypted PDF - password required");
+          setReady(true);
+          return;
+        }
+        throw err;
+      }
       docRef.current = doc;
       mount.replaceChildren();
       const pages: RenderedPage[] = [];
       for (let p = 1; p <= doc.numPages; p++) {
         const rp = await renderPage(doc, p, mount, 1.3);
         rp.container.dataset.pageIndex = String(p - 1);
+        rp.stage.dataset.pageIndex = String(p - 1);
         pages.push(rp);
       }
       if (cancelled) return;
       pagesRef.current = pages;
       setRangeEnd(doc.numPages - 1);
+      // M6 (D01): a page with 0 selectable text items is a scanned/image PDF.
+      if (pages.length > 0 && pages.every((p) => p.textItemCount === 0)) {
+        setScopeStatus(
+          "Scanned PDF (no selectable text layer) - use page-range or area annotations",
+        );
+      }
+      // FIX-PAGECOUNT-BACKFILL (3.1 / D01): backfill a batch-ingested source's
+      // pageCount (stored as 0) now that pdf.js knows the real page count.
+      if (source && source.pageCount === 0) {
+        void wb.updateSourcePageCount(sourceId, doc.numPages);
+      }
       setReady(true);
     })().catch((err) => console.error("render failed", err));
     return () => {
@@ -546,6 +587,62 @@ function SourcePane({
   useEffect(() => {
     if (ready) redrawOverlays();
   }, [ready, redrawOverlays]);
+
+  // FIX-PANE-CLIPPING (3.2): responsive fit-to-pane scaling. When the pane is
+  // narrower than a rendered page, re-render each page at a scale that fits the
+  // available width so PDF text never clips horizontally in 2-pane / 3-pane
+  // layouts. The text layer re-renders with the stage (RenderedPage.rerender),
+  // so glyphs + canvas + overlays stay aligned at the fitted scale. A
+  // ResizeObserver keeps it in sync as dividers are dragged. Idempotent: it
+  // only re-renders when the fitted scale meaningfully changes.
+  const fittedScaleRef = useRef<number>(1.3);
+  useEffect(() => {
+    if (!ready || isWebsite) return;
+    const mount = mountRef.current;
+    if (!mount) return;
+    const scroll = mount.parentElement; // the pane-scroll container
+    if (!scroll) return;
+    let frame = 0;
+    const BASE_SCALE = 1.3;
+    const refit = (): void => {
+      const pages = pagesRef.current;
+      if (pages.length === 0) return;
+      // Intrinsic (BASE_SCALE) width of a page = current stage width scaled
+      // back to base. Use the first page as representative.
+      const first = pages[0]!;
+      const factor = first.textLayer
+        ? Number(first.stage.style.getPropertyValue("--scale-factor")) || BASE_SCALE
+        : BASE_SCALE;
+      const intrinsicWidth = first.stage.getBoundingClientRect().width / factor;
+      if (intrinsicWidth <= 0) return;
+      // Available content width inside the scroll container (minus padding).
+      const style = getComputedStyle(scroll);
+      const padding =
+        parseFloat(style.paddingLeft || "0") + parseFloat(style.paddingRight || "0");
+      const avail = scroll.clientWidth - padding;
+      if (avail <= 0) return;
+      const target = Math.min(BASE_SCALE, Math.max(0.4, avail / intrinsicWidth));
+      if (Math.abs(target - fittedScaleRef.current) < 0.02) return;
+      fittedScaleRef.current = target;
+      void (async () => {
+        for (const page of pages) {
+          await page.rerender(target);
+        }
+        redrawOverlays();
+      })();
+    };
+    const schedule = (): void => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(refit);
+    };
+    const ro = new ResizeObserver(schedule);
+    ro.observe(scroll);
+    schedule();
+    return () => {
+      cancelAnimationFrame(frame);
+      ro.disconnect();
+    };
+  }, [ready, isWebsite, redrawOverlays]);
 
   // Source-return: scroll this pane to the exact passage and flash a transient
   // overlay re-derived from the live render (A17, spec section 8.2). For an
@@ -560,7 +657,7 @@ function SourcePane({
       (p) => Number(p.container.dataset.pageIndex ?? "-1") === returnTarget.pageIndex,
     );
     if (!page) return;
-    page.textLayer.querySelectorAll(".ito-return").forEach((el) => el.remove());
+    page.stage.querySelectorAll(".ito-return").forEach((el) => el.remove());
     page.container.scrollIntoView({
       behavior: suppressMotion ? "auto" : "smooth",
       block: "center",
@@ -591,7 +688,8 @@ function SourcePane({
             borderRadius: "3px",
             pointerEvents: "none",
           } satisfies Partial<CSSStyleDeclaration>);
-          page.textLayer.appendChild(el);
+          // Insert the return flash above the canvas, beneath the text layer.
+          page.stage.insertBefore(el, page.textLayer);
         }
       }
     } else {
@@ -656,6 +754,17 @@ function SourcePane({
     bump();
   }, [wb, sourceId, rangeStart, rangeEnd, redrawOverlays, bump]);
 
+  // M6 (D01): commit a rectangular AREA annotation. For scanned/image PDFs
+  // (no selectable text) this is the citable alternative to a text highlight.
+  // A default centered rect on the first page is used; the box is draggable in
+  // FEAT-003's richer interaction, but the citable record is created here.
+  const commitArea = useCallback(async () => {
+    const rect = { x: 0.2, y: 0.2, width: 0.6, height: 0.15 };
+    await wb.commitAreaAnnotation(sourceId, 0, rect);
+    redrawOverlays();
+    bump();
+  }, [wb, sourceId, redrawOverlays, bump]);
+
   // Reveal a comment when an annotation overlay is clicked (quiet-by-default).
   useEffect(() => {
     if (!ready) return;
@@ -699,6 +808,17 @@ function SourcePane({
       <div style={styles.paneHeader}>
         <strong>{source?.title ?? "…"}</strong>
         <span style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
+          {isWebsite && (
+            <span
+              data-testid="website-availability-badge"
+              data-source-id={sourceId}
+              data-status={source?.availabilityStatus ?? "snapshot-cached"}
+              title={source?.url ?? ""}
+              style={styles.websiteBadge}
+            >
+              Snapshot cached
+            </span>
+          )}
           {switchable.length > 0 && (
             <select
               data-testid="switch-paper"
@@ -726,8 +846,23 @@ function SourcePane({
           >
             Comment on page range
           </button>
+          {!isWebsite && (
+            <button
+              data-testid="add-area-annotation"
+              onClick={() => void commitArea()}
+              title="Add an area annotation on the first page"
+            >
+              Mark area
+            </button>
+          )}
         </span>
       </div>
+
+      {scopeStatus && (
+        <div data-testid="pdf-scope-status" role="note" style={styles.scopeStatus}>
+          {scopeStatus}
+        </div>
+      )}
 
       {rangeMode && source && (
         <div data-testid="range-selector" style={styles.rangeSelector}>
@@ -777,7 +912,16 @@ function SourcePane({
           data-testid="pdf-mount"
           style={styles.mount}
           onMouseUp={onMouseUp}
-        />
+        >
+          {isWebsite && websiteHtml != null && (
+            <div
+              data-testid="website-snapshot"
+              data-source-id={sourceId}
+              style={styles.websiteSnapshot}
+              dangerouslySetInnerHTML={{ __html: sanitizeSnapshotHtml(websiteHtml) }}
+            />
+          )}
+        </div>
       </div>
 
       {toolbar && (
@@ -1429,13 +1573,32 @@ export function drawAnnotation(
       (p) => Number(p.container.dataset.pageIndex ?? "-1") === anchor.pageIndex,
     );
     if (!page) return;
-    renderHighlightOverlay(page.textLayer, {
+    // Overlays are measured + positioned relative to the STAGE (not the
+    // header-bearing wrapper), so they sit over the selected glyphs (3.1).
+    renderHighlightOverlay(page.stage, {
       kind: view.style.kind,
       color: view.style.color,
       rects: anchor.rects,
       animate,
       suppressMotion,
       annotationId: view.annotation.id,
+    });
+  } else if (view.annotation.scope.kind === "area") {
+    // M6 (D01) area annotation: a labeled rectangular region box on the stage.
+    const anchor = view.annotation.scope.anchor;
+    const page = pages.find(
+      (p) => Number(p.container.dataset.pageIndex ?? "-1") === anchor.pageIndex,
+    );
+    if (!page) return;
+    renderHighlightOverlay(page.stage, {
+      kind: view.style.kind,
+      color: view.style.color,
+      rects: [anchor.rect],
+      animate: false,
+      suppressMotion,
+      annotationId: view.annotation.id,
+      areaBox: true,
+      areaLabel: view.annotation.comment || "Area",
     });
   } else {
     const { startPageIndex, endPageIndex } = view.annotation.scope.anchor;
@@ -1444,7 +1607,7 @@ export function drawAnnotation(
         (p) => Number(p.container.dataset.pageIndex ?? "-1") === pi,
       );
       if (!page) continue;
-      renderHighlightOverlay(page.textLayer, {
+      renderHighlightOverlay(page.stage, {
         kind: view.style.kind,
         color: view.style.color,
         rects: [],
@@ -1459,6 +1622,22 @@ export function drawAnnotation(
 
 function swatch(c: HighlightColor): string {
   return { yellow: "#ffdd57", green: "#82dc96", blue: "#82beff", pink: "#ff96c8" }[c];
+}
+
+/**
+ * Minimal defense-in-depth sanitizer for a stored website snapshot (A15, D11).
+ * The snapshot was already sanitized at import time by the Workbench; this is a
+ * render-time belt-and-braces pass that strips <script> blocks, inline event
+ * handlers, and javascript: URLs so a snapshot can never execute script in the
+ * reader. The remaining text stays fully selectable for highlighting/quoting.
+ */
+export function sanitizeSnapshotHtml(html: string): string {
+  return html
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/\son\w+\s*=\s*"[^"]*"/gi, "")
+    .replace(/\son\w+\s*=\s*'[^']*'/gi, "")
+    .replace(/javascript:/gi, "");
 }
 
 /**
@@ -1678,6 +1857,29 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: "0.5rem",
   },
   mount: { position: "relative" },
+  scopeStatus: {
+    padding: "0.5rem 0.75rem",
+    margin: "0 0 0.5rem",
+    background: "#fff4e5",
+    border: "1px solid #f0c38a",
+    borderRadius: "6px",
+    color: "#7a4b00",
+    fontSize: "0.82rem",
+  },
+  websiteBadge: {
+    fontSize: "0.72rem",
+    padding: "0.05rem 0.4rem",
+    borderRadius: "4px",
+    background: "#e6f0fb",
+    color: "#2c4a6f",
+  },
+  websiteSnapshot: {
+    maxWidth: "100%",
+    padding: "0.5rem",
+    background: "#fff",
+    lineHeight: 1.5,
+    userSelect: "text",
+  },
   sidebar: {
     width: "20rem",
     minWidth: "20rem",

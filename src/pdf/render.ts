@@ -40,7 +40,19 @@ export async function loadDocument(bytes: Uint8Array): Promise<PDFDocumentProxy>
 export interface RenderedPage {
   readonly canvas: HTMLCanvasElement;
   readonly textLayer: HTMLDivElement;
+  /** The outer `.pdf-page` wrapper (header + stage). Carries data-page-index. */
   readonly container: HTMLDivElement;
+  /**
+   * FIX-HIGHLIGHT-OFFSET (3.1) inner `.pdf-page-stage`: the positioning context
+   * for the canvas, the text layer and ALL overlays. Exact viewport size.
+   */
+  readonly stage: HTMLDivElement;
+  /**
+   * M6 (D01) number of selectable text items pdf.js extracted for this page.
+   * 0 means a scanned/image page with no selectable text layer, which the
+   * Reader surfaces so the user reaches for page-range or area annotations.
+   */
+  readonly textItemCount: number;
   readonly pageText: string;
   /** Bounding box of the page container in CSS pixels. */
   pageBox(): PageBox;
@@ -75,18 +87,39 @@ export async function renderPage(
 ): Promise<RenderedPage> {
   const page: PDFPageProxy = await doc.getPage(pageNumber);
 
+  // FIX-HIGHLIGHT-OFFSET (3.1): the outer `.pdf-page` wrapper now holds a
+  // separate page HEADER ("- Page N") ABOVE a dedicated inner STAGE. All
+  // overlays (highlights, area boxes, return flashes) position against the
+  // STAGE, never the header-bearing wrapper, so a highlight sits over the real
+  // glyphs instead of floating near the top of the wrapper under the header.
   const container = document.createElement("div");
   container.className = "pdf-page";
   container.style.position = "relative";
   mount.appendChild(container);
 
+  const header = document.createElement("div");
+  header.className = "pdf-page-header";
+  header.dataset.testid = "pdf-page-header";
+  header.setAttribute("data-testid", "pdf-page-header");
+  // ' - Page N' (plain hyphen, NOT an em dash).
+  header.textContent = ` - Page ${pageNumber}`;
+  container.appendChild(header);
+
+  const stage = document.createElement("div");
+  stage.className = "pdf-page-stage";
+  stage.setAttribute("data-testid", "pdf-page-stage");
+  // The stage establishes the positioning context + exact viewport box; canvas,
+  // text layer and overlays all live inside it.
+  stage.style.position = "relative";
+  container.appendChild(stage);
+
   const canvas = document.createElement("canvas");
   canvas.style.display = "block";
-  container.appendChild(canvas);
+  stage.appendChild(canvas);
 
   const textLayer = document.createElement("div");
   textLayer.className = "textLayer";
-  // The pdf.js TextLayer positions absolutely-placed spans; the container must
+  // The pdf.js TextLayer positions absolutely-placed spans; the stage must
   // establish the positioning context and overlay exactly on the canvas.
   Object.assign(textLayer.style, {
     position: "absolute",
@@ -97,7 +130,7 @@ export async function renderPage(
     // see and select it, matching how pdf.js overlays text on the canvas.
     color: "transparent",
   } satisfies Partial<CSSStyleDeclaration>);
-  container.appendChild(textLayer);
+  stage.appendChild(textLayer);
 
   const textContent = await page.getTextContent();
 
@@ -108,13 +141,16 @@ export async function renderPage(
     canvas.height = Math.floor(viewport.height * ratio);
     canvas.style.width = `${Math.floor(viewport.width)}px`;
     canvas.style.height = `${Math.floor(viewport.height)}px`;
-    container.style.width = `${Math.floor(viewport.width)}px`;
-    container.style.height = `${Math.floor(viewport.height)}px`;
+    // The STAGE is sized to the exact viewport box (the overlay positioning
+    // context). The outer wrapper sizes to its content (header + stage) so it
+    // never becomes the overlay box.
+    stage.style.width = `${Math.floor(viewport.width)}px`;
+    stage.style.height = `${Math.floor(viewport.height)}px`;
     // pdf.js TextLayer positions its spans using the `--scale-factor` CSS var
     // on the containing element. Without it the text divs do NOT track the
     // canvas across zoom, which would break anchor stability. Set it on both
-    // the page container and the text layer so geometry stays consistent.
-    container.style.setProperty("--scale-factor", String(renderScale));
+    // the stage and the text layer so geometry stays consistent.
+    stage.style.setProperty("--scale-factor", String(renderScale));
     textLayer.style.setProperty("--scale-factor", String(renderScale));
 
     const ctx = canvas.getContext("2d")!;
@@ -170,13 +206,18 @@ export async function renderPage(
     canvas,
     textLayer,
     container,
+    stage,
+    textItemCount: textContent.items.length,
     // The DOM-derived page text (what resolve matches against). Prefer the
     // live DOM text so offsets are internally consistent with client rects.
     get pageText() {
       return buildGlyphMap().text;
     },
     pageBox(): PageBox {
-      const r = container.getBoundingClientRect();
+      // FIX-HIGHLIGHT-OFFSET (3.1): measure the STAGE, not the outer wrapper
+      // that also contains the page header, so normalized rects map to the
+      // glyph region exactly.
+      const r = stage.getBoundingClientRect();
       return { left: r.left, top: r.top, width: r.width, height: r.height };
     },
     rangeToClientRects(start: number, end: number): DOMRect[] {

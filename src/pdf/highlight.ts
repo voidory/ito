@@ -31,6 +31,14 @@ export interface OverlayOptions {
   readonly annotationId: string;
   /** A whole-page BORDER style (range annotations) instead of a line hug. */
   readonly pageBorder?: boolean;
+  /**
+   * M6 (D01) a rectangular AREA box drawn from a single normalized rect, shown
+   * with a labeled region border. Mutually exclusive with pageBorder; the
+   * single rect comes through `rects[0]`.
+   */
+  readonly areaBox?: boolean;
+  /** M6 (D01) label text shown on an area box. */
+  readonly areaLabel?: string;
 }
 
 /** CSS color per named highlight color. */
@@ -88,7 +96,43 @@ export function renderHighlightOverlay(
   const animate = opts.animate && !reducedMotion(opts.suppressMotion);
   const cssColor = COLOR_CSS[opts.color] ?? COLOR_CSS["yellow"]!;
 
-  if (opts.pageBorder) {
+  if (opts.areaBox && opts.rects[0]) {
+    container.dataset.area = "true";
+    const r = opts.rects[0];
+    const box = document.createElement("div");
+    box.className = "ito-highlight-area";
+    Object.assign(box.style, {
+      position: "absolute",
+      left: `${r.x * 100}%`,
+      top: `${r.y * 100}%`,
+      width: `${r.width * 100}%`,
+      height: `${r.height * 100}%`,
+      border: `2px solid ${solidify(opts.color)}`,
+      background: cssColor,
+      borderRadius: "4px",
+      pointerEvents: "auto",
+      boxSizing: "border-box",
+    } satisfies Partial<CSSStyleDeclaration>);
+    if (opts.areaLabel) {
+      const label = document.createElement("span");
+      label.className = "ito-highlight-area-label";
+      label.textContent = opts.areaLabel;
+      Object.assign(label.style, {
+        position: "absolute",
+        left: "0",
+        top: "-1.1em",
+        fontSize: "0.7rem",
+        color: solidify(opts.color),
+        background: "rgba(255,255,255,0.85)",
+        padding: "0 0.2rem",
+        borderRadius: "3px",
+        whiteSpace: "nowrap",
+        pointerEvents: "none",
+      } satisfies Partial<CSSStyleDeclaration>);
+      box.appendChild(label);
+    }
+    container.appendChild(box);
+  } else if (opts.pageBorder) {
     const border = document.createElement("div");
     border.className = "ito-highlight-border";
     Object.assign(border.style, {
@@ -135,8 +179,17 @@ export function renderHighlightOverlay(
     });
   }
 
-  // Overlay goes FIRST so it sits beneath the (later-appended) text layer.
-  layer.insertBefore(container, layer.firstChild);
+  // The overlay must sit ABOVE the opaque canvas but BENEATH the transparent
+  // text layer so glyphs stay legible + selectable. When drawn into the stage
+  // (which holds canvas, then overlays, then .textLayer), insert the overlay
+  // just before the text layer; otherwise fall back to first-child (legacy
+  // text-layer host) so it still sits beneath the text spans.
+  const textLayerEl = layer.querySelector(":scope > .textLayer");
+  if (textLayerEl) {
+    layer.insertBefore(container, textLayerEl);
+  } else {
+    layer.insertBefore(container, layer.firstChild);
+  }
   return container;
 }
 

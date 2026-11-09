@@ -32,6 +32,7 @@ import {
   relationshipEndpoints,
   type Annotation,
   type AnnotationId,
+  type AnnotationScope,
   type AnnotationStyleRecord,
   type AnchorResolution,
   type AssetIndexEntry,
@@ -92,6 +93,7 @@ import {
   commitStagedImport as commitStagedImportCodec,
   sha256Hex,
   strToU8,
+  parseZoteroBundle,
   type BackupOptions,
   type IngestOptions,
   type StagedImport,
@@ -101,6 +103,43 @@ import {
 /** An empty subject-page composition: one empty paragraph (never null). */
 function emptyDocJson(): DocumentJson {
   return { type: "doc", content: [{ type: "paragraph" }] };
+}
+
+/**
+ * Sanitize a website snapshot's bytes at import time (A15, D11). Decodes as
+ * UTF-8, strips script/style blocks, inline event handlers, and javascript:
+ * URLs, then re-encodes. Pure + DOM-free so it runs in the headless workbench.
+ */
+function sanitizeSnapshotBytes(bytes: Uint8Array): Uint8Array {
+  const html = new TextDecoder().decode(bytes);
+  const clean = html
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/\son\w+\s*=\s*"[^"]*"/gi, "")
+    .replace(/\son\w+\s*=\s*'[^']*'/gi, "")
+    .replace(/javascript:/gi, "");
+  return new TextEncoder().encode(clean);
+}
+
+/**
+ * The quoted-text snapshot for an annotation, used when citing it into a
+ * subject page. Text annotations quote their selection; range annotations
+ * quote their pp. label; M6 (D01) area annotations quote the comment or a
+ * default "Area on p. N" label (the box has no selectable text).
+ */
+function quotedTextForScope(annotation: Annotation): string {
+  switch (annotation.scope.kind) {
+    case "text":
+      return annotation.scope.anchor.selectedText;
+    case "pages":
+      return `pp. ${annotation.scope.anchor.startPageIndex + 1}-${
+        annotation.scope.anchor.endPageIndex + 1
+      }`;
+    case "area":
+      return (
+        annotation.comment || `Area on p. ${annotation.scope.anchor.pageIndex + 1}`
+      );
+  }
 }
 
 /**
@@ -632,6 +671,257 @@ export class Workbench {
     const source = this.data.sources.find((s) => s.id === sourceId);
     if (!source) return null;
     return this.storage.readAsset(this.data.manifest.brainId, source.assetId);
+  }
+
+  /**
+   * M3 v2 backfill (spec 3.1 / D01): set a Source's `pageCount` ONLY when the
+   * stored value is 0. The batch ingest queue (enqueuePdfBinaries) is pure /
+   * DOM-free and cannot run pdf.js, so a freshly CREATED source lands with
+   * pageCount 0; the Reader runs pdf.js and calls this once `doc.numPages` is
+   * known to fill the real count. A no-op for an unknown source, a non-zero
+   * stored count (never clobbers a real count), or a non-positive input.
+   */
+  async updateSourcePageCount(sourceId: SourceId, pageCount: number): Promise<void> {
+    const idx = this.data.sources.findIndex((s) => s.id === sourceId);
+    if (idx < 0) return;
+    const source = this.data.sources[idx]!;
+    if (source.pageCount !== 0) return;
+    if (!Number.isFinite(pageCount) || pageCount <= 0) return;
+    const sources = this.data.sources.slice();
+    sources[idx] = { ...source, pageCount };
+    this.data = { ...this.data, sources };
+    await this.persist();
+  }
+
+  /**
+   * M6 (A15, D11) import a WEBSITE source. REQUIRES both a URL and a snapshot
+   * file (the sanitized HTML/markdown/text); a URL-only import is rejected (the
+   * Library modal enforces this too). The snapshot bytes are stored via the
+   * StorageAdapter exactly like a PDF binary, the Source is tagged
+   * kind/type "website" with availabilityStatus "snapshot-cached", and the URL
+   * is recorded. Importing a website creates NO Page/Relationship/Category —
+   * only a Source + an asset blob, like importSource. Persists once.
+   */
+  async importWebsiteSource(params: {
+    title?: string;
+    url: string;
+    snapshot: Uint8Array;
+    category?: string;
+  }): Promise<Source> {
+    const url = params.url?.trim() ?? "";
+    if (url === "") {
+      throw new Error("importWebsiteSource: a URL is required");
+    }
+    if (!params.snapshot || params.snapshot.byteLength === 0) {
+      throw new Error("importWebsiteSource: a snapshot file is required");
+    }
+    // Sanitize the snapshot at import time (defense in depth; the reader also
+    // sanitizes at render time). Strips script/style blocks, inline event
+    // handlers, and javascript: URLs so a stored snapshot can never execute.
+    const sanitized = sanitizeSnapshotBytes(params.snapshot);
+    const assetId = newAssetId();
+    const versionHash = await sha256Hex(sanitized);
+    const source: Source = {
+      id: newSourceId(),
+      kind: "website",
+      type: "website",
+      title: params.title?.trim() || url,
+      assetId,
+      versionHash,
+      url,
+      availabilityStatus: "snapshot-cached",
+      // A website renders as a single scrollable snapshot: one logical page.
+      pageCount: 1,
+      importedAt: new Date().toISOString(),
+      category: params.category ?? "Websites",
+    };
+    await this.storage.writeAsset(this.data.manifest.brainId, assetId, sanitized);
+    this.data = {
+      ...this.data,
+      sources: [...this.data.sources, source],
+      manifest: {
+        ...this.data.manifest,
+        assetIndex: [
+          ...this.data.manifest.assetIndex,
+          {
+            assetId,
+            contentType: "text/html",
+            byteLength: sanitized.byteLength,
+            contentHash: versionHash,
+          },
+        ],
+      },
+    };
+    await this.persist();
+    return source;
+  }
+
+  /**
+   * M6 (D01) commit a rectangular AREA annotation over one page. Produces an
+   * Annotation whose scope.kind is "area" (the spec's `Annotation.kind =
+   * "area"`) with an EMPTY comment unless provided, and NO node/page/category.
+   * The area is citable into Subject Pages via the ordinary evidence path
+   * (insertEvidenceIntoPage). Persists once. Throws for an unknown source.
+   */
+  async commitAreaAnnotation(
+    sourceId: SourceId,
+    pageIndex: number,
+    rect: NormalizedRect,
+    comment?: string,
+  ): Promise<AnnotationView> {
+    const source = this.data.sources.find((s) => s.id === sourceId);
+    if (!source) throw new Error("commitAreaAnnotation: unknown source");
+    const now = new Date().toISOString();
+    const annotation: Annotation = {
+      id: newAnnotationId(),
+      sourceId,
+      scope: {
+        kind: "area",
+        anchor: {
+          docId: sourceId,
+          sourceVersionHash: source.versionHash,
+          pageIndex,
+          rect,
+        },
+      },
+      resolution: { kind: "resolved" },
+      comment: comment ?? "",
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.data = {
+      ...this.writeStyle(this.data, annotation.id, DEFAULT_STYLE),
+      annotations: [...this.data.annotations, annotation],
+    };
+    await this.persist();
+    return this.viewFor(annotation.id)!;
+  }
+
+  /**
+   * M6 (A24, D10) import a Zotero bundle (Zotero JSON / BetterBibTeX JSON / RDF
+   * annotation bundle). Parent items map to Sources (externalId) and
+   * highlights/notes to source-local Annotations (externalId). The import is
+   * IDEMPOTENT: it matches existing records on `externalId` and updates them in
+   * place, so re-importing the same bundle produces ZERO duplicate Source or
+   * Annotation records and ZERO auto-created graph nodes (pages, relationships,
+   * categories are untouched). Persists once. Returns a small summary.
+   */
+  async importZoteroBundle(
+    rawJson: string,
+  ): Promise<{ sourcesAdded: number; sourcesUpdated: number; annotationsAdded: number; annotationsUpdated: number }> {
+    const parsed = parseZoteroBundle(rawJson);
+    const now = new Date().toISOString();
+
+    const sources = this.data.sources.slice();
+    const annotations = this.data.annotations.slice();
+    const assetIndex = this.data.manifest.assetIndex.slice();
+    let sourcesAdded = 0;
+    let sourcesUpdated = 0;
+    let annotationsAdded = 0;
+    let annotationsUpdated = 0;
+
+    // Map external source id -> live SourceId (existing or newly created).
+    const sourceIdByExternal = new Map<string, SourceId>();
+    for (const s of sources) {
+      if (s.externalId != null) sourceIdByExternal.set(s.externalId, s.id);
+    }
+
+    for (const item of parsed.sources) {
+      const existingId = sourceIdByExternal.get(item.externalId);
+      if (existingId != null) {
+        // Update in place: refresh title/url, keep the same id + assetId.
+        const idx = sources.findIndex((s) => s.id === existingId);
+        if (idx >= 0) {
+          sources[idx] = {
+            ...sources[idx]!,
+            title: item.title || sources[idx]!.title,
+            ...(item.url != null ? { url: item.url } : {}),
+          };
+          sourcesUpdated += 1;
+        }
+        continue;
+      }
+      // A Zotero parent item carries no binary; it still needs an assetId for
+      // the Source shape. We create a stable empty asset entry (no bytes
+      // written) so the record is well-formed; the PDF can be attached later.
+      const assetId = newAssetId();
+      const newSource: Source = {
+        id: newSourceId(),
+        kind: "pdf",
+        title: item.title || item.externalId,
+        assetId,
+        versionHash: "",
+        pageCount: 0,
+        importedAt: now,
+        category: item.category ?? "Zotero",
+        externalId: item.externalId,
+        ...(item.url != null ? { url: item.url } : {}),
+      };
+      sources.push(newSource);
+      assetIndex.push({
+        assetId,
+        contentType: "application/pdf",
+        byteLength: 0,
+        contentHash: "",
+      });
+      sourceIdByExternal.set(item.externalId, newSource.id);
+      sourcesAdded += 1;
+    }
+
+    // Index existing annotations by externalId for idempotent updates.
+    const annIdxByExternal = new Map<string, number>();
+    annotations.forEach((a, i) => {
+      if (a.externalId != null) annIdxByExternal.set(a.externalId, i);
+    });
+
+    for (const ann of parsed.annotations) {
+      const liveSourceId = sourceIdByExternal.get(ann.sourceExternalId);
+      if (liveSourceId == null) continue; // orphan annotation: no parent item
+      const source = sources.find((s) => s.id === liveSourceId)!;
+      const scope: AnnotationScope = {
+        kind: "area",
+        anchor: {
+          docId: liveSourceId,
+          sourceVersionHash: source.versionHash,
+          pageIndex: ann.pageIndex,
+          rect: ann.rect,
+        },
+      };
+      const existingIdx = annIdxByExternal.get(ann.externalId);
+      if (existingIdx != null) {
+        annotations[existingIdx] = {
+          ...annotations[existingIdx]!,
+          sourceId: liveSourceId,
+          scope,
+          comment: ann.comment,
+          updatedAt: now,
+        };
+        annotationsUpdated += 1;
+      } else {
+        const created: Annotation = {
+          id: newAnnotationId(),
+          sourceId: liveSourceId,
+          scope,
+          resolution: { kind: "resolved" },
+          comment: ann.comment,
+          createdAt: now,
+          updatedAt: now,
+          externalId: ann.externalId,
+        };
+        annotations.push(created);
+        annIdxByExternal.set(ann.externalId, annotations.length - 1);
+        annotationsAdded += 1;
+      }
+    }
+
+    this.data = {
+      ...this.data,
+      sources,
+      annotations,
+      manifest: { ...this.data.manifest, assetIndex },
+    };
+    await this.persist();
+    return { sourcesAdded, sourcesUpdated, annotationsAdded, annotationsUpdated };
   }
 
   // -- offline-first binary eviction (A17) ----------------------------------
@@ -1187,9 +1477,9 @@ export class Workbench {
       if (!annotation) continue;
       if (!this.openSourceIds.includes(annotation.sourceId)) continue;
       const sourcePageIndex =
-        annotation.scope.kind === "text"
-          ? annotation.scope.anchor.pageIndex
-          : annotation.scope.anchor.startPageIndex;
+        annotation.scope.kind === "pages"
+          ? annotation.scope.anchor.startPageIndex
+          : annotation.scope.anchor.pageIndex;
       lines.push({
         evidenceId: ev.id,
         annotationId: annotation.id,
@@ -1562,6 +1852,28 @@ export class Workbench {
         mode,
       };
     }
+    if (annotation.scope.kind === "area") {
+      // Area annotation: synthesize a minimal text anchor whose page + rect
+      // come from the area box so source-return navigates to the right page.
+      const a = annotation.scope.anchor;
+      const synthetic: TextAnchor = {
+        docId: a.docId,
+        sourceVersionHash: a.sourceVersionHash,
+        pageIndex: a.pageIndex,
+        rects: [a.rect],
+        selectedText: quotedTextForScope(annotation),
+        prefix: "",
+        suffix: "",
+      };
+      return {
+        evidenceId,
+        sourceId: annotation.sourceId,
+        annotationId: annotation.id,
+        quotedText: synthetic.selectedText,
+        anchor: synthetic,
+        mode,
+      };
+    }
     // Range annotation: synthesize a minimal text anchor so the node's attr
     // shape is uniform. Source-return for a range navigates to its first page.
     const a = annotation.scope.anchor;
@@ -1613,12 +1925,7 @@ export class Workbench {
       id: newEvidenceInstanceId(),
       annotationId,
       destinationPageId,
-      quotedText:
-        annotation.scope.kind === "text"
-          ? annotation.scope.anchor.selectedText
-          : `pp. ${annotation.scope.anchor.startPageIndex + 1}-${
-              annotation.scope.anchor.endPageIndex + 1
-            }`,
+      quotedText: quotedTextForScope(annotation),
       createdAt: new Date().toISOString(),
     };
 
@@ -2186,6 +2493,9 @@ export class Workbench {
    */
   private annotationAnchorText(annotation: Annotation): string {
     if (annotation.scope.kind === "text") return annotation.scope.anchor.selectedText;
+    if (annotation.scope.kind === "area") {
+      return `Area on p. ${annotation.scope.anchor.pageIndex + 1}`;
+    }
     const a = annotation.scope.anchor;
     return `pp. ${a.startPageIndex + 1}-${a.endPageIndex + 1}`;
   }

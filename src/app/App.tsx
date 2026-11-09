@@ -224,6 +224,7 @@ export function App(): JSX.Element {
                 wb.openTogether(ids);
                 bump();
               }}
+              onImported={() => bump()}
             />
           ) : (
             <Reader

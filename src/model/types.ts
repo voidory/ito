@@ -122,13 +122,28 @@ export type AnchorResolution =
 // Source (spec section 20)
 // ---------------------------------------------------------------------------
 
-export type SourceKind = "pdf";
+/**
+ * M6 (A15, A24) a source is now either an imported "pdf" OR a snapshot
+ * "website". The kind stays the primary discriminator; the optional `type`
+ * alias (also "pdf"|"website") exists only because the spec's wording for the
+ * website feature is `Source.type = "website"`. Both are kept in sync by the
+ * workbench; `kind` remains the canonical field every reader already uses.
+ */
+export type SourceKind = "pdf" | "website";
+
+/**
+ * M6 (A15, D11) local availability of a source's rendered payload. A PDF whose
+ * bytes are present is implicitly available; a snapshot website carries
+ * "snapshot-cached" so the Reader can show a provenance badge explaining the
+ * live URL is NOT fetched (the stored snapshot is the source of truth).
+ */
+export type SourceAvailabilityStatus = "snapshot-cached";
 
 export interface Source {
   readonly id: SourceId;
   readonly kind: SourceKind;
   readonly title: string;
-  /** Id of the stored binary asset (the PDF bytes). */
+  /** Id of the stored binary asset (the PDF bytes, or the website snapshot). */
   readonly assetId: AssetId;
   readonly versionHash: SourceVersionHash;
   readonly pageCount: number;
@@ -139,6 +154,22 @@ export interface Source {
    * never a Page — importing or categorizing a source creates no graph content.
    */
   readonly category: string;
+  /**
+   * M6 (A15) optional alias of `kind` mirroring the spec's `Source.type`
+   * wording. Optional/additive so existing PDF sources (which only carry
+   * `kind`) read fine; the workbench keeps it equal to `kind` when it is set.
+   */
+  readonly type?: SourceKind;
+  /** M6 (A15, D11) original website URL for a snapshot source. Optional. */
+  readonly url?: string;
+  /** M6 (D11) local availability status (e.g. "snapshot-cached"). Optional. */
+  readonly availabilityStatus?: SourceAvailabilityStatus;
+  /**
+   * M6 (A24, D10) stable external identifier when the source was imported from
+   * an external library (Zotero item key). Importing matches on this id so a
+   * re-import updates the record in place instead of duplicating it. Optional.
+   */
+  readonly externalId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -146,12 +177,27 @@ export interface Source {
 // ---------------------------------------------------------------------------
 
 /**
- * An annotation scope is EITHER a text-level selection OR a multi-page range.
- * Discriminated so callers must handle both.
+ * M6 (D01) a rectangular AREA anchor: a single normalized rect on one page,
+ * used for area annotations over scanned/image PDF content that has no
+ * selectable text layer. It is DOM-independent like the other anchors.
+ */
+export interface AreaAnchor {
+  readonly docId: SourceId;
+  readonly sourceVersionHash: SourceVersionHash;
+  readonly pageIndex: number;
+  readonly rect: NormalizedRect;
+}
+
+/**
+ * An annotation scope is a text-level selection, a multi-page range, OR (M6,
+ * D01) a rectangular AREA on a single page. Discriminated so callers must
+ * handle each; the `area` variant is additive so existing text/pages data
+ * still typechecks.
  */
 export type AnnotationScope =
   | { readonly kind: "text"; readonly anchor: TextAnchor }
-  | { readonly kind: "pages"; readonly anchor: ScopeAnchor };
+  | { readonly kind: "pages"; readonly anchor: ScopeAnchor }
+  | { readonly kind: "area"; readonly anchor: AreaAnchor };
 
 export interface Annotation {
   readonly id: AnnotationId;
@@ -163,6 +209,12 @@ export interface Annotation {
   readonly comment: string;
   readonly createdAt: Timestamp;
   readonly updatedAt: Timestamp;
+  /**
+   * M6 (A24, D10) stable external identifier when the annotation was imported
+   * from an external library (Zotero highlight/note key). Importing matches on
+   * this id so a re-import updates in place rather than duplicating. Optional.
+   */
+  readonly externalId?: string;
 }
 
 // ---------------------------------------------------------------------------
