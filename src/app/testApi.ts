@@ -10,7 +10,13 @@
  * ordinary selection→toolbar path runs exactly as a human's would.
  */
 
-import type { AnnotationId, PageId, SourceId } from "../model";
+import type {
+  AnnotationId,
+  PageId,
+  RelationshipId,
+  RelationshipKind,
+  SourceId,
+} from "../model";
 import {
   hydrateState,
   outline,
@@ -77,6 +83,34 @@ interface ItoTestApi {
   categories(): string[];
   /** Count of Page + Relationship + Category records (invariant probe). */
   graphRecordCount(): { pages: number; relationships: number; categories: number };
+  /** The derived concept-network graph snapshot (nodes/links/categories). */
+  conceptGraph(): {
+    nodes: { pageId: string; title: string; hidden: boolean }[];
+    links: {
+      relationshipId: string;
+      endpointPageIds: string[];
+      topology: string;
+      blendColor: string;
+      hidden: boolean;
+    }[];
+    categories: { categoryId: string; name: string; colorCode: string }[];
+  };
+  /** Count of non-hidden pages participating in the network (§3.4). */
+  activeNodeCount(): number;
+  /** Whether the 3D presentation is unlocked (activeNodeCount >= 35). */
+  is3DUnlocked(): boolean;
+  /** Set the active-3D flag (presentation only). */
+  setActive3D(on: boolean): Promise<void>;
+  /** The transient N06 "not connected yet" placeholder for a source id. */
+  nodePlaceholderFor(sourceId: string): { sourceId: string; title: string; transient: boolean };
+  /** Create a category with a watercolor color (test setup convenience). */
+  createCategory(name: string, colorCode?: string): Promise<string>;
+  /** Create a relationship across N>=2 endpoints; returns the relationship id. */
+  createRelationship(endpointPageIds: string[], kind?: string, label?: string): Promise<string>;
+  /** Hide a node (presentation only; never deletes the Page). */
+  hideNode(pageId: string): Promise<void>;
+  /** Hide a relationship (presentation only; never deletes the Relationship). */
+  hideRelationship(relationshipId: string): Promise<void>;
   /** Test-only: force the next N persist() calls to fail (R12). */
   forceNextSaveFailures(count: number): void;
   /** Test-only: drift a source's stored version hash to trigger A17 mismatch. */
@@ -256,6 +290,63 @@ export function installTestApi(wb: Workbench, bump: () => void): void {
         relationships: d.relationships.length,
         categories: d.categories.length,
       };
+    },
+    conceptGraph() {
+      const g = wb.conceptGraph();
+      return {
+        nodes: g.nodes.map((n) => ({
+          pageId: n.pageId,
+          title: n.title,
+          hidden: n.hidden,
+        })),
+        links: g.links.map((l) => ({
+          relationshipId: l.relationshipId,
+          endpointPageIds: [...l.endpointPageIds],
+          topology: l.topology,
+          blendColor: l.blendColor,
+          hidden: l.hidden,
+        })),
+        categories: g.categories.map((c) => ({
+          categoryId: c.categoryId,
+          name: c.name,
+          colorCode: c.colorCode,
+        })),
+      };
+    },
+    activeNodeCount() {
+      return wb.activeNodeCount();
+    },
+    is3DUnlocked() {
+      return wb.is3DUnlocked();
+    },
+    async setActive3D(on) {
+      await wb.setActive3D(on);
+      bump();
+    },
+    nodePlaceholderFor(sourceId) {
+      return wb.nodePlaceholderFor(sourceId);
+    },
+    async createCategory(name, colorCode) {
+      const category = await wb.createCategory(name, colorCode);
+      bump();
+      return category.id;
+    },
+    async createRelationship(endpointPageIds, kind, label) {
+      const rel = await wb.createRelationship(
+        endpointPageIds as PageId[],
+        (kind as RelationshipKind | undefined) ?? "relates",
+        label ?? "",
+      );
+      bump();
+      return rel.id;
+    },
+    async hideNode(pageId) {
+      await wb.hideNode(pageId as PageId);
+      bump();
+    },
+    async hideRelationship(relationshipId) {
+      await wb.hideRelationship(relationshipId as RelationshipId);
+      bump();
     },
     forceNextSaveFailures(count) {
       wb.forceNextSaveFailures(count);

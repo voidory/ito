@@ -14,26 +14,35 @@
  */
 
 import {
+  DEFAULT_CATEGORY_COLOR,
   createEmptyBrainData,
   deriveSubjectReferenceStatus,
   deriveSubjectReferences,
   newAnnotationId,
   newAssetId,
   newCaptureId,
+  newCategoryId,
   newEvidenceInstanceId,
   newPageId,
+  newRelationshipId,
   newSourceId,
   newSubjectAssociationId,
+  relationshipEndpoints,
   type Annotation,
   type AnnotationId,
   type AnchorResolution,
   type BrainData,
   type BrainId,
   type Capture,
+  type Category,
+  type CategoryId,
   type EvidenceInstance,
   type NormalizedRect,
   type Page,
   type PageId,
+  type Relationship,
+  type RelationshipId,
+  type RelationshipKind,
   type ScopeAnchor,
   type Source,
   type SourceId,
@@ -42,6 +51,7 @@ import {
   type SubjectReferenceStatus,
   type TextAnchor,
 } from "../model";
+import { deriveHubBlendColor } from "../network";
 import {
   appendEvidence,
   compositionStats,
@@ -225,6 +235,64 @@ export interface WorkbenchState {
   readonly categoryScope: string | null;
   /** Last save failure, if any; cleared on the next successful save. */
   readonly saveError: SaveError | null;
+}
+
+/**
+ * The node-count threshold at which the §3.4 density reward (3D presentation)
+ * unlocks. A named constant so the rule has ONE source of truth and the test
+ * asserts the exact boundary.
+ */
+export const THREE_D_UNLOCK_THRESHOLD = 35;
+
+/** A node in the derived concept-network graph (a page + its view state). */
+export interface ConceptNode {
+  readonly pageId: PageId;
+  readonly title: string;
+  readonly kind: Page["kind"];
+  /** True when the node is presentation-hidden (still a durable record). */
+  readonly hidden: boolean;
+  /** 2D canvas position if one has been laid out/dragged, else null. */
+  readonly position: { readonly x: number; readonly y: number } | null;
+}
+
+/** A link in the derived graph = one Relationship with its normalized endpoints. */
+export interface ConceptLink {
+  readonly relationshipId: RelationshipId;
+  readonly endpointPageIds: readonly PageId[];
+  readonly kind: RelationshipKind;
+  readonly label: string;
+  /** Lens for N=2, star for N>=3 (A13-M2). */
+  readonly topology: "lens" | "star";
+  /** Derived watercolor-multiply blend of endpoint category colors. */
+  readonly blendColor: string;
+  readonly hidden: boolean;
+}
+
+/** A category in the derived graph with its color + members. */
+export interface ConceptCategory {
+  readonly categoryId: CategoryId;
+  readonly name: string;
+  readonly colorCode: string;
+  readonly memberPageIds: readonly PageId[];
+}
+
+/** The full derived concept-network graph the view renders from. */
+export interface ConceptGraph {
+  readonly nodes: readonly ConceptNode[];
+  readonly links: readonly ConceptLink[];
+  readonly categories: readonly ConceptCategory[];
+}
+
+/**
+ * A TRANSIENT "Not connected yet" placeholder for a source node (N06). It is
+ * ephemeral: produced on demand, it creates NO Page/Relationship/Category and
+ * persists NOTHING. `transient: true` marks it so the view never mistakes it
+ * for a durable record.
+ */
+export interface NodePlaceholder {
+  readonly sourceId: string;
+  readonly title: string;
+  readonly transient: true;
 }
 
 /** Inputs for committing a text-level highlight/underline annotation. */
@@ -1090,6 +1158,328 @@ export class Workbench {
       this.data.subjectAssociations,
     );
     return { annotation, style, isRange, rangeLabel, references };
+  }
+
+  // -- concept network (M2, FEAT-003) ---------------------------------------
+
+  /** The effective color for a category (explicit colorCode or the default). */
+  private categoryColor(category: Category): string {
+    return category.colorCode ?? DEFAULT_CATEGORY_COLOR;
+  }
+
+  /**
+   * Create a category with a watercolor color. Creating a category is an
+   * explicit user action; it references pages by id and NEVER duplicates a
+   * Page. `colorCode` is persisted so the derived hub blendColor is stable.
+   */
+  async createCategory(
+    name: string,
+    colorCode: string = DEFAULT_CATEGORY_COLOR,
+    memberPageIds: readonly PageId[] = [],
+  ): Promise<Category> {
+    const category: Category = {
+      id: newCategoryId(),
+      name,
+      memberPageIds: [...memberPageIds],
+      createdAt: new Date().toISOString(),
+      colorCode,
+    };
+    this.data = { ...this.data, categories: [...this.data.categories, category] };
+    await this.persist();
+    return category;
+  }
+
+  /**
+   * Add a page to a category's membership (idempotent). Membership edits never
+   * embed a Page; they only change the set of member ids (A18 foundation).
+   */
+  async addPageToCategory(categoryId: CategoryId, pageId: PageId): Promise<void> {
+    const idx = this.data.categories.findIndex((c) => c.id === categoryId);
+    if (idx < 0) return;
+    const prev = this.data.categories[idx]!;
+    if (prev.memberPageIds.includes(pageId)) return;
+    const updated: Category = {
+      ...prev,
+      memberPageIds: [...prev.memberPageIds, pageId],
+    };
+    const categories = this.data.categories.slice();
+    categories[idx] = updated;
+    this.data = { ...this.data, categories };
+    await this.persist();
+  }
+
+  /** Remove a page from a category's membership. Never deletes the Page. */
+  async removePageFromCategory(categoryId: CategoryId, pageId: PageId): Promise<void> {
+    const idx = this.data.categories.findIndex((c) => c.id === categoryId);
+    if (idx < 0) return;
+    const prev = this.data.categories[idx]!;
+    if (!prev.memberPageIds.includes(pageId)) return;
+    const updated: Category = {
+      ...prev,
+      memberPageIds: prev.memberPageIds.filter((id) => id !== pageId),
+    };
+    const categories = this.data.categories.slice();
+    categories[idx] = updated;
+    this.data = { ...this.data, categories };
+    await this.persist();
+  }
+
+  /**
+   * The DISTINCT category colors spanned by a set of endpoint pages. Used to
+   * derive a relationship's blendColor. A page may belong to several
+   * categories; every such category contributes its color.
+   */
+  private endpointCategoryColors(endpointPageIds: readonly PageId[]): string[] {
+    const colors: string[] = [];
+    for (const category of this.data.categories) {
+      if (category.memberPageIds.some((id) => endpointPageIds.includes(id))) {
+        colors.push(this.categoryColor(category));
+      }
+    }
+    return colors;
+  }
+
+  /**
+   * Create a relationship ("Connecting Page") spanning N>=2 page endpoints. The
+   * N=2 case fills the degenerate `fromPageId`/`toPageId`; every case stores the
+   * explicit `endpointPageIds` so later reads go through one normalizer. The
+   * `blendColor` is DERIVED (watercolor-multiply of the endpoint categories'
+   * colors, §3.2) — never a hand-chosen value — so overlaps are always visually
+   * consistent. Persists through the adapter.
+   */
+  async createRelationship(
+    endpointPageIds: readonly PageId[],
+    kind: RelationshipKind = "relates",
+    label = "",
+  ): Promise<Relationship> {
+    if (endpointPageIds.length < 2) {
+      throw new Error("createRelationship: need at least 2 endpoints");
+    }
+    const blendColor = deriveHubBlendColor(this.endpointCategoryColors(endpointPageIds));
+    const relationship: Relationship = {
+      id: newRelationshipId(),
+      fromPageId: endpointPageIds[0]!,
+      toPageId: endpointPageIds[endpointPageIds.length - 1]!,
+      kind,
+      label,
+      createdAt: new Date().toISOString(),
+      endpointPageIds: [...endpointPageIds],
+      blendColor,
+    };
+    this.data = {
+      ...this.data,
+      relationships: [...this.data.relationships, relationship],
+    };
+    await this.persist();
+    return relationship;
+  }
+
+  /**
+   * The DERIVED concept-network graph the view renders from: nodes = pages
+   * (with hidden flag + laid-out position), links = relationships with their
+   * normalized endpoints + topology + derived blendColor, categories with their
+   * colors. Reading the graph derives everything live; it never mutates data.
+   */
+  conceptGraph(): ConceptGraph {
+    const presentation = this.data.presentation;
+    const hiddenPages = new Set<PageId>(presentation.hiddenPageIds);
+    const hiddenRels = new Set<RelationshipId>(presentation.hiddenRelationshipIds);
+    const positions = presentation.nodePositions ?? presentation.positions;
+
+    const nodes: ConceptNode[] = this.data.pages.map((page) => ({
+      pageId: page.id,
+      title: page.title,
+      kind: page.kind,
+      hidden: hiddenPages.has(page.id),
+      position: positions[page.id] ?? null,
+    }));
+
+    const links: ConceptLink[] = this.data.relationships.map((rel) => {
+      const endpoints = relationshipEndpoints(rel);
+      return {
+        relationshipId: rel.id,
+        endpointPageIds: endpoints,
+        kind: rel.kind,
+        label: rel.label,
+        topology: endpoints.length >= 3 ? "star" : "lens",
+        blendColor:
+          rel.blendColor ?? deriveHubBlendColor(this.endpointCategoryColors(endpoints)),
+        hidden: hiddenRels.has(rel.id),
+      };
+    });
+
+    const categories: ConceptCategory[] = this.data.categories.map((category) => ({
+      categoryId: category.id,
+      name: category.name,
+      colorCode: this.categoryColor(category),
+      memberPageIds: category.memberPageIds,
+    }));
+
+    return { nodes, links, categories };
+  }
+
+  // -- concept-network presentation-only transitions ------------------------
+
+  /**
+   * Set a node's durable 2D canvas position (laid-out or hand-dragged). This is
+   * PRESENTATION state: it never creates or deletes a Page/Relationship. Writes
+   * `nodePositions` (the M2 canvas map) and persists.
+   */
+  async setNodePosition(pageId: PageId, x: number, y: number): Promise<void> {
+    const nodePositions = {
+      ...(this.data.presentation.nodePositions ?? {}),
+      [pageId]: { x, y },
+    };
+    this.data = {
+      ...this.data,
+      presentation: { ...this.data.presentation, nodePositions },
+    };
+    await this.persist();
+  }
+
+  /**
+   * Set a node's user-dragged OFFSET relative to the engine layout. Durable
+   * presentation state (D19); survives a relayout. Never touches records.
+   */
+  async setDragOffset(pageId: PageId, x: number, y: number): Promise<void> {
+    const dragOffsets = {
+      ...(this.data.presentation.dragOffsets ?? {}),
+      [pageId]: { x, y },
+    };
+    this.data = {
+      ...this.data,
+      presentation: { ...this.data.presentation, dragOffsets },
+    };
+    await this.persist();
+  }
+
+  /** Set the canvas zoom scale (presentation only). */
+  async setZoom(zoom: number): Promise<void> {
+    this.data = {
+      ...this.data,
+      presentation: { ...this.data.presentation, zoom },
+    };
+    await this.persist();
+  }
+
+  /** Current canvas zoom scale (defaults to 1). */
+  zoom(): number {
+    return this.data.presentation.zoom ?? 1;
+  }
+
+  /**
+   * Hide a node. PRESENTATION ONLY: it adds the id to `hiddenPageIds` and NEVER
+   * deletes the Page (A09-M2 / the M1 non-destructive guarantee). Idempotent.
+   */
+  async hideNode(pageId: PageId): Promise<void> {
+    if (this.data.presentation.hiddenPageIds.includes(pageId)) return;
+    this.data = {
+      ...this.data,
+      presentation: {
+        ...this.data.presentation,
+        hiddenPageIds: [...this.data.presentation.hiddenPageIds, pageId],
+      },
+    };
+    await this.persist();
+  }
+
+  /** Un-hide a node (presentation only). */
+  async showNode(pageId: PageId): Promise<void> {
+    if (!this.data.presentation.hiddenPageIds.includes(pageId)) return;
+    this.data = {
+      ...this.data,
+      presentation: {
+        ...this.data.presentation,
+        hiddenPageIds: this.data.presentation.hiddenPageIds.filter((id) => id !== pageId),
+      },
+    };
+    await this.persist();
+  }
+
+  /**
+   * Hide a relationship. PRESENTATION ONLY: adds the id to
+   * `hiddenRelationshipIds` and NEVER deletes the Relationship. Idempotent.
+   */
+  async hideRelationship(relationshipId: RelationshipId): Promise<void> {
+    if (this.data.presentation.hiddenRelationshipIds.includes(relationshipId)) return;
+    this.data = {
+      ...this.data,
+      presentation: {
+        ...this.data.presentation,
+        hiddenRelationshipIds: [
+          ...this.data.presentation.hiddenRelationshipIds,
+          relationshipId,
+        ],
+      },
+    };
+    await this.persist();
+  }
+
+  /** Un-hide a relationship (presentation only). */
+  async showRelationship(relationshipId: RelationshipId): Promise<void> {
+    if (!this.data.presentation.hiddenRelationshipIds.includes(relationshipId)) return;
+    this.data = {
+      ...this.data,
+      presentation: {
+        ...this.data.presentation,
+        hiddenRelationshipIds: this.data.presentation.hiddenRelationshipIds.filter(
+          (id) => id !== relationshipId,
+        ),
+      },
+    };
+    await this.persist();
+  }
+
+  // -- density monitor (§3.4) ----------------------------------------------
+
+  /**
+   * The count of NON-hidden pages participating in the concept network. Pure
+   * getter: counts durable pages minus those presentation-hidden. Hiding a node
+   * lowers this (view state) without deleting anything.
+   */
+  activeNodeCount(): number {
+    const hidden = new Set<PageId>(this.data.presentation.hiddenPageIds);
+    return this.data.pages.filter((p) => !hidden.has(p.id)).length;
+  }
+
+  /**
+   * Whether the §3.4 density reward (3D presentation) is UNLOCKED: true once the
+   * active node count reaches THREE_D_UNLOCK_THRESHOLD (35).
+   */
+  is3DUnlocked(): boolean {
+    return this.activeNodeCount() >= THREE_D_UNLOCK_THRESHOLD;
+  }
+
+  /** Whether 3D presentation is currently active (user opt-in). */
+  active3D(): boolean {
+    return this.data.presentation.active3D ?? false;
+  }
+
+  /**
+   * Set the active-3D flag (presentation only). The view is responsible for
+   * only surfacing the toggle when `is3DUnlocked()`; this persists the choice.
+   */
+  async setActive3D(on: boolean): Promise<void> {
+    this.data = {
+      ...this.data,
+      presentation: { ...this.data.presentation, active3D: on },
+    };
+    await this.persist();
+  }
+
+  // -- N06 transient placeholder --------------------------------------------
+
+  /**
+   * Return a TRANSIENT "Not connected yet" placeholder for a source id (N06).
+   * This is pure/ephemeral: it creates NO Page/Relationship/Category and writes
+   * NOTHING to storage — mirroring the invariant that annotating/associating
+   * creates zero graph records. The returned descriptor is marked
+   * `transient: true` so the view never persists it.
+   */
+  nodePlaceholderFor(sourceId: string): NodePlaceholder {
+    const source = this.data.sources.find((s) => s.id === (sourceId as SourceId));
+    const title = source ? `${source.title} — not connected yet` : "Not connected yet";
+    return { sourceId, title, transient: true };
   }
 
   // -- persistence ----------------------------------------------------------

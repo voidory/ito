@@ -44,8 +44,8 @@ Last run on this working tree (all green):
 | ------------------------- | ------------------- | -------------------- |
 | TypeScript typecheck      | `npm run typecheck` | pass (0 errors)      |
 | Production build          | `npm run build`     | pass                 |
-| Unit / integration        | `npm run test`      | 63 passed / 8 files  |
-| Runtime (real browser)    | `npm run test:e2e`  | 29 passed / 5 specs  |
+| Unit / integration        | `npm run test`      | 122 passed / 15 files |
+| Runtime (real browser)    | `npm run test:e2e`  | 29 passed / 5 specs (sandbox: e2e deferred, see §9) |
 
 E2E specs: `e2e/ready.spec.ts` (boot), `e2e/pdf-anchor.spec.ts` (anchor
 round-trip spike), `e2e/reader-workbench.spec.ts` (M1 reading workbench),
@@ -173,24 +173,63 @@ edition yields an explicit `mismatched` state and never a silent navigation.
 
 ---
 
+## 8b. M2 concept-network foundation (FEAT-003) — data contract + headless transitions
+
+FEAT-003 delivers the TYPED, PERSISTED, TESTED foundation for the M2 concept
+network (no rendering yet — that is FEAT-004/005/006). It extends the section-20
+contract ADDITIVELY (SCHEMA_VERSION stays 1) and adds the headless Workbench
+transitions + density monitor. Rendering/interaction rows below marked `e2e`
+have their headless/pure logic proven in Vitest in the sandbox; the Playwright
+e2e is deferred to the publishing environment (see §9).
+
+| ID      | Requirement (summary)                                              | Status      | Kind       | Covering test |
+| ------- | ------------------------------------------------------------------ | ----------- | ---------- | ------------- |
+| A09-M2  | Graph `hide` is presentation-only; never deletes a Page/Relationship | implemented | unit       | `src/app/workbench.network.test.ts` "hiding a node/relationship is presentation-only" |
+| A13-M2  | N=2 lens vs N>=3 star hub topology derived from endpoints           | implemented | unit       | `workbench.network.test.ts` "relationship round-trip"; `src/model/relationship.test.ts`; `src/network/*` (FEAT-002) |
+| A14-M2  | Category watercolor colorCode persists; hub blendColor derived (§3.2) | implemented | unit       | `workbench.network.test.ts` "colorCode"/"blendColor is derived"; `src/network/blend.test.ts` |
+| N06-M2  | Transient "not connected yet" placeholder creates ZERO graph records | implemented | unit       | `workbench.network.test.ts` "N06 transient placeholder creates zero records" |
+| (§3.4)  | Density reward: 3D unlocks at 35 active nodes; opt-in flag durable   | implemented | unit       | `workbench.network.test.ts` "§3.4 density reward (3D unlock)" |
+
+Additive schema guarantees (ADR-0008, ADR-0009), proven in Vitest:
+
+| Capability                                                            | Status      | Covering test |
+| --------------------------------------------------------------------- | ----------- | ------------- |
+| `Relationship` gains optional N-endpoint `endpointPageIds` + derived hub fields | implemented | `src/model/relationship.test.ts`; `workbench.network.test.ts` |
+| One normalized `relationshipEndpoints(rel)` accessor (lens/star rule)  | implemented | `src/model/relationship.test.ts` |
+| `PresentationState` gains nodePositions/zoom/categoryBounds/active3D/dragOffsets (durable, D19) | implemented | `src/model/brain.test.ts`; `workbench.network.test.ts` "durable presentation state" |
+| v1 `Category`/`Relationship`/`PresentationState` still typecheck + load | implemented | `src/model/brain.test.ts` "additive schema — v1 shapes still typecheck" |
+| SCHEMA_VERSION stays 1 (no migration; M7 per ADR-0004)                 | implemented | `src/model/brain.test.ts`; `src/test/model.test.ts` |
+| `window.__ito` exposes conceptGraph/activeNodeCount/is3DUnlocked/nodePlaceholderFor | implemented | `src/app/testApi.ts` (drives the real Workbench; e2e deferred §9) |
+
+## 9. Sandbox verification note (M2)
+
+The Playwright Chromium binary CANNOT be downloaded in the build sandbox (the
+proxy returns HTTP 403 on the Playwright CDN), so `npm run test:e2e` cannot run
+here and its result above is the last recorded run from the publishing
+environment. FEAT-003 contains NO rendering and is fully verifiable headlessly:
+its gates `npm run typecheck`, `npm run test` (Vitest) and `npm run build` are
+all green in the sandbox. Every behaviour a later e2e spec will cover (hub
+topology, blend, hide, density threshold, N06 zero-record guarantee) has Vitest
+coverage of its headless/pure logic so correctness is proven without a browser.
+
 ## 8. Proposed next decisions (D-items)
 
 New decisions surfaced by FEAT-005 that should be recorded before the relevant
 milestone builds on them (numbering continues the decision log D01–D18):
 
-- **D19 — Pane-configuration persistence scope.** Pane width weights, line
-  visibility and category scope are currently SESSION view state (held on the
-  Workbench, preserved across in-session transitions, reset on reload). Decide
-  whether any of these should persist into `BrainData.presentation` across
-  reloads. Default proposal: keep them session-only until M5 ties layout to the
-  concept-network `PresentationState`, so reloading never resurrects a stale
-  layout. (relates R19, N08)
-- **D20 — Passage-to-evidence line routing at scale.** The current lines route
-  through the inter-pane gutter with cubic-Bézier paths re-computed on scroll /
-  zoom / resize. Decide the M2+ policy for many overlapping lines (bundling,
-  fade-on-density, hover-reveal) so readability holds at high evidence counts.
-  Default proposal: keep the simple always-on margin routing for M1 and revisit
-  with the graph work. (relates A08, section 10.2)
+- **D19 — Pane-configuration persistence scope. RESOLVED (M2, ADR-0009).** The
+  M1 reader-workbench view state (pane width weights, line visibility, category
+  scope) STAYS session-only. The M2 concept-network canvas state
+  (`nodePositions`, `dragOffsets`, `categoryBounds`, `zoom`, `active3D`) is
+  DURABLE in `BrainData.presentation`, because a hand-arranged graph is
+  content-adjacent work and losing it on reload would be a data-loss-like
+  surprise. See ADR-0009 §2. (relates R19, N08)
+- **D20 — Passage-to-evidence line routing at scale. ADDRESSED (M2, ADR-0008).**
+  The N-endpoint "Connecting Page" draws ONE hub glyph with N legs instead of
+  N·(N−1)/2 pairwise lines, reducing clutter structurally; ADR-0008 fixes the
+  DATA shape. The M1 inter-pane passage lines keep their simple always-on margin
+  routing; detailed density treatments (bundling, fade, hover-reveal) remain a
+  FEAT-005/006 rendering concern under D20. (relates A08, section 10.2, §3.1)
 - **D21 — Narrow-screen flow beyond the stub.** The responsive stub is a
   documented placeholder. Decide the real mobile composition flow (tabbed panes,
   bottom-sheet editor, or deferred to a packaged app) at M7 hardening. (relates

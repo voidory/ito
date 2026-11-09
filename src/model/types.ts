@@ -229,17 +229,45 @@ export interface Page {
  * A category groups pages. It references member pages by id only; it NEVER
  * embeds or duplicates a Page. A page id may appear in many categories, but
  * the page itself exists in exactly one place.
+ *
+ * `colorCode` is the category's watercolor hex pigment (§3.2); it drives the
+ * multiplicative `blendColor` derived for any Relationship/hub whose endpoints
+ * span this category. `presentationOrder` is an OPTIONAL view ordering hint
+ * (lower sorts first) — it is layout presentation, never a change to the
+ * durable set of member pages. Both are additive: v1 brains without them read
+ * fine because `colorCode` gets a default in brain.ts and the workbench, and
+ * `presentationOrder` is optional. (ADR-0008.)
  */
 export interface Category {
   readonly id: CategoryId;
   readonly name: string;
   readonly memberPageIds: readonly PageId[];
   readonly createdAt: Timestamp;
+  /** Watercolor hex pigment for this category (e.g. "#ffcc00"). */
+  readonly colorCode?: string;
+  /** Optional presentation ordering hint; lower sorts first. View-only. */
+  readonly presentationOrder?: number;
 }
 
 export type RelationshipKind = "relates" | "supports" | "contradicts" | "derives";
 
-/** A directed edge between two pages in the concept network. */
+/**
+ * A relationship in the concept network. Historically (M1) this was a DIRECTED
+ * 2-page edge via `fromPageId`/`toPageId`. M2 reconciles that with the N>=3
+ * star-hub "Connecting Page" (§3.1, A13-M2) ADDITIVELY: a relationship may now
+ * carry `endpointPageIds` listing N>=2 page endpoints. The 2-page edge is the
+ * DEGENERATE case — when `endpointPageIds` is absent, the endpoints are exactly
+ * `[fromPageId, toPageId]` (which still render as a lens; N>=3 renders as the
+ * arched star). Always read endpoints through `relationshipEndpoints(rel)` so
+ * the rest of the app has ONE normalized accessor (see citation/index barrel).
+ *
+ * `hubPosition` and `blendColor` are DERIVED, cached presentation hints: the
+ * hub centroid in 2D canvas coords and the watercolor-multiply of the endpoint
+ * categories' colors (`deriveHubBlendColor`, §3.2). They are optional because
+ * they are recomputable from positions + category colors; storing them is a
+ * cache, not a source of truth. All new fields are optional/readonly so v1 data
+ * loads with no migration and SCHEMA_VERSION stays 1 (ADR-0008, ADR-0004/M7).
+ */
 export interface Relationship {
   readonly id: RelationshipId;
   readonly fromPageId: PageId;
@@ -247,6 +275,15 @@ export interface Relationship {
   readonly kind: RelationshipKind;
   readonly label: string;
   readonly createdAt: Timestamp;
+  /**
+   * Optional N>=2 endpoint representation for the Connecting Page. When absent,
+   * endpoints are the 2-page degenerate case `[fromPageId, toPageId]`.
+   */
+  readonly endpointPageIds?: readonly PageId[];
+  /** Derived, cached hub centroid in 2D canvas coords (recomputable). */
+  readonly hubPosition?: { readonly x: number; readonly y: number };
+  /** Derived, cached watercolor-multiply of the endpoint categories' colors. */
+  readonly blendColor?: string;
 }
 
 /**
@@ -285,12 +322,54 @@ export interface Revision {
 /**
  * Presentation-only state for the concept network. Hiding a node or edge is a
  * VIEW operation and never deletes the underlying Page / Relationship.
+ *
+ * M2 (ADR-0009) expands this with the concept-network canvas view state. The
+ * persistence scope of each field is resolved by D19:
+ *
+ *  - `positions` (M1) and `nodePositions` are the DURABLE laid-out 2D canvas
+ *    coordinates keyed by page id. `positions` is kept for back-compat;
+ *    `nodePositions` is the M2 name used by the network canvas and carries the
+ *    same shape. A reader may hand-drag a node; the drag result lives in
+ *    `nodePositions` so re-opening restores the arrangement.
+ *  - `dragOffsets` are per-node user nudges relative to the engine layout —
+ *    durable so a user's manual tweaks survive a relayout.
+ *  - `categoryBounds` are the squircle boundary ellipses per category id
+ *    (durable, recomputable from members but cached for stable framing).
+ *  - `zoom` is the durable canvas zoom scale.
+ *  - `active3D` is the §3.4 density-reward flag (durable) — whether the user
+ *    has opted into the 3D presentation once it is unlocked.
+ *
+ * Every new field is OPTIONAL so a v1 `PresentationState` (only
+ * hiddenPageIds/hiddenRelationshipIds/positions) still typechecks and loads
+ * with no migration; brain.ts seeds the sensible defaults.
  */
 export interface PresentationState {
   readonly hiddenPageIds: readonly PageId[];
   readonly hiddenRelationshipIds: readonly RelationshipId[];
-  /** Optional saved layout positions, keyed by page id. */
+  /** Optional saved layout positions, keyed by page id (M1 name). */
   readonly positions: Readonly<Record<string, { readonly x: number; readonly y: number }>>;
+  /**
+   * M2 concept-network 2D canvas coordinates keyed by page id. Same shape as
+   * `positions`; the network canvas reads/writes this one.
+   */
+  readonly nodePositions?: Readonly<
+    Record<string, { readonly x: number; readonly y: number }>
+  >;
+  /** Canvas zoom scale (1 = default). Durable. */
+  readonly zoom?: number;
+  /** Squircle boundary ellipse per category id (cx,cy center; rx,ry radii). */
+  readonly categoryBounds?: Readonly<
+    Record<
+      string,
+      { readonly cx: number; readonly cy: number; readonly rx: number; readonly ry: number }
+    >
+  >;
+  /** §3.4 density-reward: whether the 3D presentation is active. Durable. */
+  readonly active3D?: boolean;
+  /** Per-node user-dragged offsets relative to the engine layout, by page id. */
+  readonly dragOffsets?: Readonly<
+    Record<string, { readonly x: number; readonly y: number }>
+  >;
 }
 
 // ---------------------------------------------------------------------------

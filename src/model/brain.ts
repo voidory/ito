@@ -42,6 +42,16 @@ export function createEmptyBrainData(
       hiddenPageIds: [],
       hiddenRelationshipIds: [],
       positions: {},
+      // M2 concept-network view state (ADR-0009). Sensible empty defaults so a
+      // fresh brain is valid; all are optional so v1 data loads without them.
+      nodePositions: {},
+      zoom: 1,
+      categoryBounds: {},
+      active3D: false,
+      dragOffsets: {},
     },
   };
 }
+
+/** The default watercolor pigment assigned to a category with no explicit color. */
+export const DEFAULT_CATEGORY_COLOR = "#9aa7b2";

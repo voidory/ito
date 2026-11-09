@@ -119,6 +119,32 @@ implemented/pending/unsupported matrix lives in `docs/MILESTONE-MATRIX.md`.
 D-items proposed from FEAT-005 (D19–D22) are recorded in
 `docs/MILESTONE-MATRIX.md` section 8.
 
+## M2 concept-network foundation (FEAT-003, spec section 5 data contract + §3.1/§3.2/§3.4)
+
+FEAT-003 delivers the additive data-contract extensions, the hub-topology and
+presentation/3D-state decisions (ADR-0008, ADR-0009), and the headless Workbench
+concept-network transitions. There is NO rendering here (FEAT-004/005/006), so
+every behaviour below is covered by REAL Vitest tests of the headless/pure logic
+(the Playwright e2e the later features add runs in the publishing environment;
+it cannot run in the sandbox — see `docs/MILESTONE-MATRIX.md` §9). "N06-M2"
+denotes the M2 transient-placeholder behaviour and is distinct from the N06
+non-functional large-PDF row below.
+
+| ID     | Behaviour                                                           | Test kind | Test / location | Status      |
+| ------ | ------------------------------------------------------------------- | --------- | --------------- | ----------- |
+| A09-M2 | Graph `hide` presentation-only; never deletes a Page/Relationship   | unit      | `src/app/workbench.network.test.ts` | implemented |
+| A13-M2 | N=2 lens vs N>=3 star hub topology derived from endpoints            | unit      | `workbench.network.test.ts`; `src/model/relationship.test.ts`; `src/network/hub` | implemented |
+| A14-M2 | Category colorCode persists; hub blendColor derived (§3.2 multiply)  | unit      | `workbench.network.test.ts`; `src/network/blend.test.ts` | implemented |
+| N06-M2 | Transient "not connected yet" placeholder creates ZERO graph records | unit      | `workbench.network.test.ts` | implemented |
+| §3.4   | Density reward: 3D unlocks at 35 active nodes; opt-in flag durable   | unit      | `workbench.network.test.ts` | implemented |
+| ADD    | Additive schema: v1 Category/Relationship/PresentationState load; SCHEMA_VERSION=1 | unit | `src/model/brain.test.ts`; `src/test/model.test.ts` | implemented |
+| NORM   | One `relationshipEndpoints(rel)` accessor reconciles 2-page + N-endpoint | unit  | `src/model/relationship.test.ts` | implemented |
+
+Decisions recorded: `docs/decisions/ADR-0008-connecting-hub-topology.md`
+(reconciling the 2-page edge with the N-endpoint star; addresses D20) and
+`docs/decisions/ADR-0009-presentation-and-3d-state.md` (PresentationState
+expansion + §3.4 3D reward; resolves D19).
+
 ## Non-functional (N01–N08)
 
 | ID  | Requirement (summary)                        | Milestone | Status      |
