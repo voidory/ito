@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { PageId } from "../model";
 import type { SceneGraphInput } from "../network";
-import { mapGraphTo3D, type Scene3D } from "./threeScene.map";
+import { mapGraphTo3D, THREE_D_STYLE, type Scene3D } from "./threeScene.map";
 import type { Workbench } from "./workbench";
 
 /**
@@ -77,10 +77,15 @@ export function ThreeScene({
     mount.appendChild(canvas);
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color("#f4f1ea");
-    // Gentle watercolor fog: distant particles dissolve into the paper tone.
+    // §3.5: deep twilight-ink backdrop so glowing nodes + translucent hulls
+    // read with high contrast instead of washing out on light beige.
+    scene.background = new THREE.Color(THREE_D_STYLE.backdrop);
+    // Gentle twilight fog: distant particles recede into the ink, never vanish.
     const extent = Math.max(scene3d.extent, 200);
-    scene.fog = new THREE.FogExp2(0xf4f1ea, 0.0016);
+    scene.fog = new THREE.FogExp2(
+      new THREE.Color(THREE_D_STYLE.backdrop).getHex(),
+      THREE_D_STYLE.fogDensity,
+    );
 
     const camera = new THREE.PerspectiveCamera(55, width / height, 0.1, extent * 20);
     camera.position.set(extent * 0.9, extent * 0.8, extent * 1.6);
@@ -104,11 +109,11 @@ export function ThreeScene({
       const geom = new THREE.BufferGeometry();
       geom.setAttribute("position", new THREE.BufferAttribute(positions, 3));
       const mat = new THREE.PointsMaterial({
-        color: 0x2a2825,
-        size: 10,
+        color: new THREE.Color(THREE_D_STYLE.node.color),
+        size: THREE_D_STYLE.node.size,
         sizeAttenuation: true,
         transparent: true,
-        opacity: 0.95,
+        opacity: THREE_D_STYLE.node.opacity,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       });
@@ -125,7 +130,7 @@ export function ThreeScene({
       const mat = new THREE.MeshStandardMaterial({
         color,
         transparent: true,
-        opacity: 0.12,
+        opacity: THREE_D_STYLE.hull.opacity,
         roughness: 0.9,
         metalness: 0,
         depthWrite: false,
@@ -134,6 +139,19 @@ export function ThreeScene({
       mesh.position.set(hull.center.x, hull.center.y, hull.center.z);
       scene.add(mesh);
       disposables.push(geom, mat);
+
+      // §3.5: a subtle rim wireframe over the hull so the translucent bubble
+      // reads as a bounded 3D region rather than a formless haze.
+      const rimGeom = new THREE.WireframeGeometry(geom);
+      const rimMat = new THREE.LineBasicMaterial({
+        color,
+        transparent: true,
+        opacity: THREE_D_STYLE.hull.rimOpacity,
+      });
+      const rim = new THREE.LineSegments(rimGeom, rimMat);
+      rim.position.set(hull.center.x, hull.center.y, hull.center.z);
+      scene.add(rim);
+      disposables.push(rimGeom, rimMat);
     }
 
     // --- Relationship link glyphs ------------------------------------------
@@ -146,7 +164,7 @@ export function ThreeScene({
       const mat = new THREE.LineBasicMaterial({
         color: new THREE.Color(safeColor(link.blendColor)),
         transparent: true,
-        opacity: 0.4,
+        opacity: THREE_D_STYLE.link.opacity,
       });
       const line = new THREE.Line(geom, mat);
       scene.add(line);

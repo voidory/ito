@@ -455,3 +455,35 @@ milestone builds on them (numbering continues the decision log D01–D18):
   ADDING a pane (N papers open together) or stay at the approved A|subject|B
   arrangement. Default proposal: keep the fixed arrangement for M1; evaluate an
   N-pane workspace with the graph navigation work. (relates section 8.2 note)
+
+## Pass A - M7 history, M6 sources, and visual/interaction polish (ADR-0012)
+
+Pass A delivers M7 linked history + M6 Zotero/website/area sources + the section
+3 fixes across three FEAT units. Runtime behavior is proven headlessly in Vitest
+(the sandbox cannot run Playwright Chromium); the two new e2e specs are proven to
+COMPILE + be DISCOVERED via `npx playwright test --list`.
+
+| ID       | Behaviour                                                                                     | Test kind  | Test / location | Status |
+| -------- | --------------------------------------------------------------------------------------------- | ---------- | --------------- | ------ |
+| H01      | Coalesced prose revisions: same-Page typing within a 2000 ms idle window folds into one revision; `flushPendingRevision()` commits it deterministically | unit + e2e | `src/app/workbench.history.test.ts`; `e2e/history-reflection.spec.ts` | implemented |
+| H02      | Structural actions (quote insert/remove/reorder, annotation comments, range boundaries, tentative associations, categories, relationships) flush immediately as their own revision | unit | `src/app/workbench.history.test.ts` | implemented |
+| H03      | Day-grouped timeline with a single-day picker + date-range filter | unit + e2e | `src/app/historyReflectionPanel.render.test.ts`; `e2e/history-reflection.spec.ts` | implemented |
+| H04      | Cherry-picked multi-day reflection storing linkedRevisionIds + start/end date keys; per-change comments; reflections never rewrite revisions or create graph nodes | unit + e2e | `src/app/workbench.history.test.ts`; `e2e/history-reflection.spec.ts` | implemented |
+| H05      | `reconstructRevisionState` replays from the nearest checkpoint or returns `missing-segment`; `restoreRevision` records a NEW forward revision (history never erased) | unit + e2e | `src/app/workbench.history.test.ts`; `e2e/history-reflection.spec.ts` | implemented |
+| H06, D13 | A validated Checkpoint every 20 revisions whose stateSnapshot excludes `revisions`+`checkpoints` and carries no PDF bytes | unit | `src/app/workbench.history.test.ts` | implemented |
+| H07      | `measureHistoryOverhead` returns `{revisionCount,checkpointCount,deltaBytes,checkpointBytes,replayDurationMs}` | unit + e2e | `src/app/workbench.history.test.ts`; `e2e/history-reflection.spec.ts` | implemented |
+| D14      | Reflection spanning multiple days renders a date-span badge; linked across days/weeks/months | unit + e2e | `src/app/historyReflectionPanel.render.test.ts`; `e2e/history-reflection.spec.ts` | implemented |
+| A24, D10 | Idempotent Zotero import (Zotero JSON / BetterBibTeX / RDF): matches on externalId in place, zero duplicate Source/Annotation, zero graph nodes | unit + e2e | `src/storage/zotero.test.ts`; `src/app/workbench.sources.test.ts`; `e2e/zotero-website.spec.ts` | implemented |
+| A15, D11 | Website sources require URL + snapshot; URL-only submit rejected with `website-snapshot-required-error`; stored sanitized as kind `website` + `snapshot-cached` with an availability badge | unit + e2e | `src/app/workbench.sources.test.ts`; `src/app/library.website.render.test.ts`; `e2e/zotero-website.spec.ts` | implemented |
+| D01      | Extended PDF scope banners (scanned / encrypted) + area annotations (`scope.kind='area'`) rendered as a labeled region and citable | unit + e2e | `src/app/workbench.sources.test.ts`; `e2e/zotero-website.spec.ts` | implemented |
+| FIX-3.1  | PDF page header/stage split; pdfjs v4 textLayer CSS; overlays measured relative to `pdf-page-stage`; pageCount backfill | unit | `src/pdf/highlight.test.ts`; `src/app/workbench.sources.test.ts` | implemented |
+| FIX-3.2  | Narrow-pane auto-fit: ResizeObserver fit-to-pane scale (`--scale-factor` + `max-width:100%`), no horizontal clipping | unit | `src/app/reader.m3.render.test.ts` (pane-fit) | implemented |
+| FIX-3.3  | Interactive 2D canvas: `buildScene` applies dragOffsets/nodePositions + recomputes hubs/squircles (determinism preserved); NodesCanvas node-drag -> `setDragOffset`, pan (`data-pan-x/y`), wheel+button zoom -> `setZoom` | unit | `src/network/scene.test.ts`; `src/app/nodesCanvas.render.test.ts` | implemented |
+| FIX-3.4  | Warm Archival Research theme tokens + tactile 160 ms micro-animations; STRICT motion gate under `[data-suppress-motion]` + `prefers-reduced-motion` | unit | `src/app/theme.render.test.ts` | implemented |
+| FIX-3.5  | 3D contrast: `#141824` backdrop/fog, glowing nodes, hull opacity 0.28 + rim wireframe, visible lines; WebGL guard + fallback intact | unit | `src/app/threeScene.map.test.ts` | implemented |
+
+Decision: `docs/decisions/ADR-0012-m7-history-m6-sources-and-visual-polish.md`
+records the M7 history/checkpoint/reflection model, the M6 Zotero/website/area
+additions, the PDF stage/overlay restructuring + pane-fit + pageCount backfill,
+the 2D interaction + tactile theme + 3D contrast changes, and the decision to
+keep SCHEMA_VERSION at 2 (all additions additive + optional).

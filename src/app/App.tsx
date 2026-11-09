@@ -4,6 +4,7 @@ import { useWorkbench } from "./useWorkbench";
 import { Library } from "./Library";
 import { Reader } from "./Reader";
 import { NodesCanvas } from "./NodesCanvas";
+import { HistoryReflectionPanel } from "./HistoryReflectionPanel";
 import { NetworkSearch } from "./NetworkSearch";
 import { ThreeScene } from "./ThreeScene";
 import { BackupExportModal } from "./BackupExportModal";
@@ -67,7 +68,7 @@ export function App(): JSX.Element {
   );
 
   const onSetViewMode = useCallback(
-    (mode: "files" | "nodes") => {
+    (mode: "files" | "nodes" | "history") => {
       wb?.setViewMode(mode);
       bump();
     },
@@ -136,7 +137,14 @@ export function App(): JSX.Element {
   }
 
   return (
-    <div data-testid="app-status" data-state="ready" style={{ fontFamily: "system-ui, sans-serif" }}>
+    <div
+      data-testid="app-status"
+      data-state="ready"
+      // Propagate the motion-suppression gate to the shell root so theme.css
+      // disables every transition/keyframe app-wide (R19, A09-M2).
+      data-suppress-motion={state?.suppressMotion ? "true" : "false"}
+      style={{ fontFamily: "system-ui, sans-serif" }}
+    >
       {/* Hidden boot confirmation retained for traceability to the M0 checks. */}
       <span style={{ display: "none" }} data-testid="boot-detail">
         {boot.detail}
@@ -199,7 +207,14 @@ export function App(): JSX.Element {
               }}
             />
           )}
-          {state.viewMode === "nodes" ? (
+          {state.viewMode === "history" ? (
+            <div
+              data-testid="history-view"
+              style={{ position: "fixed", inset: 0, top: "3rem", overflow: "auto" }}
+            >
+              <HistoryReflectionPanel wb={wb} onChange={bump} />
+            </div>
+          ) : state.viewMode === "nodes" ? (
             <NodesView
               wb={wb}
               categoryScope={state.categoryScope}
@@ -259,8 +274,8 @@ function ViewSwitch({
   viewMode,
   onSetViewMode,
 }: {
-  viewMode: "files" | "nodes";
-  onSetViewMode: (mode: "files" | "nodes") => void;
+  viewMode: "files" | "nodes" | "history";
+  onSetViewMode: (mode: "files" | "nodes" | "history") => void;
 }): JSX.Element {
   return (
     <div
@@ -292,6 +307,15 @@ function ViewSwitch({
         onClick={() => onSetViewMode("nodes")}
       >
         Nodes
+      </button>
+      <button
+        data-testid="view-history"
+        role="tab"
+        aria-selected={viewMode === "history"}
+        data-active={viewMode === "history"}
+        onClick={() => onSetViewMode("history")}
+      >
+        History
       </button>
     </div>
   );

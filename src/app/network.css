@@ -16,6 +16,28 @@
   touch-action: none;
 }
 
+/* §3.3 interactive-canvas shell: hosts the SVG + the floating zoom controls. */
+.nodes-canvas-shell {
+  width: 100%;
+  height: 100%;
+}
+
+/* Floating zoom controls (§3.3): pan/zoom affordances over the canvas. */
+.canvas-zoom-controls {
+  position: absolute;
+  bottom: 1rem;
+  right: 1rem;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.canvas-zoom-controls button {
+  min-width: 2rem;
+  min-height: 2rem;
+}
+
 /* Watercolor fill: translucent pigment that darkens where areas overlap. */
 .category-squircle-fill {
   mix-blend-mode: multiply;

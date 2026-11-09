@@ -15,7 +15,7 @@
 
 import { describe, expect, it } from "vitest";
 import { buildScene, type SceneGraphInput } from "../network";
-import { mapGraphTo3D, revealPresentation } from "./threeScene.map";
+import { mapGraphTo3D, revealPresentation, THREE_D_STYLE } from "./threeScene.map";
 
 /** A small live-graph fixture: 5 nodes, 2 categories, 1 relationship. */
 function sampleGraph(): SceneGraphInput {
@@ -216,6 +216,27 @@ describe("mapGraphTo3D — pure graph -> 3D scene descriptor", () => {
     const scene3d = mapGraphTo3D(graph);
     expect(scene3d.categoryLinks).toHaveLength(1);
     expect(scene3d.categoryLinks[0]!.linkKind).toBe("member");
+  });
+});
+
+describe("THREE_D_STYLE — §3.5 FIX-3D-CONTRAST descriptors", () => {
+  it("uses the deep twilight-ink backdrop #141824 for the scene + fog", () => {
+    expect(THREE_D_STYLE.backdrop).toBe("#141824");
+    expect(THREE_D_STYLE.fogDensity).toBeGreaterThan(0);
+  });
+
+  it("renders clearly visible translucent category hulls at opacity 0.28 with a rim wireframe", () => {
+    expect(THREE_D_STYLE.hull.opacity).toBe(0.28);
+    // The rim wireframe is present and subtle (lighter than the hull fill).
+    expect(THREE_D_STYLE.hull.rimOpacity).toBeGreaterThan(0);
+    expect(THREE_D_STYLE.hull.rimOpacity).toBeLessThan(THREE_D_STYLE.hull.opacity);
+  });
+
+  it("uses a bright glowing stellar node color + visible connecting lines", () => {
+    expect(THREE_D_STYLE.node.color).toBe("#eaf2ff");
+    expect(THREE_D_STYLE.node.opacity).toBeGreaterThan(0.5);
+    // Links are clearly visible (not the old washed-out 0.4).
+    expect(THREE_D_STYLE.link.opacity).toBeGreaterThanOrEqual(0.6);
   });
 });
 

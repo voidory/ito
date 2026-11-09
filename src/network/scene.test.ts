@@ -78,6 +78,86 @@ describe("buildScene — node positions come from the real layout engine", () =>
   });
 });
 
+describe("buildScene — §3.3 interactive drag offsets (D19)", () => {
+  function draggableGraph(): SceneGraphInput {
+    return {
+      nodes: [node("a"), node("b"), node("c")],
+      links: [
+        { relationshipId: "r1", endpointPageIds: ["a", "b"], label: "", blendColor: "#808080", hidden: false },
+      ],
+      categories: [
+        { categoryId: "cat1", name: "One", colorCode: "#4b5578", memberPageIds: ["a", "b", "c"] },
+      ],
+    };
+  }
+
+  it("applies a dragOffset on TOP of the engine position for a node", () => {
+    const g = draggableGraph();
+    const base = buildScene(g);
+    const dragged = buildScene(g, { dragOffsets: { a: { x: 100, y: -40 } } });
+    const baseA = base.nodes.find((n) => n.pageId === "a")!;
+    const dragA = dragged.nodes.find((n) => n.pageId === "a")!;
+    expect(dragA.x).toBeCloseTo(baseA.x + 100, 6);
+    expect(dragA.y).toBeCloseTo(baseA.y - 40, 6);
+    // Un-dragged nodes keep their exact layout positions.
+    const baseB = base.nodes.find((n) => n.pageId === "b")!;
+    const dragB = dragged.nodes.find((n) => n.pageId === "b")!;
+    expect(dragB.x).toBe(baseB.x);
+    expect(dragB.y).toBe(baseB.y);
+  });
+
+  it("recomputes hub + squircle bounds from the offset-adjusted coordinates", () => {
+    const g = draggableGraph();
+    const base = buildScene(g);
+    const dragged = buildScene(g, { dragOffsets: { a: { x: 500, y: 500 } } });
+    // The hub center follows the dragged endpoint (it moved).
+    expect(dragged.hubs[0]!.center).not.toEqual(base.hubs[0]!.center);
+    // The category squircle stretches to keep containing the dragged member.
+    const sq = dragged.squircles[0]!;
+    const a = dragged.nodes.find((n) => n.pageId === "a")!;
+    expect(squircleContains(sq.bounds, { x: a.x, y: a.y })).toBe(true);
+    // And its bounds differ from the un-dragged scene (it actually moved).
+    expect(sq.bounds).not.toEqual(base.squircles[0]!.bounds);
+  });
+
+  it("a nodePositions override REPLACES the engine position outright", () => {
+    const g = draggableGraph();
+    const scene = buildScene(g, { nodePositions: { a: { x: 12, y: 34 } } });
+    const a = scene.nodes.find((n) => n.pageId === "a")!;
+    expect(a.x).toBe(12);
+    expect(a.y).toBe(34);
+  });
+
+  it("a nodePositions override wins over a dragOffset for the same node", () => {
+    const g = draggableGraph();
+    const scene = buildScene(g, {
+      nodePositions: { a: { x: 7, y: 7 } },
+      dragOffsets: { a: { x: 1000, y: 1000 } },
+    });
+    const a = scene.nodes.find((n) => n.pageId === "a")!;
+    expect(a.x).toBe(7);
+    expect(a.y).toBe(7);
+  });
+
+  it("determinism (A09-M2): NO offsets yields output identical to the plain layout", () => {
+    const g = draggableGraph();
+    const plain = buildScene(g);
+    const emptyOffsets = buildScene(g, { dragOffsets: {}, nodePositions: {} });
+    expect(emptyOffsets.positions).toEqual(plain.positions);
+    expect(emptyOffsets.nodes).toEqual(plain.nodes);
+    expect(emptyOffsets.hubs[0]!.d).toEqual(plain.hubs[0]!.d);
+    expect(emptyOffsets.squircles[0]!.bounds).toEqual(plain.squircles[0]!.bounds);
+  });
+
+  it("determinism (A09-M2): identical offsets yield identical output", () => {
+    const g = draggableGraph();
+    const one = buildScene(g, { dragOffsets: { a: { x: 20, y: 20 } } });
+    const two = buildScene(g, { dragOffsets: { a: { x: 20, y: 20 } } });
+    expect(two.positions).toEqual(one.positions);
+    expect(two.squircles[0]!.bounds).toEqual(one.squircles[0]!.bounds);
+  });
+});
+
 describe("buildScene — hub topology (A13-M2)", () => {
   it("renders a lens for a 2-endpoint relationship", () => {
     const g = graph({

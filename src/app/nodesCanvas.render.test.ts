@@ -57,6 +57,22 @@ async function mount(
   return container;
 }
 
+/**
+ * jsdom has no PointerEvent constructor. React's pointer-event plugin listens
+ * for native events named "pointerdown"/"pointermove"/"pointerup", so a
+ * MouseEvent carrying that type triggers the React handlers; we augment it with
+ * the `pointerId` the handlers read.
+ */
+function pointer(type: string, props: { clientX?: number; clientY?: number; pointerId?: number }): Event {
+  const ev = new MouseEvent(type, {
+    bubbles: true,
+    clientX: props.clientX ?? 0,
+    clientY: props.clientY ?? 0,
+  });
+  Object.defineProperty(ev, "pointerId", { value: props.pointerId ?? 1 });
+  return ev;
+}
+
 async function makePages(wb: Workbench, titles: readonly string[]): Promise<PageId[]> {
   const ids: PageId[] = [];
   for (const t of titles) ids.push((await wb.createSubjectPage(t)).id);
@@ -318,5 +334,83 @@ describe("NodesCanvas — renders from live Workbench records", () => {
       n.getAttribute("data-page-id"),
     );
     expect(ids).toEqual([b]);
+  });
+
+  // --- §3.3 interactive 2D canvas (pan / zoom / node drag) ----------------
+
+  it("§3.3: renders zoom controls wired to wb.setZoom (in / out / reset)", async () => {
+    const wb = await Workbench.open(new InMemoryStorageAdapter());
+    await makePages(wb, ["A", "B"]);
+    const el = await mount(wb);
+
+    const zoomIn = el.querySelector('[data-testid="canvas-zoom-in"]') as HTMLButtonElement;
+    const zoomOut = el.querySelector('[data-testid="canvas-zoom-out"]') as HTMLButtonElement;
+    const zoomReset = el.querySelector('[data-testid="canvas-zoom-reset"]') as HTMLButtonElement;
+    expect(zoomIn).not.toBeNull();
+    expect(zoomOut).not.toBeNull();
+    expect(zoomReset).not.toBeNull();
+
+    expect(wb.zoom()).toBe(1);
+    await act(async () => {
+      zoomIn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    // Zooming in increased the persisted scale (and shrank the viewBox).
+    expect(wb.zoom()).toBeGreaterThan(1);
+    const zoomedIn = wb.zoom();
+
+    await act(async () => {
+      zoomReset.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(wb.zoom()).toBe(1);
+
+    await act(async () => {
+      zoomOut.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(wb.zoom()).toBeLessThan(1);
+    expect(zoomedIn).toBeGreaterThan(wb.zoom());
+  });
+
+  it("§3.3: the canvas exposes data-pan-x / data-pan-y / data-zoom", async () => {
+    const wb = await Workbench.open(new InMemoryStorageAdapter());
+    await makePages(wb, ["A"]);
+    const el = await mount(wb);
+    const svg = el.querySelector('[data-testid="nodes-canvas"]')!;
+    expect(svg.getAttribute("data-pan-x")).toBe("0");
+    expect(svg.getAttribute("data-pan-y")).toBe("0");
+    expect(svg.getAttribute("data-zoom")).toBe("1");
+  });
+
+  it("§3.3: dragging a node commits wb.setDragOffset on pointer-up (persists, D19)", async () => {
+    const wb = await Workbench.open(new InMemoryStorageAdapter());
+    const [a] = await makePages(wb, ["A", "B"]);
+    const el = await mount(wb);
+
+    const svg = el.querySelector('[data-testid="nodes-canvas"]') as SVGSVGElement;
+    // jsdom has no layout; give the SVG a measurable client box so the drag
+    // delta maps to scene units deterministically.
+    svg.getBoundingClientRect = () =>
+      ({ width: 400, height: 400, left: 0, top: 0, right: 400, bottom: 400, x: 0, y: 0, toJSON() {} }) as DOMRect;
+
+    const group = el.querySelector(
+      `[data-testid="graph-node"][data-page-id="${a}"]`,
+    ) as SVGGElement;
+    (group as unknown as { setPointerCapture?: () => void }).setPointerCapture = () => undefined;
+
+    await act(async () => {
+      group.dispatchEvent(pointer("pointerdown", { clientX: 10, clientY: 10, pointerId: 1 }));
+    });
+    await act(async () => {
+      svg.dispatchEvent(pointer("pointermove", { clientX: 60, clientY: 90, pointerId: 1 }));
+    });
+    await act(async () => {
+      svg.dispatchEvent(pointer("pointerup", { pointerId: 1 }));
+    });
+
+    // A durable drag offset was persisted for the dragged node (non-zero).
+    const off = wb.presentationView().dragOffsets[a!];
+    expect(off).toBeDefined();
+    expect(Math.abs(off!.x) + Math.abs(off!.y)).toBeGreaterThan(0);
+    // Dragging records NO history revision (FEAT-001 excludes drag frames).
+    expect(wb.revisions().length).toBe(0);
   });
 });

@@ -289,3 +289,30 @@ ADR-0004/0007/0010.
 | N06 | Large-PDF performance                        | M7        | planned     |
 | N07 | Accessibility / keyboard                     | M7        | planned     |
 | N08 | Reproducible, committed fixtures             | M0        | implemented |
+
+## Pass A - M7 history + M6 sources + section 3 polish (ADR-0012)
+
+Spec-milestone IDs for Pass A (distinct from the legacy A01-A24 acceptance list
+above). Runtime behavior is proven in Vitest; the two new e2e specs
+(`e2e/history-reflection.spec.ts`, `e2e/zotero-website.spec.ts`) are proven to
+COMPILE + be DISCOVERED via `npx playwright test --list`.
+
+| ID       | Behaviour                                                                 | Test kind  | Test / location | Status |
+| -------- | ------------------------------------------------------------------------- | ---------- | --------------- | ------ |
+| H01      | Coalesced 2000 ms prose revisions; `flushPendingRevision` deterministic   | unit + e2e | `src/app/workbench.history.test.ts`; `e2e/history-reflection.spec.ts` | implemented |
+| H02      | Structural actions flush immediately as their own revision                | unit       | `src/app/workbench.history.test.ts` | implemented |
+| H03      | Day-grouped timeline + single-day picker + date-range filter              | unit + e2e | `src/app/historyReflectionPanel.render.test.ts`; `e2e/history-reflection.spec.ts` | implemented |
+| H04, D14 | Multi-day reflection (linkedRevisionIds + start/end keys, date-span badge), per-change comments, zero graph nodes | unit + e2e | `src/app/workbench.history.test.ts`; `src/app/historyReflectionPanel.render.test.ts`; `e2e/history-reflection.spec.ts` | implemented |
+| H05      | reconstruct (ok / missing-segment) + forward-only restore                 | unit + e2e | `src/app/workbench.history.test.ts`; `e2e/history-reflection.spec.ts` | implemented |
+| H06, D13 | Checkpoint every 20 revisions; snapshot excludes revisions/checkpoints, no PDF bytes | unit | `src/app/workbench.history.test.ts` | implemented |
+| H07      | `measureHistoryOverhead` field shape                                      | unit + e2e | `src/app/workbench.history.test.ts`; `e2e/history-reflection.spec.ts` | implemented |
+| A24, D10 | Idempotent Zotero import (zero duplicates, zero graph nodes)              | unit + e2e | `src/storage/zotero.test.ts`; `src/app/workbench.sources.test.ts`; `e2e/zotero-website.spec.ts` | implemented |
+| A15, D11 | Website URL + required snapshot; required-error; kind `website` + `snapshot-cached` | unit + e2e | `src/app/workbench.sources.test.ts`; `src/app/library.website.render.test.ts`; `e2e/zotero-website.spec.ts` | implemented |
+| D01      | Scanned/encrypted scope banners + citable area annotations                | unit + e2e | `src/app/workbench.sources.test.ts`; `e2e/zotero-website.spec.ts` | implemented |
+| FIX-3.1  | PDF header/stage split, textLayer CSS, overlay measurement, pageCount backfill | unit | `src/pdf/highlight.test.ts`; `src/app/workbench.sources.test.ts` | implemented |
+| FIX-3.2  | Narrow-pane auto-fit (ResizeObserver, `--scale-factor`, `max-width:100%`) | unit | `src/app/reader.m3.render.test.ts` | implemented |
+| FIX-3.3  | Interactive 2D pan/zoom/node-drag + deterministic offset layout           | unit | `src/network/scene.test.ts`; `src/app/nodesCanvas.render.test.ts` | implemented |
+| FIX-3.4  | Tactile theme tokens + 160 ms micro-animations + strict motion gate       | unit | `src/app/theme.render.test.ts` | implemented |
+| FIX-3.5  | 3D `#141824` backdrop, glowing nodes, hull opacity 0.28 + rim, visible lines | unit | `src/app/threeScene.map.test.ts` | implemented |
+
+Decision: `docs/decisions/ADR-0012-m7-history-m6-sources-and-visual-polish.md`.

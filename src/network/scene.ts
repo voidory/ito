@@ -69,6 +69,14 @@ export interface SceneGraphInput {
   readonly categories: readonly SceneCategoryInput[];
 }
 
+/**
+ * A per-node 2D offset applied on top of the engine layout (user drag, D19).
+ */
+export interface SceneOffset {
+  readonly x: number;
+  readonly y: number;
+}
+
 /** Options for buildScene — deterministic layout + squircle padding. */
 export interface BuildSceneOptions {
   /** Layout iterations (determinism: same inputs => same output). */
@@ -79,6 +87,22 @@ export interface BuildSceneOptions {
   readonly squirclePadding?: number;
   /** Radius of the initial ring the nodes are seeded on before the sim runs. */
   readonly seedRadius?: number;
+  /**
+   * Per-node drag OFFSETS keyed by page id (§3.3, D19). Applied on TOP of the
+   * deterministic force-layout coordinates BEFORE hubs + squircle bounds are
+   * computed, so squircles and star-hubs stretch/follow a dragged node. A page
+   * with no entry keeps its pure layout position, so a graph with NO offsets is
+   * byte-identical to the un-offset layout (A09-M2 determinism preserved).
+   */
+  readonly dragOffsets?: Readonly<Record<string, SceneOffset>>;
+  /**
+   * Absolute per-node POSITION overrides keyed by page id (§3.3, D19). When
+   * present for a page this REPLACES the engine position outright (an explicit
+   * placement), taking precedence over `dragOffsets` for that page. Omitted
+   * pages keep their layout position, preserving determinism for un-placed
+   * graphs.
+   */
+  readonly nodePositions?: Readonly<Record<string, SceneOffset>>;
 }
 
 /** A rendered node: id, title and its resolved 2D position. */
@@ -354,7 +378,29 @@ export function buildScene(graph: SceneGraphInput, options: BuildSceneOptions = 
   const seedRadius = options.seedRadius ?? DEFAULT_SEED_RADIUS;
 
   const layoutGraph = toLayoutGraph(graph, seedRadius);
-  const positions = runLayout(layoutGraph, { iterations, seed });
+  const enginePositions = runLayout(layoutGraph, { iterations, seed });
+
+  // Apply per-node drag offsets / absolute position overrides on TOP of the
+  // engine layout (§3.3, D19). An absolute override wins outright; otherwise a
+  // drag offset is added to the engine position. Pages with neither keep their
+  // pure layout coordinate, so a graph with NO offsets yields output identical
+  // to the un-offset layout (A09-M2 determinism). Hubs + squircle bounds are
+  // computed from these ADJUSTED positions below, so they follow a dragged node.
+  const dragOffsets = options.dragOffsets ?? {};
+  const nodePositions = options.nodePositions ?? {};
+  const mutablePositions: Record<string, Vec2> = {};
+  for (const [pageId, p] of Object.entries(enginePositions)) {
+    const override = nodePositions[pageId];
+    if (override) {
+      mutablePositions[pageId] = { x: override.x, y: override.y };
+      continue;
+    }
+    const off = dragOffsets[pageId];
+    mutablePositions[pageId] = off
+      ? { x: p.x + off.x, y: p.y + off.y }
+      : { x: p.x, y: p.y };
+  }
+  const positions: Positions = mutablePositions;
 
   const posOf = (pageId: string): Point | null => {
     const p = positions[pageId];

@@ -183,6 +183,68 @@ interface ItoTestApi {
     relationships: number;
     categories: number;
   };
+  // -- M7 linked history, checkpoints & reflection (H01-H07, D13, D14) ------
+  /** Commit any buffered coalesced prose-edit revision immediately (H01). */
+  flushPendingRevision(): Promise<void>;
+  /** The recorded revisions (oldest first) as serializable rows. */
+  revisions(): {
+    id: string;
+    kind: string;
+    label: string;
+    summary: string;
+    createdAt: string;
+    dateKey: string;
+    affectedObjectIds: string[];
+  }[];
+  /** The periodic history checkpoints (H06) as serializable rows. */
+  checkpoints(): { id: string; revisionIndex: number; afterRevisionId: string; createdAt: string }[];
+  /** Reconstruct the structured state as of a revision (H05). */
+  reconstructRevisionState(revId: string): { status: string; missingIds: string[]; hasState: boolean };
+  /** Restore the brain to the state as of a revision; returns the new forward revision id (H05). */
+  restoreRevision(revId: string): Promise<string | null>;
+  /** The history overhead probe (H07). */
+  measureHistoryOverhead(): {
+    revisionCount: number;
+    checkpointCount: number;
+    deltaBytes: number;
+    checkpointBytes: number;
+    replayDurationMs: number;
+  };
+  /** Create a multi-span reflection over cherry-picked revisions (H04, D14). */
+  createReflection(input: { text: string; linkedRevisionIds: string[] }): Promise<{
+    id: string;
+    text: string;
+    linkedRevisionIds: string[];
+    startDateKey: string;
+    endDateKey: string;
+  }>;
+  /** Attach/replace a per-change comment on a revision (H04). */
+  addRevisionComment(revId: string, text: string): Promise<void>;
+  // -- M6 zotero / website / area (A15, A24, D01, D10, D11) ------------------
+  /** Idempotently import a Zotero/BetterBibTeX/RDF bundle; returns a summary (A24, D10). */
+  importZoteroBundle(json: string): Promise<{
+    sourcesAdded: number;
+    sourcesUpdated: number;
+    annotationsAdded: number;
+    annotationsUpdated: number;
+  }>;
+  /** Import a website snapshot source (URL + snapshot bytes required) (A15, D11). */
+  importWebsiteSource(input: {
+    url: string;
+    snapshot: number[];
+    title?: string;
+    category?: string;
+  }): Promise<{ sourceId: string; kind: string; availabilityStatus: string | null }>;
+  /** Commit a rectangular area annotation over a page (D01); returns its id. */
+  commitAreaAnnotation(
+    sourceId: string,
+    pageIndex: number,
+    rect: { x: number; y: number; width: number; height: number },
+    comment?: string,
+  ): Promise<string>;
+  // -- §3.3 interactive 2D canvas -------------------------------------------
+  /** Persist a node's dragged OFFSET (D19); records NO history revision. */
+  setDragOffset(pageId: string, offset: { dx: number; dy: number }): Promise<void>;
 }
 
 declare global {

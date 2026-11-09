@@ -1,9 +1,10 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   buildScene,
   categoryPigment,
   type Scene,
   type SceneGraphInput,
+  type SceneOffset,
 } from "../network";
 import type { CategoryId, PageId, RelationshipId, SourceId } from "../model";
 import type { ConceptGraph, Workbench } from "./workbench";
@@ -80,6 +81,32 @@ export function NodesCanvas({
 }): JSX.Element {
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
 
+  // --- §3.3 interactive 2D canvas state -----------------------------------
+  // Background pan offset folded into the viewBox (data-pan-x / data-pan-y).
+  const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  // Zoom scale seeded from the Workbench (persisted presentation state). A
+  // larger scale zooms IN (the viewBox shrinks around its center).
+  const [zoom, setZoom] = useState<number>(() => wb.zoom());
+  // The LIVE node drag in progress (committed to wb.setDragOffset on pointer-up
+  // so it persists per ADR-0009). null when no node is being dragged.
+  const [liveDrag, setLiveDrag] = useState<{
+    pageId: string;
+    dx: number;
+    dy: number;
+  } | null>(null);
+  // Raw pointer bookkeeping for drag/pan gestures (not rendered).
+  const dragRef = useRef<{
+    kind: "node" | "pan";
+    pageId?: string;
+    startX: number;
+    startY: number;
+    baseDx: number;
+    baseDy: number;
+    basePanX: number;
+    basePanY: number;
+    moved: boolean;
+  } | null>(null);
+
   // N06: render one transient placeholder per open UNCONNECTED source. The
   // `placeholders` array (open-together) takes precedence; the single
   // `placeholder` prop is kept for backwards compatibility.
@@ -118,17 +145,158 @@ export function NodesCanvas({
   };
   const signature = JSON.stringify(graphInput);
 
-  const scene: Scene = useMemo(
-    () => buildScene(graphInput, {}),
-    // graphInput is rebuilt each render; the signature captures its content so
-    // the expensive layout only recomputes on real data changes.
+  // Persisted per-node drag offsets (D19) merged with the LIVE in-progress drag
+  // so a dragged node (and the hubs/squircles touching it) follow the pointer
+  // before the offset is committed on pointer-up. Absolute nodePositions (if
+  // any) are threaded through unchanged — buildScene lets an override win.
+  const presentation = wb.presentationView();
+  const effectiveDragOffsets = useMemo<Record<string, SceneOffset>>(() => {
+    const merged: Record<string, SceneOffset> = { ...presentation.dragOffsets };
+    if (liveDrag) {
+      const base = merged[liveDrag.pageId] ?? { x: 0, y: 0 };
+      merged[liveDrag.pageId] = { x: base.x + liveDrag.dx, y: base.y + liveDrag.dy };
+    }
+    return merged;
+    // Recompute when the persisted offsets or the live drag change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [signature],
+  }, [JSON.stringify(presentation.dragOffsets), liveDrag]);
+  const offsetsSignature = JSON.stringify(effectiveDragOffsets);
+  const positionsSignature = JSON.stringify(presentation.nodePositions);
+
+  const scene: Scene = useMemo(
+    () =>
+      buildScene(graphInput, {
+        dragOffsets: effectiveDragOffsets,
+        nodePositions: presentation.nodePositions,
+      }),
+    // graphInput is rebuilt each render; the signatures capture its content so
+    // the expensive layout only recomputes on real data / offset changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [signature, offsetsSignature, positionsSignature],
   );
 
-  // View box padded around the scene extents so everything is visible without
-  // any camera animation. Computed from the resolved positions, not constants.
-  const viewBox = useMemo(() => computeViewBox(scene), [scene]);
+  // Base view box padded around the scene extents so everything is visible
+  // without any camera animation. Computed from the resolved positions, not
+  // constants. Pan + zoom are folded on top (§3.3) into the rendered viewBox.
+  const baseViewBox = useMemo(() => computeViewBox(scene), [scene]);
+  const viewBox = useMemo(
+    () => applyPanZoom(baseViewBox, pan, zoom),
+    [baseViewBox, pan, zoom],
+  );
+
+  // --- §3.3 zoom controls --------------------------------------------------
+  const commitZoom = useCallback(
+    (next: number): void => {
+      const clamped = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, next));
+      setZoom(clamped);
+      void wb.setZoom(clamped);
+    },
+    [wb],
+  );
+  const onZoomIn = useCallback(() => commitZoom(zoom * ZOOM_STEP), [commitZoom, zoom]);
+  const onZoomOut = useCallback(() => commitZoom(zoom / ZOOM_STEP), [commitZoom, zoom]);
+  const onZoomReset = useCallback(() => {
+    setPan({ x: 0, y: 0 });
+    commitZoom(1);
+  }, [commitZoom]);
+  const onWheel = useCallback(
+    (e: React.WheelEvent<SVGSVGElement>): void => {
+      // Wheel up (negative deltaY) zooms in; down zooms out.
+      commitZoom(e.deltaY < 0 ? zoom * ZOOM_STEP : zoom / ZOOM_STEP);
+    },
+    [commitZoom, zoom],
+  );
+
+  // --- §3.3 node drag + background pan gestures ----------------------------
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  // Convert a client delta (px) into scene units using the current viewBox so
+  // a drag tracks the pointer regardless of zoom / fit scaling.
+  const toSceneDelta = useCallback(
+    (clientDx: number, clientDy: number): { dx: number; dy: number } => {
+      const svg = svgRef.current;
+      const vb = parseViewBox(viewBox);
+      const rect = svg?.getBoundingClientRect();
+      const w = rect && rect.width > 0 ? rect.width : vb.w;
+      const h = rect && rect.height > 0 ? rect.height : vb.h;
+      return { dx: (clientDx / w) * vb.w, dy: (clientDy / h) * vb.h };
+    },
+    [viewBox],
+  );
+
+  const onNodePointerDown = useCallback(
+    (e: React.PointerEvent<SVGGElement>, pageId: string): void => {
+      e.stopPropagation();
+      (e.currentTarget as SVGGElement).setPointerCapture?.(e.pointerId);
+      const base = presentation.dragOffsets[pageId] ?? { x: 0, y: 0 };
+      dragRef.current = {
+        kind: "node",
+        pageId,
+        startX: e.clientX,
+        startY: e.clientY,
+        baseDx: base.x,
+        baseDy: base.y,
+        basePanX: pan.x,
+        basePanY: pan.y,
+        moved: false,
+      };
+      setLiveDrag({ pageId, dx: 0, dy: 0 });
+    },
+    [pan, presentation.dragOffsets],
+  );
+
+  const onPointerMove = useCallback(
+    (e: React.PointerEvent<SVGSVGElement>): void => {
+      const drag = dragRef.current;
+      if (!drag) return;
+      const { dx, dy } = toSceneDelta(e.clientX - drag.startX, e.clientY - drag.startY);
+      if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) drag.moved = true;
+      if (drag.kind === "node") {
+        setLiveDrag({ pageId: drag.pageId!, dx, dy });
+      } else {
+        // Background pan: dragging right/down moves the view the same way, so
+        // the viewBox origin shifts in the OPPOSITE direction.
+        setPan({ x: drag.basePanX - dx, y: drag.basePanY - dy });
+      }
+    },
+    [toSceneDelta],
+  );
+
+  const endGesture = useCallback((): void => {
+    const drag = dragRef.current;
+    dragRef.current = null;
+    if (!drag) return;
+    if (drag.kind === "node" && drag.moved) {
+      const live = liveDrag;
+      const dx = drag.baseDx + (live?.dx ?? 0);
+      const dy = drag.baseDy + (live?.dy ?? 0);
+      // Commit the dragged OFFSET so it persists (D19); setDragOffset records
+      // NO history revision (FEAT-001 excludes drag frames).
+      void wb.setDragOffset(drag.pageId as PageId, dx, dy).then(() => {
+        setLiveDrag(null);
+        bump();
+      });
+    } else {
+      setLiveDrag(null);
+    }
+  }, [liveDrag, wb, bump]);
+
+  const onBackgroundPointerDown = useCallback(
+    (e: React.PointerEvent<SVGSVGElement>): void => {
+      // Only start a pan on an empty-canvas press (nodes stop propagation).
+      svgRef.current?.setPointerCapture?.(e.pointerId);
+      dragRef.current = {
+        kind: "pan",
+        startX: e.clientX,
+        startY: e.clientY,
+        baseDx: 0,
+        baseDy: 0,
+        basePanX: pan.x,
+        basePanY: pan.y,
+        moved: false,
+      };
+    },
+    [pan],
+  );
 
   const onHubClick = (relationshipId: string): void => {
     const current =
@@ -143,6 +311,8 @@ export function NodesCanvas({
   };
 
   const onNodeClick = (pageId: string): void => {
+    // A drag that moved should not also open the page (gesture disambiguation).
+    if (dragRef.current?.moved) return;
     // Reuse the SubjectEditor open flow: a node IS a page, so clicking opens it
     // for composition (the connecting-page editor path for subject nodes).
     wb.openSubjectPage(pageId as PageId);
@@ -150,15 +320,57 @@ export function NodesCanvas({
   };
 
   return (
-    <svg
-      data-testid="nodes-canvas"
-      className="nodes-canvas"
-      viewBox={viewBox}
-      preserveAspectRatio="xMidYMid meet"
+    <div
+      data-testid="nodes-canvas-shell"
+      className="nodes-canvas-shell"
       data-suppress-motion={suppressMotion ? "true" : "false"}
-      role="img"
-      aria-label="Concept network"
+      style={{ position: "relative", width: "100%", height: "100%" }}
     >
+      {/* §3.3 zoom controls — wired to wb.setZoom via the folded viewBox. */}
+      <div data-testid="canvas-zoom-controls" className="canvas-zoom-controls">
+        <button
+          type="button"
+          data-testid="canvas-zoom-in"
+          aria-label="Zoom in"
+          onClick={onZoomIn}
+        >
+          +
+        </button>
+        <button
+          type="button"
+          data-testid="canvas-zoom-out"
+          aria-label="Zoom out"
+          onClick={onZoomOut}
+        >
+          &minus;
+        </button>
+        <button
+          type="button"
+          data-testid="canvas-zoom-reset"
+          aria-label="Reset zoom"
+          onClick={onZoomReset}
+        >
+          Reset
+        </button>
+      </div>
+      <svg
+        ref={svgRef}
+        data-testid="nodes-canvas"
+        className="nodes-canvas"
+        viewBox={viewBox}
+        data-pan-x={round(pan.x)}
+        data-pan-y={round(pan.y)}
+        data-zoom={round(zoom)}
+        preserveAspectRatio="xMidYMid meet"
+        data-suppress-motion={suppressMotion ? "true" : "false"}
+        role="img"
+        aria-label="Concept network"
+        onWheel={onWheel}
+        onPointerDown={onBackgroundPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={endGesture}
+        onPointerCancel={endGesture}
+      >
       <defs>
         {/*
           Hand-painted watercolor edge: low-frequency turbulence displaces the
@@ -355,6 +567,8 @@ export function NodesCanvas({
             data-x={round(node.x)}
             data-y={round(node.y)}
             transform={`translate(${node.x} ${node.y})`}
+            style={{ cursor: "grab" }}
+            onPointerDown={(e) => onNodePointerDown(e, node.pageId)}
             onClick={() => onNodeClick(node.pageId)}
             onMouseEnter={() => setHoveredNode(node.pageId)}
             onMouseLeave={() =>
@@ -373,12 +587,40 @@ export function NodesCanvas({
           </g>
         ))}
       </g>
-    </svg>
+      </svg>
+    </div>
   );
 }
 
 /** Vertical spacing between stacked N06 placeholders (presentation only). */
 const PLACEHOLDER_SPACING = 96;
+
+/** Zoom bounds + per-step multiplier for the §3.3 canvas zoom controls. */
+const MIN_ZOOM = 0.2;
+const MAX_ZOOM = 5;
+const ZOOM_STEP = 1.2;
+
+/** Parse an SVG viewBox string into its numeric components. */
+function parseViewBox(vb: string): { x: number; y: number; w: number; h: number } {
+  const [x, y, w, h] = vb.split(/\s+/).map(Number);
+  return { x: x ?? 0, y: y ?? 0, w: w || 1, h: h || 1 };
+}
+
+/**
+ * Fold the pan offset and zoom scale into a base viewBox (§3.3). Zooming in
+ * (scale > 1) shrinks the viewBox around its center so the scene appears
+ * larger; panning shifts the origin. Pure — no camera animation.
+ */
+function applyPanZoom(base: string, pan: { x: number; y: number }, zoom: number): string {
+  const { x, y, w, h } = parseViewBox(base);
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  const zw = w / zoom;
+  const zh = h / zoom;
+  const nx = cx - zw / 2 + pan.x;
+  const ny = cy - zh / 2 + pan.y;
+  return `${round(nx)} ${round(ny)} ${round(zw)} ${round(zh)}`;
+}
 
 function round(n: number): number {
   return Math.round(n * 1000) / 1000;

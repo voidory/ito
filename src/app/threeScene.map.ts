@@ -91,6 +91,31 @@ export interface MapGraphTo3DOptions extends BuildSceneOptions {
 const DEFAULT_DEPTH = 120;
 
 /**
+ * §3.5 FIX-3D-CONTRAST visual descriptors for the 3D dimensional view. These
+ * are PURE plain values (no Three.js) so the high-contrast look is provable in
+ * Vitest without a WebGL render. ThreeScene.tsx reads them to build the scene:
+ *   - a deep twilight-ink backdrop (and matching fog) so glowing nodes and
+ *     translucent hulls read with high contrast instead of washing out on the
+ *     old light-beige background,
+ *   - bright glowing stellar node particles,
+ *   - clearly visible translucent category bubble hulls (opacity 0.28) with a
+ *     subtle rim wireframe,
+ *   - visible connecting lines.
+ */
+export const THREE_D_STYLE = {
+  /** Deep twilight-ink scene background + fog color. */
+  backdrop: "#141824",
+  /** Exponential fog density (gentle; distant nodes recede, never vanish). */
+  fogDensity: 0.0012,
+  /** Glowing stellar node particle color + size + opacity (additive blend). */
+  node: { color: "#eaf2ff", size: 12, opacity: 0.95 },
+  /** Translucent category bubble hull fill + its subtle rim wireframe. */
+  hull: { opacity: 0.28, rimOpacity: 0.22 },
+  /** Visible 3D connecting line opacity. */
+  link: { opacity: 0.75 },
+} as const;
+
+/**
  * Small stable string hash (FNV-1a) used to spread particles through depth
  * deterministically — NOT Math.random, so the 3D cloud is reproducible and the
  * no-forced-motion guarantee carries into 3D.

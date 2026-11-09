@@ -1,0 +1,210 @@
+/*
+ * Warm Archival Research Design System (§3.4, FEAT-003).
+ *
+ * A cohesive, tactile theme layered across the whole shell (App, Library,
+ * Reader, SubjectEditor, HistoryReflectionPanel). It defines the design tokens
+ * as CSS custom properties and styles the raw browser controls (buttons,
+ * segmented view-switch pills, inputs, selects, checkboxes, cards, modals) so
+ * every surface shares one warm-paper identity with crisp local click/panel
+ * feedback.
+ *
+ * STRICT MOTION GATE (R19, A09-M2): all transitions + keyframes are disabled
+ * when [data-suppress-motion="true"] is set on an ancestor OR when the user
+ * prefers reduced motion. The graph camera is never animated unprompted — the
+ * only motion here is LOCAL control/panel feedback.
+ */
+
+:root {
+  /* Core palette (the exact tokens the plan specifies). */
+  --ito-bg-paper: #f8f5ee;
+  --ito-bg-elevated: #ffffff;
+  --ito-ink: #1e232a;
+  --ito-accent: #2c4a6f;
+  --ito-border: #dcd6c8;
+
+  /* Derived accents. */
+  --ito-accent-ink: #ffffff;
+  --ito-accent-soft: rgba(44, 74, 111, 0.12);
+  --ito-muted: #6b6356;
+
+  /* Radii. */
+  --ito-radius-sm: 6px;
+  --ito-radius-md: 10px;
+  --ito-radius-lg: 14px;
+  --ito-radius-pill: 999px;
+
+  /* Shadows (soft, paper-elevation). */
+  --ito-shadow-sm: 0 1px 2px rgba(30, 35, 42, 0.08);
+  --ito-shadow-md: 0 4px 14px rgba(30, 35, 42, 0.12);
+  --ito-shadow-lg: 0 12px 40px rgba(30, 35, 42, 0.22);
+
+  /* Motion: a single crisp local-feedback curve + duration. */
+  --ito-motion-fast: 160ms;
+  --ito-motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* The warm paper backdrop + ink text applied app-wide. */
+body {
+  background: var(--ito-bg-paper);
+  color: var(--ito-ink);
+}
+
+/* --- Buttons ------------------------------------------------------------ */
+button {
+  font: inherit;
+  color: var(--ito-ink);
+  background: var(--ito-bg-elevated);
+  border: 1px solid var(--ito-border);
+  border-radius: var(--ito-radius-sm);
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+  box-shadow: var(--ito-shadow-sm);
+  transition:
+    transform var(--ito-motion-fast) var(--ito-motion-ease),
+    box-shadow var(--ito-motion-fast) var(--ito-motion-ease),
+    background var(--ito-motion-fast) var(--ito-motion-ease),
+    border-color var(--ito-motion-fast) var(--ito-motion-ease);
+}
+
+button:hover {
+  box-shadow: var(--ito-shadow-md);
+  border-color: var(--ito-accent);
+}
+
+/* Subtle tactile press: the control dips slightly on :active. */
+button:active {
+  transform: scale(0.97);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+/* --- Segmented view-switch pills (App view-switch) --------------------- */
+[data-testid="view-switch"] {
+  gap: 0.25rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--ito-bg-paper);
+  border-radius: var(--ito-radius-pill);
+}
+
+[data-testid="view-switch"] button {
+  border-radius: var(--ito-radius-pill);
+  box-shadow: none;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--ito-muted);
+}
+
+[data-testid="view-switch"] button[data-active="true"],
+[data-testid="view-switch"] button[aria-selected="true"] {
+  background: var(--ito-accent);
+  color: var(--ito-accent-ink);
+  border-color: var(--ito-accent);
+  box-shadow: var(--ito-shadow-sm);
+}
+
+/* --- Inputs / selects / textareas -------------------------------------- */
+input,
+select,
+textarea {
+  font: inherit;
+  color: var(--ito-ink);
+  background: var(--ito-bg-elevated);
+  border: 1px solid var(--ito-border);
+  border-radius: var(--ito-radius-sm);
+  padding: 0.35rem 0.5rem;
+  transition:
+    border-color var(--ito-motion-fast) var(--ito-motion-ease),
+    box-shadow var(--ito-motion-fast) var(--ito-motion-ease);
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--ito-accent);
+  box-shadow: 0 0 0 3px var(--ito-accent-soft);
+}
+
+/* Checkboxes pick up the accent tint. */
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--ito-accent);
+}
+
+/* --- Cards + modals ----------------------------------------------------- */
+.ito-card,
+[data-testid$="-modal"],
+[data-testid$="-panel"] {
+  background: var(--ito-bg-elevated);
+  border: 1px solid var(--ito-border);
+  border-radius: var(--ito-radius-md);
+  box-shadow: var(--ito-shadow-md);
+}
+
+/* Modal / drawer / popover fade-and-slide entry. */
+@keyframes ito-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+[data-testid$="-modal"] {
+  animation: ito-pop-in var(--ito-motion-fast) var(--ito-motion-ease);
+}
+
+/* Highlight creation pulse (applied to a freshly committed overlay). */
+@keyframes ito-highlight-pulse {
+  0% {
+    box-shadow: 0 0 0 0 var(--ito-accent-soft);
+  }
+  100% {
+    box-shadow: 0 0 0 10px rgba(44, 74, 111, 0);
+  }
+}
+
+.ito-highlight-pulse {
+  animation: ito-highlight-pulse var(--ito-motion-fast) var(--ito-motion-ease);
+}
+
+/* Node / hub selection ring transition. */
+.graph-node circle,
+.graph-hub {
+  transition:
+    stroke var(--ito-motion-fast) var(--ito-motion-ease),
+    stroke-width var(--ito-motion-fast) var(--ito-motion-ease),
+    filter var(--ito-motion-fast) var(--ito-motion-ease);
+}
+
+/*
+ * STRICT MOTION GATE (R19, A09-M2). Disable EVERY transition, animation and
+ * scroll-behavior under an explicit suppress-motion root or the OS
+ * reduced-motion preference. `!important` guarantees it wins over the local
+ * rules above. The graph camera already never auto-animates; this makes the
+ * whole tactile layer honor the gate app-wide.
+ */
+[data-suppress-motion="true"],
+[data-suppress-motion="true"] * {
+  animation: none !important;
+  transition: none !important;
+  scroll-behavior: auto !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}

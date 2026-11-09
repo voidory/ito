@@ -339,7 +339,7 @@ export interface PassageEvidenceLine {
  * the Nodes concept-network canvas. This is SESSION VIEW STATE (relates D19) —
  * preserved across in-session transitions, writing NO durable record.
  */
-export type ViewMode = "files" | "nodes";
+export type ViewMode = "files" | "nodes" | "history";
 
 /** Immutable snapshot of workbench state the UI renders from. */
 export interface WorkbenchState {
@@ -2614,6 +2614,28 @@ export class Workbench {
   /** Current canvas zoom scale (defaults to 1). */
   zoom(): number {
     return this.data.presentation.zoom ?? 1;
+  }
+
+  /**
+   * A read-only view of the interactive 2D canvas presentation state (§3.3):
+   * the durable per-node drag offsets and absolute position overrides keyed by
+   * page id, plus the canvas zoom. Returns PLAIN copies so a caller (NodesCanvas
+   * / testApi) cannot mutate the underlying record.
+   */
+  presentationView(): {
+    dragOffsets: Record<string, { x: number; y: number }>;
+    nodePositions: Record<string, { x: number; y: number }>;
+    zoom: number;
+  } {
+    const dragOffsets: Record<string, { x: number; y: number }> = {};
+    for (const [id, p] of Object.entries(this.data.presentation.dragOffsets ?? {})) {
+      dragOffsets[id] = { x: p.x, y: p.y };
+    }
+    const nodePositions: Record<string, { x: number; y: number }> = {};
+    for (const [id, p] of Object.entries(this.data.presentation.nodePositions ?? {})) {
+      nodePositions[id] = { x: p.x, y: p.y };
+    }
+    return { dragOffsets, nodePositions, zoom: this.data.presentation.zoom ?? 1 };
   }
 
   /**
