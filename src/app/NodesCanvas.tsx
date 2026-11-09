@@ -781,7 +781,8 @@ export function NodesCanvas({
               data-hub-cy={round(hub.center.y)}
               d={hub.d}
               fill={hub.blendColor}
-              onClick={() => onHubClick(hub.relationshipId)}
+              onClick={() => onOpenConnectingPage(hub.relationshipId)}
+              onDoubleClick={() => onHubClick(hub.relationshipId)}
             />
             {/*
               A13-M2: develop/open the hub's FULL Connecting Page in the

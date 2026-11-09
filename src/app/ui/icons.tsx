@@ -95,4 +95,58 @@ export const Icons = {
       <path d="M2.5 8h11M4.5 5.5L2.5 8l2 2.5M11.5 5.5l2 2.5-2 2.5" />
     </Svg>
   ),
+  plus: (
+    <Svg>
+      <path d="M8 3v10M3 8h10" />
+    </Svg>
+  ),
+  copy: (
+    <Svg>
+      <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" />
+      <path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" />
+    </Svg>
+  ),
+  open: (
+    <Svg>
+      <path d="M9 3h4v4M13 3L7.5 8.5M12 9.5V12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h2.5" />
+    </Svg>
+  ),
+  upload: (
+    <Svg>
+      <path d="M8 10.5V3M5 6l3-3 3 3M3 11.5v1a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1" />
+    </Svg>
+  ),
+  globe: (
+    <Svg>
+      <circle cx="8" cy="8" r="5.5" />
+      <path d="M2.5 8h11M8 2.5c2 2 2 9 0 11M8 2.5c-2 2-2 9 0 11" />
+    </Svg>
+  ),
+  files: (
+    <Svg>
+      <path d="M3.5 2.5h5l3 3v8h-8z" />
+      <path d="M8.5 2.5v3h3" />
+    </Svg>
+  ),
+  history: (
+    <Svg>
+      <path d="M2.5 8a5.5 5.5 0 1 0 1.8-4M2.5 3v3h3M8 5v3l2 1.5" />
+    </Svg>
+  ),
+  inbox: (
+    <Svg>
+      <path d="M2.5 9l1.5-5h8l1.5 5v3.5h-11zM2.5 9h3.5l.5 1.5h3L10 9h3.5" />
+    </Svg>
+  ),
+  reset: (
+    <Svg>
+      <path d="M3 8a5 5 0 1 1 1.6 3.7M3 12V8.5h3.5" />
+    </Svg>
+  ),
+  panel: (
+    <Svg>
+      <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
+      <path d="M10 3v10" />
+    </Svg>
+  ),
 } as const;

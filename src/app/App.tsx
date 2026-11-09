@@ -3,6 +3,8 @@ import { runStartupChecks } from "./startup";
 import { useWorkbench } from "./useWorkbench";
 import { Library } from "./Library";
 import { Reader } from "./Reader";
+import { SubjectEditor } from "./SubjectEditor";
+import { AppContextMenu } from "./AppContextMenu";
 import { NodesCanvas } from "./NodesCanvas";
 import { HistoryReflectionPanel } from "./HistoryReflectionPanel";
 import { NetworkSearch } from "./NetworkSearch";
@@ -17,7 +19,7 @@ import { CaptureProcessingQueue } from "./CaptureProcessingQueue";
 import { revealPresentation } from "./threeScene.map";
 import { installTestApi } from "./testApi";
 import type { KoofrStorageAdapter, StagedImport } from "../storage";
-import type { SourceId } from "../model";
+import type { PageId, SourceId } from "../model";
 import { loadDocument, hashBytes } from "../pdf";
 import { importPdfFiles } from "./pdfImport";
 
@@ -180,6 +182,7 @@ export function App(): JSX.Element {
       onDrop={onShellDrop}
       style={{ fontFamily: "system-ui, sans-serif" }}
     >
+      <AppContextMenu />
       {/* Hidden boot confirmation retained for traceability to the M0 checks. */}
       <span style={{ display: "none" }} data-testid="boot-detail">
         {boot.detail}
@@ -291,6 +294,7 @@ export function App(): JSX.Element {
               categoryScope={state.categoryScope}
               openSourceIds={state.openSourceIds}
               focusedPageId={state.focusedPageId}
+              openSubjectPageId={state.openSubjectPageId}
               suppressMotion={state.suppressMotion}
               bump={bump}
             />
@@ -709,6 +713,7 @@ function NodesView({
   categoryScope,
   openSourceIds,
   focusedPageId,
+  openSubjectPageId,
   suppressMotion,
   bump,
 }: {
@@ -716,6 +721,8 @@ function NodesView({
   categoryScope: string | null;
   openSourceIds: readonly SourceId[];
   focusedPageId: string | null;
+  /** The subject / connecting page opened from the map, shown docked beside it. */
+  openSubjectPageId: PageId | null;
   suppressMotion: boolean;
   bump: () => void;
 }): JSX.Element {
@@ -739,9 +746,9 @@ function NodesView({
       // FIX-TOP-BAR-CLIPPING (§3.5): fill the flex view-body instead of pinning
       // `position: fixed; top: 3rem`, so the canvas can never overdraw the
       // header's bottom edge.
-      style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}
+      style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "row" }}
     >
-      <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
+      <div style={{ flex: 1, minWidth: 0, minHeight: 0, position: "relative" }}>
         {active3D ? (
           // Smooth scale-out transition from the 2D canvas into 3D; an instant
           // swap when motion is suppressed (no scale animation).
@@ -790,6 +797,39 @@ function NodesView({
           </>
         )}
       </div>
+      {/*
+        A node (or a hub's Connecting Page) opened from the map is composed in
+        place: the Subject editor docks beside the map instead of the click
+        silently doing nothing (the editor used to exist only inside the Reader).
+        The map re-fits into the remaining width.
+      */}
+      {openSubjectPageId && !active3D ? (
+        <aside
+          data-testid="nodes-page-dock"
+          data-page-id={openSubjectPageId}
+          className="ito-nodes-dock"
+          aria-label="Page editor"
+        >
+          <SubjectEditor
+            wb={wb}
+            pageId={openSubjectPageId}
+            onFollowSource={(evidenceId) => {
+              // Follow a quote back to its source: switch to the reader with the
+              // source open next to this page.
+              const resolved = wb.resolveEvidenceSource(evidenceId);
+              if (!resolved || resolved.sourceId == null) return;
+              wb.setViewMode("files");
+              wb.openSource(resolved.sourceId);
+              bump();
+            }}
+            onClose={() => {
+              wb.closeSubjectPage();
+              bump();
+            }}
+            bump={bump}
+          />
+        </aside>
+      ) : null}
     </div>
   );
 }

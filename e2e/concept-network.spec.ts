@@ -201,7 +201,8 @@ test("clicking a hub opens the connecting-page label surface", async ({ page }) 
   );
 
   page.once("dialog", (d) => void d.accept("Bridges P and Q"));
-  await page.getByTestId("graph-hub").click();
+  // Double-click edits the short label; a single click opens the page.
+  await page.getByTestId("graph-hub").dblclick();
 
   await expect
     .poll(() => page.evaluate((id) => window.__ito.relationshipLabel(id), relId))
@@ -303,6 +304,8 @@ test("A13-M2: developing a relationship's connection promotes it to a real Conne
   expect(pagesBefore).toBe(2);
 
   // Develop the connection into a full page via the on-canvas control (A13-M2).
+  // The pill is revealed on hover (declutter), so hover the hub first.
+  await page.getByTestId("graph-hub").hover();
   await page.getByTestId("open-connecting-page").click();
 
   // A REAL explanatory Page is created, linked via explanatoryPageId, and opened
@@ -337,4 +340,40 @@ test("A13-M2: developing a relationship's connection promotes it to a real Conne
   const graph = await page.evaluate(() => window.__ito.conceptGraph());
   const link2 = graph.links.find((l) => l.relationshipId === relId2)!;
   expect(link2.endpointPageIds).toContain(explanatoryId);
+});
+
+test("clicking a node opens its page in an editor docked beside the map", async ({ page }) => {
+  await bootToNodesView(page);
+  const [a] = await createPages(page, ["Open me"]);
+
+  await expect(page.getByTestId("nodes-page-dock")).toHaveCount(0);
+  await page.locator(`[data-testid="graph-node"][data-page-id="${a}"] circle`).click();
+
+  const dock = page.getByTestId("nodes-page-dock");
+  await expect(dock).toBeVisible();
+  await expect(dock.getByTestId("subject-editor")).toBeVisible();
+  expect(await page.evaluate(() => window.__ito.openSubjectId())).toBe(a);
+  // The map is still there, sharing the space.
+  await expect(page.getByTestId("nodes-canvas")).toBeVisible();
+
+  // Closing the editor undocks it.
+  await dock.getByTestId("close-subject").click();
+  await expect(page.getByTestId("nodes-page-dock")).toHaveCount(0);
+});
+
+test("clicking a hub opens its Connecting Page docked beside the map", async ({ page }) => {
+  await bootToNodesView(page);
+  const [a, b] = await createPages(page, ["Cause", "Effect"]);
+  const relId = await page.evaluate(
+    ([x, y]) => window.__ito.createRelationship([x!, y!]),
+    [a, b] as const,
+  );
+  await page.getByTestId("graph-hub").click();
+  await expect(page.getByTestId("nodes-page-dock")).toBeVisible();
+  const explanatory = await page.evaluate(
+    (id) => window.__ito.relationshipExplanatoryPageId(id),
+    relId,
+  );
+  expect(explanatory).toBeTruthy();
+  await expect(page.getByTestId("nodes-page-dock")).toHaveAttribute("data-page-id", explanatory!);
 });

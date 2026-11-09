@@ -1133,3 +1133,32 @@ label[data-testid="open-restore-input"]:active {
   border-color: #b3261e;
   color: #fff;
 }
+
+/* --- Nodes view: page editor docked beside the map -------------------- */
+.ito-nodes-dock {
+  flex: 0 0 min(46%, 680px);
+  min-width: 320px;
+  height: 100%;
+  overflow: auto;
+  background: var(--ito-bg-elevated);
+  border-left: 1px solid var(--ito-border);
+  box-shadow: -8px 0 24px rgba(30, 35, 42, 0.08);
+}
+
+/* Context-menu extras */
+.ito-ctx-item[data-active="true"]:not(:disabled) {
+  background: var(--ito-accent-soft);
+}
+
+.ito-ctx-item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.ito-ctx-heading {
+  padding: 4px 10px 2px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ito-muted);
+}
