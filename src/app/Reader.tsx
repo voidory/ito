@@ -864,7 +864,15 @@ function CommentSurface({
         value={draft}
         placeholder="Add a quiet comment (optional)"
         onChange={(e) => setDraft(e.target.value)}
-        style={{ width: "100%", maxWidth: "100%", minHeight: "4rem", boxSizing: "border-box" }}
+        style={{
+          display: "block",
+          width: "100%",
+          minWidth: 0,
+          maxWidth: "100%",
+          minHeight: "4rem",
+          boxSizing: "border-box",
+          resize: "vertical",
+        }}
       />
       {error && (
         <p data-testid="comment-error" role="alert" style={{ color: "#c5221f" }}>
@@ -1436,6 +1444,9 @@ const styles: Record<string, React.CSSProperties> = {
     left: "50%",
     transform: "translateX(-50%)",
     width: "22rem",
+    maxWidth: "calc(100vw - 2rem)",
+    minWidth: 0,
+    boxSizing: "border-box",
     padding: "0.75rem",
     background: "#fff",
     border: "1px solid #ccc",

@@ -42,6 +42,7 @@ async function openFirstDocument(page: Page, titleMatch?: RegExp): Promise<void>
 
 /** The fixture contains "quick brown fox" on each page. */
 const NEEDLE = "quick brown fox";
+const ROTATED_NEEDLE = "Rotated page at 90 degrees";
 
 test("library is the default view and lists imported PDFs by category", async ({ page }) => {
   await bootLibrary(page);
@@ -159,7 +160,41 @@ test("R02: a highlight saves quiet; comment is hidden until explicit reveal, the
   await page.locator(".ito-highlight-fragment").first().click();
   const surface = page.getByTestId("comment-surface");
   await expect(surface).toBeVisible();
-  await page.getByTestId("comment-input").fill("a quiet thought");
+  const commentInput = page.getByTestId("comment-input");
+  await commentInput.fill("A deliberately long annotation comment. ".repeat(12));
+  const originalViewport = page.viewportSize() ?? { width: 1280, height: 720 };
+
+  for (const width of [originalViewport.width, 360]) {
+    await page.setViewportSize({ width, height: originalViewport.height });
+    await expect(surface).toBeVisible();
+    const commentLayout = await surface.evaluate((el) => {
+      const input = el.querySelector("textarea");
+      if (!input) return null;
+      const surfaceRect = el.getBoundingClientRect();
+      const inputRect = input.getBoundingClientRect();
+      const surfaceStyle = getComputedStyle(el);
+      const inputStyle = getComputedStyle(input);
+      return {
+        fitsWithinSurface:
+          inputRect.left >=
+            surfaceRect.left + Number.parseFloat(surfaceStyle.borderLeftWidth) - 0.5 &&
+          inputRect.right <=
+            surfaceRect.right - Number.parseFloat(surfaceStyle.borderRightWidth) + 0.5,
+        fitsWithinViewport: surfaceRect.left >= 0 && surfaceRect.right <= window.innerWidth,
+        resize: inputStyle.resize,
+        boxSizing: inputStyle.boxSizing,
+        noHorizontalOverflow: input.scrollWidth <= input.clientWidth + 1,
+      };
+    });
+    expect(commentLayout?.fitsWithinSurface).toBe(true);
+    expect(commentLayout?.fitsWithinViewport).toBe(true);
+    expect(commentLayout?.resize).toBe("vertical");
+    expect(commentLayout?.boxSizing).toBe("border-box");
+    expect(commentLayout?.noHorizontalOverflow).toBe(true);
+  }
+
+  await page.setViewportSize(originalViewport);
+  await commentInput.fill("a quiet thought");
   await page.getByTestId("comment-save").click();
   // Returns toward the passage, leaving no persistent obstruction.
   await expect(surface).toHaveCount(0);
@@ -169,6 +204,98 @@ test("R02: a highlight saves quiet; comment is hidden until explicit reveal, the
   await expect(page.getByTestId("comment-input")).toHaveValue("a quiet thought");
   await page.getByTestId("comment-cancel").click();
   await expect(page.getByTestId("comment-surface")).toHaveCount(0);
+});
+
+test("rotated PDF pages support real pointer selection and highlight the selected glyphs", async ({
+  page,
+}) => {
+  await openFirstDocument(page, /Rotated Fixture/);
+
+  // Find the live PDF.js range geometry without changing the browser Selection.
+  const target = await page.evaluate((needle) => {
+    const pane = document.querySelector('[data-testid="source-pane"]');
+    const pageEl = pane?.querySelector(".pdf-page");
+    const layer = pageEl?.querySelector(".textLayer");
+    if (!pageEl || !layer) return null;
+
+    const walker = document.createTreeWalker(layer, NodeFilter.SHOW_TEXT);
+    const runs: { node: Text; start: number; end: number }[] = [];
+    let text = "";
+    let node = walker.nextNode();
+    while (node) {
+      const textNode = node as Text;
+      runs.push({ node: textNode, start: text.length, end: text.length + textNode.data.length });
+      text += textNode.data;
+      node = walker.nextNode();
+    }
+
+    const start = text.indexOf(needle);
+    if (start < 0) return null;
+    const end = start + needle.length;
+    const startRun = runs.find((run) => start >= run.start && start < run.end);
+    const endRun = runs.find((run) => end > run.start && end <= run.end);
+    if (!startRun || !endRun) return null;
+
+    const range = document.createRange();
+    range.setStart(startRun.node, start - startRun.start);
+    range.setEnd(endRun.node, end - endRun.start);
+    const rect = range.getBoundingClientRect();
+    const pageRect = pageEl.getBoundingClientRect();
+    return {
+      rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height },
+      pageRect: { left: pageRect.left, top: pageRect.top, width: pageRect.width, height: pageRect.height },
+      spanPosition: getComputedStyle(layer.querySelector("span")!).position,
+      transformOrigin: getComputedStyle(layer.querySelector("span")!).transformOrigin,
+      selectionBackground: getComputedStyle(layer.querySelector("span")!, "::selection").backgroundColor,
+    };
+  }, ROTATED_NEEDLE);
+
+  expect(target).not.toBeNull();
+  expect(target!.rect.height).toBeGreaterThan(target!.rect.width * 5);
+  expect(target!.rect.left).toBeGreaterThan(target!.pageRect.left + target!.pageRect.width / 2);
+  expect(target!.spanPosition).toBe("absolute");
+  expect(target!.transformOrigin).toBe("0px 0px");
+  expect(target!.selectionBackground).not.toBe("rgba(0, 0, 0, 0)");
+
+  // Use a genuine pointer drag, not window.getSelection()/the test helper.
+  // The vertical page text should visibly select from its top to its bottom.
+  const x = target!.rect.left + target!.rect.width / 2;
+  await page.mouse.move(x, target!.rect.top + 1);
+  await page.mouse.down();
+  await page.mouse.move(x, target!.rect.bottom - 1, { steps: 12 });
+  await page.mouse.up();
+
+  const selectedGeometry = await page.evaluate(() => {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return null;
+    const rect = selection.getRangeAt(0).getBoundingClientRect();
+    return {
+      text: selection.toString().trim(),
+      rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height },
+    };
+  });
+  expect(selectedGeometry).not.toBeNull();
+  expect(selectedGeometry!.text).toContain(ROTATED_NEEDLE);
+  expect(selectedGeometry!.rect.height).toBeGreaterThan(selectedGeometry!.rect.width * 5);
+
+  await expect(page.getByTestId("selection-toolbar")).toBeVisible();
+  await page.getByTestId("commit-highlight").click();
+  await expect(page.locator(".ito-highlight-fragment").first()).toBeVisible();
+
+  const overlayBounds = await page.locator(".ito-highlight-fragment").evaluateAll((elements) => {
+    const rects = elements.map((el) => el.getBoundingClientRect());
+    return {
+      left: Math.min(...rects.map((rect) => rect.left)),
+      top: Math.min(...rects.map((rect) => rect.top)),
+      right: Math.max(...rects.map((rect) => rect.right)),
+      bottom: Math.max(...rects.map((rect) => rect.bottom)),
+    };
+  });
+  const selectedRect = selectedGeometry!.rect;
+  expect(Math.abs(overlayBounds.left - selectedRect.left)).toBeLessThan(2);
+  expect(Math.abs(overlayBounds.top - selectedRect.top)).toBeLessThan(2);
+  expect(Math.abs(overlayBounds.right - selectedRect.right)).toBeLessThan(2);
+  expect(Math.abs(overlayBounds.bottom - selectedRect.bottom)).toBeLessThan(2);
 });
 
 test("R03 + R04 + R16 + R17: a 3-page range annotation is one identity with borders + pp. label; micro-highlights stay independent", async ({

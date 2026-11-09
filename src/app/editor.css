@@ -57,3 +57,49 @@ p.copied-comment::before {
   letter-spacing: 0.04em;
   color: #1a56db;
 }
+
+
+/*
+ * PDF.js text-layer layout rules (scoped subset of pdfjs-dist's
+ * text_layer_builder.css). The app renders TextLayer directly rather than
+ * through PDFViewer, so it must supply the span positioning rules itself.
+ * The top-left transform origin is essential for rotated PDF pages.
+ */
+.textLayer {
+  text-align: initial;
+  inset: 0;
+  overflow: clip;
+  opacity: 1;
+  line-height: 1;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  caret-color: CanvasText;
+  z-index: 0;
+}
+
+.textLayer :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+
+.textLayer > :not(.markedContent),
+.textLayer .markedContent span:not(.markedContent) {
+  z-index: 1;
+}
+
+.textLayer span.markedContent {
+  top: 0;
+  height: 0;
+}
+
+.textLayer ::selection {
+  background: rgba(0, 0, 255, 0.25);
+}
+
+.textLayer br::selection {
+  background: transparent;
+}
