@@ -175,3 +175,90 @@ describe("SyncBanner — status + publish/refresh (A20)", () => {
     expect(fresh.syncStatus().state).toBe("up-to-date");
   });
 });
+
+describe("FEAT-003 3.2 SyncBanner configure-sync modal + demo remote", () => {
+  async function mountConfig(
+    wb: Workbench,
+    onConfigureRemote: (remote: KoofrStorageAdapter) => void,
+  ): Promise<HTMLElement> {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root!.render(
+        createElement(SyncBanner, {
+          wb,
+          remote: null,
+          onChange: () => undefined,
+          onConfigureRemote,
+        }),
+      );
+    });
+    return container;
+  }
+
+  it("configure-sync-btn toggles the sync-config-modal open and closed", async () => {
+    const wb = await Workbench.open(new InMemoryStorageAdapter());
+    const el = await mountConfig(wb, () => undefined);
+    expect(el.querySelector('[data-testid="sync-config-modal"]')).toBeNull();
+
+    await click(el.querySelector('[data-testid="configure-sync-btn"]')!);
+    expect(el.querySelector('[data-testid="sync-config-modal"]')).not.toBeNull();
+    // The WebDAV credential inputs + both actions are present.
+    expect(el.querySelector('[data-testid="sync-base-url-input"]')).not.toBeNull();
+    expect(el.querySelector('[data-testid="sync-username-input"]')).not.toBeNull();
+    expect(el.querySelector('[data-testid="sync-app-password-input"]')).not.toBeNull();
+    expect(el.querySelector('[data-testid="use-demo-remote-btn"]')).not.toBeNull();
+
+    await click(el.querySelector('[data-testid="configure-sync-btn"]')!);
+    expect(el.querySelector('[data-testid="sync-config-modal"]')).toBeNull();
+  });
+
+  it("use-demo-remote-btn lifts an in-memory remote that enables publish/refresh and round-trips", async () => {
+    const wb = await Workbench.open(new InMemoryStorageAdapter());
+    let configured: KoofrStorageAdapter | null = null;
+    const el = await mountConfig(wb, (r) => {
+      configured = r;
+    });
+
+    await click(el.querySelector('[data-testid="configure-sync-btn"]')!);
+    await click(el.querySelector('[data-testid="use-demo-remote-btn"]')!);
+
+    expect(configured).not.toBeNull();
+    // The demo remote is a REAL KoofrStorageAdapter; publishing + refreshing a
+    // fresh brain from it round-trips through the in-memory WebDAV fake fetch.
+    await wb.publishToRemote(configured!);
+    expect(wb.syncStatus().state).toBe("up-to-date");
+    const fresh = await Workbench.open(new InMemoryStorageAdapter());
+    await fresh.refreshFromRemote(configured!);
+    expect(fresh.syncStatus().state).toBe("up-to-date");
+  });
+
+  it("re-rendering with the configured remote enables the publish/refresh buttons", async () => {
+    const wb = await Workbench.open(new InMemoryStorageAdapter());
+    let configured: KoofrStorageAdapter | null = null;
+    const el = await mountConfig(wb, (r) => {
+      configured = r;
+    });
+    await click(el.querySelector('[data-testid="configure-sync-btn"]')!);
+    await click(el.querySelector('[data-testid="use-demo-remote-btn"]')!);
+
+    // The shell lifts the remote and re-renders the banner with it wired.
+    await act(async () => {
+      root!.render(
+        createElement(SyncBanner, {
+          wb,
+          remote: configured,
+          onChange: () => undefined,
+          onConfigureRemote: () => undefined,
+        }),
+      );
+    });
+    expect(
+      (el.querySelector('[data-testid="publish-remote-btn"]') as HTMLButtonElement).disabled,
+    ).toBe(false);
+    expect(
+      (el.querySelector('[data-testid="refresh-remote-btn"]') as HTMLButtonElement).disabled,
+    ).toBe(false);
+  });
+});

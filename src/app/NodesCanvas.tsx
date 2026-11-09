@@ -2,13 +2,22 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import {
   buildScene,
   categoryPigment,
+  NATURAL_PALETTE_ORDER,
   type Scene,
   type SceneGraphInput,
   type SceneOffset,
 } from "../network";
-import type { CategoryId, PageId, RelationshipId, SourceId } from "../model";
+import type { CategoryId, PageId, RelationshipId, RelationshipKind, SourceId } from "../model";
 import type { ConceptGraph, Workbench } from "./workbench";
 import "./network.css";
+
+/** The relationship kinds a user can pick when creating a hub (§3.1). */
+const RELATIONSHIP_KINDS: readonly RelationshipKind[] = [
+  "relates",
+  "supports",
+  "contradicts",
+  "derives",
+];
 
 /**
  * NodesCanvas (FEAT-004, spec §3) — the 2D concept-network SVG scene.
@@ -87,6 +96,22 @@ export function NodesCanvas({
   // hub is open so its pill stays reachable during the edit.
   const [hoveredHub, setHoveredHub] = useState<string | null>(null);
   const [editingHub, setEditingHub] = useState<string | null>(null);
+
+  // --- FEAT-003 (3.1) interactive creation toolbar state ------------------
+  // The "+ Category" popover (name + watercolor swatch + membership toggles).
+  const [categoryModalOpen, setCategoryModalOpen] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [newCategoryColor, setNewCategoryColor] = useState<string>(
+    NATURAL_PALETTE_ORDER[0]!,
+  );
+  // "Connect Nodes" multi-select mode and the ordered set of selected pages. A
+  // Set preserves insert order via an array mirror; we keep a plain array so
+  // createRelationship receives endpoints in click order (first = lens anchor).
+  const [connectMode, setConnectMode] = useState(false);
+  const [selectedNodeIds, setSelectedNodeIds] = useState<PageId[]>([]);
+  // The Create-Hub popover controls (kind + label), shown once >=2 selected.
+  const [hubKind, setHubKind] = useState<RelationshipKind>("relates");
+  const [hubLabel, setHubLabel] = useState("");
 
   // --- §3.3 interactive 2D canvas state -----------------------------------
   // Background pan offset folded into the viewBox (data-pan-x / data-pan-y).
@@ -322,10 +347,89 @@ export function NodesCanvas({
   const onNodeClick = (pageId: string): void => {
     // A drag that moved should not also open the page (gesture disambiguation).
     if (dragRef.current?.moved) return;
+    // FEAT-003 (3.1): in Connect Nodes mode a click TOGGLES the node in the
+    // multi-select set (building a hub) rather than opening its page.
+    if (connectMode) {
+      setSelectedNodeIds((prev) =>
+        prev.includes(pageId as PageId)
+          ? prev.filter((id) => id !== (pageId as PageId))
+          : [...prev, pageId as PageId],
+      );
+      return;
+    }
     // Reuse the SubjectEditor open flow: a node IS a page, so clicking opens it
     // for composition (the connecting-page editor path for subject nodes).
     wb.openSubjectPage(pageId as PageId);
     bump();
+  };
+
+  // --- FEAT-003 (3.1) creation handlers ------------------------------------
+  // "+ Subject": prompt a title and create a real subject Page directly in the
+  // network. The new page immediately appears as a graph-node.
+  const onCreateSubject = (): void => {
+    const title = window.prompt("New subject page title", "");
+    if (title === null) return;
+    const trimmed = title.trim();
+    if (trimmed === "") return;
+    void wb.createSubjectPage(trimmed).then(bump);
+  };
+
+  // "+ Category": toggle the creation popover. Entering connect mode / the
+  // category popover are mutually exclusive so only one surface is open.
+  const onToggleCategoryModal = (): void => {
+    setCategoryModalOpen((open) => {
+      const next = !open;
+      if (next) {
+        setConnectMode(false);
+        setSelectedNodeIds([]);
+      }
+      return next;
+    });
+  };
+
+  const onCreateCategory = (): void => {
+    const name = newCategoryName.trim();
+    if (name === "") return;
+    void wb.createCategory(name, newCategoryColor).then(() => {
+      setNewCategoryName("");
+      bump();
+    });
+  };
+
+  // Toggle a page's membership in a category (§3.1) via the real workbench
+  // mutations. Adds when absent, removes when present; both persist.
+  const onToggleMembership = (categoryId: CategoryId, pageId: PageId, isMember: boolean): void => {
+    const op = isMember
+      ? wb.removePageFromCategory(categoryId, pageId)
+      : wb.addPageToCategory(categoryId, pageId);
+    void op.then(bump);
+  };
+
+  // "Connect Nodes": toggle multi-node selection mode. Leaving the mode clears
+  // the selection so stale picks never leak into the next session.
+  const onToggleConnectMode = (): void => {
+    setConnectMode((on) => {
+      const next = !on;
+      if (next) {
+        setCategoryModalOpen(false);
+      }
+      setSelectedNodeIds([]);
+      return next;
+    });
+  };
+
+  // "Create Hub": build a real Relationship from the selected nodes. 2 nodes
+  // make a lens; N>=3 make a star hub (the topology is derived by the engine).
+  const onCreateHub = (): void => {
+    if (selectedNodeIds.length < 2) return;
+    void wb
+      .createRelationship(selectedNodeIds, hubKind, hubLabel.trim())
+      .then(() => {
+        setSelectedNodeIds([]);
+        setHubLabel("");
+        setConnectMode(false);
+        bump();
+      });
   };
 
   return (
@@ -335,6 +439,134 @@ export function NodesCanvas({
       data-suppress-motion={suppressMotion ? "true" : "false"}
       style={{ position: "relative", width: "100%", height: "100%" }}
     >
+      {/* FEAT-003 (3.1) floating creation bar: build the whole concept network
+          with the mouse (+ Subject, + Category, Connect Nodes / Create Hub). */}
+      <div data-testid="nodes-create-bar" className="nodes-create-bar">
+        <button
+          type="button"
+          data-testid="nodes-create-subject-btn"
+          onClick={onCreateSubject}
+        >
+          + Subject
+        </button>
+        <button
+          type="button"
+          data-testid="nodes-create-category-btn"
+          data-active={categoryModalOpen ? "true" : "false"}
+          aria-expanded={categoryModalOpen}
+          onClick={onToggleCategoryModal}
+        >
+          + Category
+        </button>
+        <button
+          type="button"
+          data-testid="nodes-connect-mode-btn"
+          data-active={connectMode ? "true" : "false"}
+          aria-pressed={connectMode}
+          onClick={onToggleConnectMode}
+        >
+          {connectMode ? "Connecting…" : "Connect Nodes"}
+        </button>
+      </div>
+
+      {/* §3.1 category creation + membership popover. */}
+      {categoryModalOpen && (
+        <div data-testid="nodes-category-modal" className="nodes-category-modal">
+          <h3>New category</h3>
+          <input
+            type="text"
+            data-testid="nodes-category-name-input"
+            placeholder="Category name"
+            value={newCategoryName}
+            onChange={(e) => setNewCategoryName(e.target.value)}
+          />
+          <div className="nodes-swatch-row" data-testid="nodes-category-swatches">
+            {NATURAL_PALETTE_ORDER.map((color) => (
+              <button
+                key={color}
+                type="button"
+                data-testid="nodes-category-swatch"
+                data-color={color}
+                data-selected={newCategoryColor === color ? "true" : "false"}
+                aria-label={`Use ${color}`}
+                className="nodes-swatch"
+                style={{ background: color }}
+                onClick={() => setNewCategoryColor(color)}
+              />
+            ))}
+          </div>
+          <button
+            type="button"
+            data-testid="nodes-category-create-btn"
+            onClick={onCreateCategory}
+          >
+            Create category
+          </button>
+
+          {/* Per-category membership toggles for every existing Subject Page. */}
+          {graph.categories.map((cat) => (
+            <div key={cat.categoryId} data-testid="nodes-category-membership">
+              <h3>{cat.name}</h3>
+              <div className="nodes-category-members">
+                {graph.nodes.map((node) => {
+                  const isMember = cat.memberPageIds.includes(node.pageId);
+                  return (
+                    <label
+                      key={node.pageId}
+                      className="nodes-category-member"
+                      data-testid="nodes-category-member"
+                      data-category-id={cat.categoryId}
+                      data-page-id={node.pageId}
+                    >
+                      <input
+                        type="checkbox"
+                        data-testid="nodes-category-member-toggle"
+                        data-category-id={cat.categoryId}
+                        data-page-id={node.pageId}
+                        checked={isMember}
+                        onChange={() =>
+                          onToggleMembership(cat.categoryId, node.pageId, isMember)
+                        }
+                      />
+                      {node.title}
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* §3.1 Create Hub popover: shown once >=2 nodes are selected in connect
+          mode. 2 nodes -> lens, N>=3 -> star (topology derived by the engine). */}
+      {connectMode && selectedNodeIds.length >= 2 && (
+        <div data-testid="nodes-hub-modal" className="nodes-hub-modal">
+          <h3>Create hub ({selectedNodeIds.length} nodes)</h3>
+          <select
+            data-testid="nodes-hub-kind-select"
+            value={hubKind}
+            onChange={(e) => setHubKind(e.target.value as RelationshipKind)}
+          >
+            {RELATIONSHIP_KINDS.map((kind) => (
+              <option key={kind} value={kind}>
+                {kind}
+              </option>
+            ))}
+          </select>
+          <input
+            type="text"
+            data-testid="nodes-hub-label-input"
+            placeholder="Connection label"
+            value={hubLabel}
+            onChange={(e) => setHubLabel(e.target.value)}
+          />
+          <button type="button" data-testid="nodes-create-hub-btn" onClick={onCreateHub}>
+            Create Hub
+          </button>
+        </div>
+      )}
+
       {/* §3.3 zoom controls — wired to wb.setZoom via the folded viewBox. */}
       <div data-testid="canvas-zoom-controls" className="canvas-zoom-controls">
         <button
@@ -594,6 +826,7 @@ export function NodesCanvas({
             data-testid="graph-node"
             data-page-id={node.pageId}
             data-focused={focusedPageId === node.pageId ? "true" : "false"}
+            data-selected={selectedNodeIds.includes(node.pageId as PageId) ? "true" : "false"}
             data-x={round(node.x)}
             data-y={round(node.y)}
             transform={`translate(${node.x} ${node.y})`}

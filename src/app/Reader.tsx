@@ -50,6 +50,54 @@ export interface OffloadedPopover {
 }
 
 /**
+ * FEAT-003 (3.3) a requestAnimationFrame scroll coalescer. Scrolling the
+ * SourcePane used to call the root bump() on EVERY scroll tick, which forces a
+ * whole-app re-render (every open pane, the subject editor, the network search)
+ * on each wheel/touch frame. The inter-pane evidence lines already recompute
+ * themselves from a local, rAF-coalesced scroll listener (PassageEvidenceLines)
+ * and the per-page highlight overlays are painted directly into the DOM, so the
+ * scroll handler never needs to go through React at all.
+ *
+ * This helper keeps at most ONE frame scheduled at a time: repeated schedule()
+ * calls within a single frame collapse into a single `onFrame` invocation, and
+ * cancel() tears the pending frame down on unmount. It is pure (no React) so it
+ * can be unit-tested headlessly, and it NEVER calls bump().
+ */
+export interface ScrollCoalescer {
+  /** Request an `onFrame` run on the next animation frame (coalesced). */
+  readonly schedule: () => void;
+  /** Cancel any pending frame (call on unmount). */
+  readonly cancel: () => void;
+}
+
+export function createScrollCoalescer(onFrame: () => void): ScrollCoalescer {
+  let frame = 0;
+  const raf =
+    typeof requestAnimationFrame === "function"
+      ? requestAnimationFrame
+      : (cb: FrameRequestCallback): number => setTimeout(() => cb(0), 16) as unknown as number;
+  const caf =
+    typeof cancelAnimationFrame === "function"
+      ? cancelAnimationFrame
+      : (handle: number): void => clearTimeout(handle);
+  const schedule = (): void => {
+    // A frame is already pending: coalesce this tick into it (do not stack).
+    if (frame !== 0) return;
+    frame = raf(() => {
+      frame = 0;
+      onFrame();
+    });
+  };
+  const cancel = (): void => {
+    if (frame !== 0) {
+      caf(frame);
+      frame = 0;
+    }
+  };
+  return { schedule, cancel };
+}
+
+/**
  * The reading workbench (spec section 6). Renders one or more open documents
  * with real selectable pdf.js text. When the highlights tab is closed the
  * reader is centred + expanded and the sidebar reserves ZERO width (R18).
@@ -375,7 +423,6 @@ export function Reader({
                       : null
                   }
                   openSourceIds={openSourceIds}
-                  onScroll={() => bump()}
                   registerScroll={(el) => registerPaneScroll(slot.slotId, el)}
                   bump={bump}
                 />
@@ -625,7 +672,6 @@ function SourcePane({
   onToggleMotion,
   returnTarget,
   openSourceIds,
-  onScroll,
   registerScroll,
   bump,
 }: {
@@ -635,7 +681,6 @@ function SourcePane({
   onToggleMotion: (suppress: boolean) => void;
   returnTarget: ReturnTarget | null;
   openSourceIds: readonly SourceId[];
-  onScroll: () => void;
   registerScroll: (el: HTMLElement | null) => void;
   bump: () => void;
 }): JSX.Element {
@@ -703,6 +748,28 @@ function SourcePane({
         .forEach((el) => el.setAttribute("data-selected", "true"));
     }
   }, [wb, sourceId, suppressMotion]);
+
+  // FEAT-003 (3.3) rAF-coalesced LOCAL scroll handling. Scrolling re-paints the
+  // per-page highlight overlays directly into the DOM (redrawOverlays) so they
+  // stay pinned to their pages; it NEVER calls the root bump(), so scrolling a
+  // reader pane no longer forces a whole-app re-render. The inter-pane evidence
+  // lines are updated separately by PassageEvidenceLines' own scroll listener.
+  // A single frame is scheduled at a time and torn down on unmount.
+  const redrawOverlaysRef = useRef(redrawOverlays);
+  redrawOverlaysRef.current = redrawOverlays;
+  const scrollCoalescerRef = useRef<ScrollCoalescer | null>(null);
+  if (scrollCoalescerRef.current === null) {
+    scrollCoalescerRef.current = createScrollCoalescer(() => {
+      redrawOverlaysRef.current();
+    });
+  }
+  const onPaneScroll = useCallback(() => {
+    scrollCoalescerRef.current?.schedule();
+  }, []);
+  useEffect(() => {
+    const coalescer = scrollCoalescerRef.current;
+    return () => coalescer?.cancel();
+  }, []);
 
   // Render the document pages once.
   useEffect(() => {
@@ -1553,7 +1620,7 @@ function SourcePane({
         data-testid="pane-scroll"
         data-source-id={sourceId}
         style={styles.paneScroll}
-        onScroll={onScroll}
+        onScroll={onPaneScroll}
       >
         <div
           ref={mountRef}

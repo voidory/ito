@@ -22,6 +22,142 @@
   height: 100%;
 }
 
+/*
+ * FEAT-003 (3.1) floating creation bar: lets the user build the whole concept
+ * network with the mouse (+ Subject, + Category, Connect Nodes). It floats over
+ * the canvas top-left so it never obscures the zoom controls (bottom-right).
+ */
+.nodes-create-bar {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.45rem;
+  border-radius: 10px;
+  background: rgba(251, 250, 247, 0.94);
+  border: 1px solid rgba(138, 127, 112, 0.35);
+  box-shadow: 0 1px 6px rgba(40, 40, 40, 0.12);
+}
+
+.nodes-create-bar button {
+  font: 600 12px system-ui, sans-serif;
+  padding: 0.3rem 0.6rem;
+  border-radius: 7px;
+  border: 1px solid rgba(138, 127, 112, 0.45);
+  background: #ffffff;
+  color: #3a3733;
+  cursor: pointer;
+}
+
+.nodes-create-bar button:hover {
+  background: #f1ede4;
+}
+
+.nodes-create-bar button[data-active="true"] {
+  background: #4b5578;
+  border-color: #4b5578;
+  color: #fbfaf7;
+}
+
+/* §3.1 category creation + membership popover. */
+.nodes-category-modal {
+  position: absolute;
+  top: 3.6rem;
+  left: 1rem;
+  z-index: 4;
+  width: 20rem;
+  max-height: 70%;
+  overflow: auto;
+  padding: 0.85rem;
+  border-radius: 12px;
+  background: #fbfaf7;
+  border: 1px solid rgba(138, 127, 112, 0.5);
+  box-shadow: 0 6px 24px rgba(40, 40, 40, 0.2);
+  font: 400 13px system-ui, sans-serif;
+  color: #3a3733;
+}
+
+.nodes-category-modal h3 {
+  margin: 0 0 0.5rem;
+  font: 700 13px system-ui, sans-serif;
+}
+
+.nodes-category-modal input[type="text"] {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.35rem 0.5rem;
+  margin-bottom: 0.5rem;
+  border-radius: 6px;
+  border: 1px solid rgba(138, 127, 112, 0.5);
+}
+
+.nodes-swatch-row {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.6rem;
+}
+
+.nodes-swatch {
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+}
+
+.nodes-swatch[data-selected="true"] {
+  border-color: #3a3733;
+}
+
+.nodes-category-members {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0.4rem 0 0.6rem;
+}
+
+.nodes-category-member {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+/* §3.1 Create Hub popover, shown once >=2 nodes are selected in connect mode. */
+.nodes-hub-modal {
+  position: absolute;
+  top: 3.6rem;
+  left: 1rem;
+  z-index: 4;
+  width: 18rem;
+  padding: 0.85rem;
+  border-radius: 12px;
+  background: #fbfaf7;
+  border: 1px solid rgba(138, 127, 112, 0.5);
+  box-shadow: 0 6px 24px rgba(40, 40, 40, 0.2);
+  font: 400 13px system-ui, sans-serif;
+  color: #3a3733;
+}
+
+.nodes-hub-modal select,
+.nodes-hub-modal input[type="text"] {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.35rem 0.5rem;
+  margin-bottom: 0.5rem;
+  border-radius: 6px;
+  border: 1px solid rgba(138, 127, 112, 0.5);
+}
+
+/* Selected-in-connect-mode node emphasis. */
+.graph-node[data-selected="true"] circle {
+  fill: #b5653f;
+  stroke: #b5653f;
+  stroke-width: 3;
+}
+
 /* Floating zoom controls (§3.3): pan/zoom affordances over the canvas. */
 .canvas-zoom-controls {
   position: absolute;

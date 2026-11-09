@@ -73,6 +73,24 @@ function pointer(type: string, props: { clientX?: number; clientY?: number; poin
   return ev;
 }
 
+/** Set a controlled input's value via the native setter so React's onChange fires. */
+function setNativeInputValue(input: HTMLInputElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(
+    window.HTMLInputElement.prototype,
+    "value",
+  )?.set;
+  setter?.call(input, value);
+}
+
+/** Set a controlled <select>'s value via the native setter so onChange fires. */
+function setNativeSelectValue(select: HTMLSelectElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(
+    window.HTMLSelectElement.prototype,
+    "value",
+  )?.set;
+  setter?.call(select, value);
+}
+
 async function makePages(wb: Workbench, titles: readonly string[]): Promise<PageId[]> {
   const ids: PageId[] = [];
   for (const t of titles) ids.push((await wb.createSubjectPage(t)).id);
@@ -412,5 +430,254 @@ describe("NodesCanvas — renders from live Workbench records", () => {
     expect(Math.abs(off!.x) + Math.abs(off!.y)).toBeGreaterThan(0);
     // Dragging records NO history revision (FEAT-001 excludes drag frames).
     expect(wb.revisions().length).toBe(0);
+  });
+
+  // --- FEAT-003 (3.1) interactive creation toolbar ------------------------
+
+  async function mountWithBump(wb: Workbench, bump: () => void): Promise<HTMLElement> {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root!.render(
+        createElement(NodesCanvas, { wb, suppressMotion: false, bump }),
+      );
+    });
+    return container;
+  }
+
+  it("3.1: + Subject prompts a title and calls wb.createSubjectPage", async () => {
+    const wb = await Workbench.open(new InMemoryStorageAdapter());
+    const el = await mount(wb);
+    const originalPrompt = window.prompt;
+    (window as unknown as { prompt: () => string | null }).prompt = () => "Photosynthesis";
+    try {
+      const btn = el.querySelector(
+        '[data-testid="nodes-create-subject-btn"]',
+      ) as HTMLButtonElement;
+      expect(btn).not.toBeNull();
+      await act(async () => {
+        btn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+    } finally {
+      (window as unknown as { prompt: typeof window.prompt }).prompt = originalPrompt;
+    }
+    const pages = wb.rawData().pages;
+    expect(pages.some((p) => p.title === "Photosynthesis")).toBe(true);
+  });
+
+  it("3.1: + Subject does nothing when the prompt is cancelled", async () => {
+    const wb = await Workbench.open(new InMemoryStorageAdapter());
+    const el = await mount(wb);
+    const originalPrompt = window.prompt;
+    (window as unknown as { prompt: () => string | null }).prompt = () => null;
+    try {
+      const btn = el.querySelector(
+        '[data-testid="nodes-create-subject-btn"]',
+      ) as HTMLButtonElement;
+      await act(async () => {
+        btn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+    } finally {
+      (window as unknown as { prompt: typeof window.prompt }).prompt = originalPrompt;
+    }
+    expect(wb.rawData().pages.length).toBe(0);
+  });
+
+  it("3.1: + Category opens nodes-category-modal and creates a category via wb.createCategory", async () => {
+    const wb = await Workbench.open(new InMemoryStorageAdapter());
+    const el = await mount(wb);
+
+    // The modal is closed initially.
+    expect(el.querySelector('[data-testid="nodes-category-modal"]')).toBeNull();
+
+    const openBtn = el.querySelector(
+      '[data-testid="nodes-create-category-btn"]',
+    ) as HTMLButtonElement;
+    await act(async () => {
+      openBtn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    const modal = el.querySelector('[data-testid="nodes-category-modal"]');
+    expect(modal).not.toBeNull();
+
+    // Pick a watercolor swatch and type a name.
+    const swatch = el.querySelector('[data-testid="nodes-category-swatch"]') as HTMLButtonElement;
+    expect(swatch).not.toBeNull();
+    await act(async () => {
+      swatch.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    const nameInput = el.querySelector(
+      '[data-testid="nodes-category-name-input"]',
+    ) as HTMLInputElement;
+    await act(async () => {
+      setNativeInputValue(nameInput, "Ecology");
+      nameInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const createBtn = el.querySelector(
+      '[data-testid="nodes-category-create-btn"]',
+    ) as HTMLButtonElement;
+    await act(async () => {
+      createBtn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const cats = wb.rawData().categories;
+    expect(cats.some((c) => c.name === "Ecology")).toBe(true);
+    const ecology = cats.find((c) => c.name === "Ecology")!;
+    expect(ecology.colorCode).toBe(swatch.getAttribute("data-color"));
+  });
+
+  it("3.1: the category membership toggle adds and removes a page via the workbench", async () => {
+    const wb = await Workbench.open(new InMemoryStorageAdapter());
+    const [a] = await makePages(wb, ["Alpha"]);
+    const cat = await wb.createCategory("Theme", "#4b5578", []);
+    const el = await mount(wb);
+
+    // Open the category popover so the membership toggles render.
+    const openBtn = el.querySelector(
+      '[data-testid="nodes-create-category-btn"]',
+    ) as HTMLButtonElement;
+    await act(async () => {
+      openBtn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    const toggle = el.querySelector(
+      `[data-testid="nodes-category-member-toggle"][data-category-id="${cat.id}"][data-page-id="${a}"]`,
+    ) as HTMLInputElement;
+    expect(toggle).not.toBeNull();
+    expect(toggle.checked).toBe(false);
+
+    // Check -> adds the page to the category.
+    await act(async () => {
+      toggle.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(wb.rawData().categories.find((c) => c.id === cat.id)!.memberPageIds).toContain(a);
+  });
+
+  it("3.1: Connect Nodes multi-select reveals nodes-create-hub-btn and creates a 2-node lens", async () => {
+    const wb = await Workbench.open(new InMemoryStorageAdapter());
+    const [a, b] = await makePages(wb, ["A", "B"]);
+    const el = await mount(wb);
+
+    // No hub modal until connect mode selects >=2 nodes.
+    expect(el.querySelector('[data-testid="nodes-create-hub-btn"]')).toBeNull();
+
+    const connectBtn = el.querySelector(
+      '[data-testid="nodes-connect-mode-btn"]',
+    ) as HTMLButtonElement;
+    await act(async () => {
+      connectBtn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(connectBtn.getAttribute("data-active")).toBe("true");
+
+    const nodeA = el.querySelector(`[data-testid="graph-node"][data-page-id="${a}"]`)!;
+    const nodeB = el.querySelector(`[data-testid="graph-node"][data-page-id="${b}"]`)!;
+    await act(async () => {
+      nodeA.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    // One selected: still no create-hub button.
+    expect(el.querySelector('[data-testid="nodes-create-hub-btn"]')).toBeNull();
+    await act(async () => {
+      nodeB.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    const hubBtn = el.querySelector('[data-testid="nodes-create-hub-btn"]') as HTMLButtonElement;
+    expect(hubBtn).not.toBeNull();
+    // Both nodes are marked selected.
+    expect(nodeA.getAttribute("data-selected")).toBe("true");
+    expect(nodeB.getAttribute("data-selected")).toBe("true");
+
+    await act(async () => {
+      hubBtn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const rels = wb.rawData().relationships;
+    expect(rels.length).toBe(1);
+    const rel = rels[0]!;
+    expect([...(rel.endpointPageIds ?? [])].sort()).toEqual([a!, b!].sort());
+    expect(rel.kind).toBe("relates");
+  });
+
+  it("3.1: Create Hub honors each relationship kind and builds an N>=3 star hub", async () => {
+    for (const kind of ["relates", "supports", "contradicts", "derives"] as const) {
+      const wb = await Workbench.open(new InMemoryStorageAdapter());
+      const ids = await makePages(wb, ["A", "B", "C"]);
+      const el = await mount(wb);
+
+      const connectBtn = el.querySelector(
+        '[data-testid="nodes-connect-mode-btn"]',
+      ) as HTMLButtonElement;
+      await act(async () => {
+        connectBtn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+      for (const id of ids) {
+        const node = el.querySelector(`[data-testid="graph-node"][data-page-id="${id}"]`)!;
+        await act(async () => {
+          node.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        });
+      }
+      const select = el.querySelector(
+        '[data-testid="nodes-hub-kind-select"]',
+      ) as HTMLSelectElement;
+      await act(async () => {
+        setNativeSelectValue(select, kind);
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      const hubBtn = el.querySelector('[data-testid="nodes-create-hub-btn"]') as HTMLButtonElement;
+      await act(async () => {
+        hubBtn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      const rels = wb.rawData().relationships;
+      expect(rels.length).toBe(1);
+      const rel = rels[0]!;
+      expect(rel.kind).toBe(kind);
+      expect((rel.endpointPageIds ?? []).length).toBe(3);
+
+      // Reset the shared container between iterations.
+      if (root) act(() => root!.unmount());
+      container?.remove();
+      root = null;
+      container = null;
+    }
+  });
+
+  it("3.1: clicking a node in connect mode does NOT open its subject page", async () => {
+    const wb = await Workbench.open(new InMemoryStorageAdapter());
+    const [a] = await makePages(wb, ["A"]);
+    let bumps = 0;
+    const el = await mountWithBump(wb, () => {
+      bumps += 1;
+    });
+    const connectBtn = el.querySelector(
+      '[data-testid="nodes-connect-mode-btn"]',
+    ) as HTMLButtonElement;
+    await act(async () => {
+      connectBtn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    const node = el.querySelector(`[data-testid="graph-node"][data-page-id="${a}"]`)!;
+    await act(async () => {
+      node.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    // Selecting a node in connect mode never opens the subject page.
+    expect(wb.snapshot().openSubjectPageId).toBeNull();
+    expect(node.getAttribute("data-selected")).toBe("true");
   });
 });

@@ -14,7 +14,7 @@ import { MobileReaderSheet } from "./MobileReaderSheet";
 import { CaptureProcessingQueue } from "./CaptureProcessingQueue";
 import { revealPresentation } from "./threeScene.map";
 import { installTestApi } from "./testApi";
-import type { StagedImport } from "../storage";
+import type { KoofrStorageAdapter, StagedImport } from "../storage";
 import type { SourceId } from "../model";
 import { loadDocument, hashBytes } from "../pdf";
 
@@ -42,6 +42,10 @@ export function App(): JSX.Element {
   // import report are mounted from the shell behind visible triggers.
   const [backupModalOpen, setBackupModalOpen] = useState(false);
   const [staged, setStaged] = useState<StagedImport | null>(null);
+  // FEAT-003 (3.2): the live remote-sync adapter, lifted into the shell so the
+  // SyncBanner's Configure Sync modal can wire a WebDAV or local demo remote
+  // and the publish/refresh controls become enabled once configured.
+  const [remote, setRemote] = useState<KoofrStorageAdapter | null>(null);
 
   const onRestoreFile = useCallback(
     async (file: File | null) => {
@@ -192,7 +196,15 @@ export function App(): JSX.Element {
               {/* M4 (§16.1, A20) remote-sync status + publish/refresh. The remote
                   adapter is wired at runtime once Koofr credentials exist; the
                   banner still shows status (and disables actions) without one. */}
-              <SyncBanner wb={wb} remote={null} onChange={bump} />
+              <SyncBanner
+                wb={wb}
+                remote={remote}
+                onChange={bump}
+                onConfigureRemote={(adapter) => {
+                  setRemote(adapter);
+                  bump();
+                }}
+              />
               {/* M5 (A21) deterministic Phone Reading toggle. */}
               <button
                 data-testid="toggle-mobile-mode"
