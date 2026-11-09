@@ -59,6 +59,15 @@
   fill: #55504a;
   opacity: 0.8;
   pointer-events: none;
+  /*
+   * FIX-NODES-LABEL-OVERLAP (§3.2): render the label with a clean readable halo
+   * so node dots never visually overdraw the category name. The label sits at
+   * the top arch of the squircle (y = cy - ry - 8, set in NodesCanvas.tsx).
+   */
+  paint-order: stroke fill;
+  stroke: #f8f5ee;
+  stroke-width: 4px;
+  stroke-linejoin: round;
 }
 
 /* Category-to-category boundary connection (A14-M2). */

@@ -80,6 +80,13 @@ export function NodesCanvas({
   bump: () => void;
 }): JSX.Element {
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
+  // FIX-NODES-LABEL-OVERLAP (§3.2): the "Open connecting page" action pill is
+  // hidden until a hub is hovered OR actively selected/editing, so the pills no
+  // longer render permanently on every hub and overdraw nearby node dots and
+  // category labels. `editingHub` latches while the inline label prompt for a
+  // hub is open so its pill stays reachable during the edit.
+  const [hoveredHub, setHoveredHub] = useState<string | null>(null);
+  const [editingHub, setEditingHub] = useState<string | null>(null);
 
   // --- §3.3 interactive 2D canvas state -----------------------------------
   // Background pan offset folded into the viewBox (data-pan-x / data-pan-y).
@@ -301,7 +308,9 @@ export function NodesCanvas({
   const onHubClick = (relationshipId: string): void => {
     const current =
       graph.links.find((l) => l.relationshipId === relationshipId)?.label ?? "";
+    setEditingHub(relationshipId);
     const next = window.prompt("Connecting page label", current);
+    setEditingHub(null);
     if (next === null) return;
     void wb.setRelationshipLabel(relationshipId as RelationshipId, next).then(bump);
   };
@@ -516,8 +525,22 @@ export function NodesCanvas({
 
       {/* Relationship hubs ("The Bump"). */}
       <g data-testid="hub-layer">
-        {scene.hubs.map((hub) => (
-          <g key={hub.relationshipId} data-testid="hub-group">
+        {scene.hubs.map((hub) => {
+          // FIX-NODES-LABEL-OVERLAP (§3.2): only reveal the action pill for the
+          // hovered or actively-selected/editing hub so pills never render
+          // permanently on all hubs and overdraw neighbouring dots/labels.
+          const pillVisible =
+            hoveredHub === hub.relationshipId || editingHub === hub.relationshipId;
+          return (
+          <g
+            key={hub.relationshipId}
+            data-testid="hub-group"
+            data-hub-active={pillVisible ? "true" : "false"}
+            onMouseEnter={() => setHoveredHub(hub.relationshipId)}
+            onMouseLeave={() =>
+              setHoveredHub((cur) => (cur === hub.relationshipId ? null : cur))
+            }
+          >
             <path
               className="graph-hub"
               data-testid="graph-hub"
@@ -535,22 +558,29 @@ export function NodesCanvas({
               SubjectEditor. Distinct from the inline short-label edit (the
               graph-hub click above, which keeps the prompt path reachable).
               Clicking lazily creates-or-opens the explanatory subject Page and
-              bumps so the shell re-renders into the editor.
+              bumps so the shell re-renders into the editor. Hidden until the
+              hub is hovered or selected/editing (§3.2 declutter).
             */}
             <text
               className="open-connecting-page"
               data-testid="open-connecting-page"
               data-relationship-id={hub.relationshipId}
+              data-pill-visible={pillVisible ? "true" : "false"}
               x={round(hub.center.x)}
               y={round(hub.center.y) + 22}
               textAnchor="middle"
               role="button"
+              style={{
+                opacity: pillVisible ? 1 : 0,
+                pointerEvents: pillVisible ? "auto" : "none",
+              }}
               onClick={() => onOpenConnectingPage(hub.relationshipId)}
             >
               Open connecting page
             </text>
           </g>
-        ))}
+          );
+        })}
       </g>
 
       {/* Circular dot nodes with minimal hover labels. */}

@@ -147,6 +147,10 @@ export function App(): JSX.Element {
     <div
       data-testid="app-status"
       data-state="ready"
+      // FIX-TOP-BAR-CLIPPING (§3.5): the shell root is a strict flex column so
+      // the header never gets clipped by the Nodes/3D canvas; see .app-shell in
+      // theme.css (height:100vh; flex column; overflow:hidden).
+      className="app-shell"
       // Propagate the motion-suppression gate to the shell root so theme.css
       // disables every transition/keyframe app-wide (R19, A09-M2).
       data-suppress-motion={state?.suppressMotion ? "true" : "false"}
@@ -165,6 +169,7 @@ export function App(): JSX.Element {
           */}
           <div
             data-testid="shell-header"
+            className="shell-header"
             style={{
               display: "flex",
               alignItems: "center",
@@ -196,7 +201,16 @@ export function App(): JSX.Element {
               <button data-testid="open-backup-export" onClick={() => setBackupModalOpen(true)}>
                 Backup
               </button>
-              <label data-testid="restore-backup-label" style={{ cursor: "pointer" }}>
+              {/* FIX-RESTORE-BUTTON-STYLE (§3.5): the label is styled like
+                  .ito-btn/button in theme.css so "Restore" visually matches
+                  "Backup". The original restore-backup-label testid is kept for
+                  back-compat; open-restore-input is the §3.5-named selector. */}
+              <label
+                data-testid="open-restore-input"
+                data-legacy-testid="restore-backup-label"
+                className="ito-btn restore-backup-label"
+                style={{ cursor: "pointer" }}
+              >
                 Restore
                 <input
                   data-testid="restore-backup-input"
@@ -226,17 +240,24 @@ export function App(): JSX.Element {
               }}
             />
           )}
+          {/*
+            FIX-TOP-BAR-CLIPPING (§3.5): the view body takes the remaining
+            height (flex:1; min-height:0) and is the positioning context for the
+            canvases, so the header's bottom edge is no longer overdrawn. The
+            previous `position: fixed; inset: 0; top: 3rem` containers are gone.
+          */}
+          <div className="view-body" data-testid="view-body">
           {state.viewMode === "captures" ? (
             <div
               data-testid="captures-view"
-              style={{ position: "fixed", inset: 0, top: "3rem", overflow: "auto" }}
+              style={{ position: "absolute", inset: 0, overflow: "auto" }}
             >
               <CaptureProcessingQueue wb={wb} onChange={bump} />
             </div>
           ) : state.viewMode === "history" ? (
             <div
               data-testid="history-view"
-              style={{ position: "fixed", inset: 0, top: "3rem", overflow: "auto" }}
+              style={{ position: "absolute", inset: 0, overflow: "auto" }}
             >
               <HistoryReflectionPanel wb={wb} onChange={bump} />
             </div>
@@ -272,7 +293,7 @@ export function App(): JSX.Element {
             // zoom survive the related-writing bottom sheet round-trip.
             <div
               data-testid="mobile-reader-view"
-              style={{ position: "fixed", inset: 0, top: "3rem", overflow: "auto" }}
+              style={{ position: "absolute", inset: 0, overflow: "auto" }}
             >
               <MobileReaderSheet
                 wb={wb}
@@ -300,6 +321,7 @@ export function App(): JSX.Element {
               bump={bump}
             />
           )}
+          </div>
         </>
       ) : (
         <p style={{ padding: "2rem" }}>Loading workbench…</p>
@@ -419,7 +441,10 @@ function NodesView({
   return (
     <div
       data-testid="nodes-view"
-      style={{ position: "fixed", inset: 0, top: "3rem", display: "flex", flexDirection: "column" }}
+      // FIX-TOP-BAR-CLIPPING (§3.5): fill the flex view-body instead of pinning
+      // `position: fixed; top: 3rem`, so the canvas can never overdraw the
+      // header's bottom edge.
+      style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}
     >
       <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
         {active3D ? (

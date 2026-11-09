@@ -12,6 +12,7 @@
 
 import type {
   AnnotationId,
+  CaptureId,
   CategoryId,
   NormalizedRect,
   PageId,
@@ -19,6 +20,7 @@ import type {
   RelationshipKind,
   SourceId,
 } from "../model";
+import type { SyncStatus } from "./workbench";
 import {
   hydrateState,
   outline,
@@ -27,7 +29,7 @@ import {
   type DocumentJson,
 } from "../editor";
 import { buildScene, squircleContains, type SceneGraphInput } from "../network";
-import type { StagedImport } from "../storage";
+import { KoofrStorageAdapter, type StagedImport } from "../storage";
 import { isWebGLAvailable } from "./ThreeScene";
 import { Workbench } from "./workbench";
 
@@ -52,6 +54,19 @@ function serializeStaged(staged: StagedImport): {
     };
   }
   return { outcome: staged.outcome, findings: [], reason: null };
+}
+
+/** Flatten a SyncStatus into the serializable shape the e2e specs assert. */
+function serializeSync(status: SyncStatus): {
+  state: string;
+  lastSyncedRevision: number | null;
+  reason?: string;
+} {
+  return {
+    state: status.state,
+    lastSyncedRevision: status.lastSyncedRevision,
+    ...(status.reason != null ? { reason: status.reason } : {}),
+  };
 }
 
 /** Map the live Workbench graph to the scene mapper's input shape. */
@@ -397,6 +412,72 @@ interface ItoTestApi {
   // -- §3.3 interactive 2D canvas -------------------------------------------
   /** Persist a node's dragged OFFSET (D19); records NO history revision. */
   setDragOffset(pageId: string, offset: { dx: number; dy: number }): Promise<void>;
+  // -- M4 Koofr sync + M5 mobile captures (§15, §16.2, §16.3, A20-A23, H06) --
+  /**
+   * M4 (§15, A20, H06) publish the live brain to the internal deterministic
+   * in-memory Koofr remote (pointer-last). `opts` may name a {baseUrl,
+   * username?, appPassword?} but the transport is always the internal fake so
+   * the e2e specs round-trip without real network. Returns the serializable
+   * sync status after the attempt.
+   */
+  publishToRemote(opts?: {
+    baseUrl?: string;
+    username?: string;
+    appPassword?: string;
+  }): Promise<{ state: string; lastSyncedRevision: number | null; reason?: string }>;
+  /**
+   * M4 (§15, A20) refresh the live brain FROM the internal deterministic Koofr
+   * remote. On an interrupted/corrupted/invalid update the local copy is
+   * retained (A20) and the returned status is stale/offline with a reason.
+   */
+  refreshFromRemote(opts?: {
+    baseUrl?: string;
+    username?: string;
+    appPassword?: string;
+    /** Test-only: simulate a dropped/invalid refresh so A20 retain-local holds. */
+    corrupt?: boolean;
+  }): Promise<{ state: string; lastSyncedRevision: number | null; reason?: string }>;
+  /** The current remote-sync status: { state, lastSyncedRevision, reason? }. */
+  syncStatus(): { state: string; lastSyncedRevision: number | null; reason?: string };
+  /**
+   * M5 (§16.2, A23) create a loose mobile capture saved locally immediately.
+   * Creating a capture NEVER creates a Page/Category/Relationship. Returns the
+   * created capture id.
+   */
+  createMobileCapture(input: {
+    content: string;
+    sourceId?: string;
+    targetPageId?: string;
+    originDevice?: string;
+    queueForUpload?: boolean;
+  }): Promise<string>;
+  /** M5 (§16.2) upload every local/pending capture to the internal remote. */
+  uploadPendingCaptures(): Promise<{ captureId: string; status: string; error?: string }[]>;
+  /**
+   * M5 (§16.2, A22) pull captures FROM the internal remote, deduped strictly by
+   * CaptureId so repeated/out-of-order pulls incorporate each at most once.
+   * Returns the capture ids newly pulled on THIS call.
+   */
+  pullRemoteCaptures(): Promise<string[]>;
+  /**
+   * M5 (§16.3, A22) process a capture with one of the four dispositions:
+   * "insert-into-page" | "create-subject" | "dismiss". Idempotent by CaptureId.
+   * Returns the recorded disposition (or null when the capture is absent /
+   * cannot be incorporated).
+   */
+  handleCapture(
+    captureId: string,
+    action: "insert-into-page" | "create-subject" | "dismiss",
+  ): Promise<string | null>;
+  /** M5 (§16.2/§16.3) the local captures as serializable rows. */
+  captures(): {
+    id: string;
+    content: string;
+    text: string;
+    status: string;
+    sourceId: string | null;
+    targetPageId: string | null;
+  }[];
 }
 
 function findPane(sourceId?: string): HTMLElement | null {
@@ -431,10 +512,101 @@ function glyphMap(layer: HTMLElement): { text: string; runs: { node: Text; start
   return { text, runs };
 }
 
+/**
+ * A deterministic in-memory Koofr remote for the e2e runtime suite. It mirrors
+ * the WebDAV surface (PUT/GET/PROPFIND/MKCOL) over a single shared Map so a
+ * publish and a later refresh (or an upload and a later pull) see the SAME
+ * store without any real network. `corrupt` flips GETs of snapshots to an
+ * unparseable body so the A20 retain-local path can be exercised.
+ */
+interface InternalRemote {
+  store: Map<string, Uint8Array>;
+  fetchImpl: typeof fetch;
+  corrupt: boolean;
+  baseUrl: string;
+}
+
+function makeInternalRemote(): InternalRemote {
+  const store = new Map<string, Uint8Array>();
+  const enc = new TextEncoder();
+  const baseUrl = "https://dav.internal/Koofr";
+  const remote: InternalRemote = {
+    store,
+    corrupt: false,
+    baseUrl,
+    fetchImpl: null as unknown as typeof fetch,
+  };
+
+  const bodyToBytes = (body: unknown): Uint8Array => {
+    if (typeof body === "string") return enc.encode(body);
+    if (body instanceof Uint8Array) return body;
+    if (body && typeof (body as ArrayBuffer).byteLength === "number") {
+      return new Uint8Array(body as ArrayBuffer);
+    }
+    return enc.encode(String(body ?? ""));
+  };
+
+  const resp = (status: number, body: string | Uint8Array): Response => {
+    const bytes = typeof body === "string" ? enc.encode(body) : body;
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      statusText: `status ${status}`,
+      async text() {
+        return new TextDecoder().decode(bytes);
+      },
+      async arrayBuffer() {
+        return bytes.slice().buffer;
+      },
+    } as unknown as Response;
+  };
+
+  remote.fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = (init?.method ?? "GET").toUpperCase();
+    const path = url.replace(baseUrl + "/", "");
+    if (method === "PUT") {
+      store.set(path, bodyToBytes(init?.body));
+      return resp(201, "");
+    }
+    if (method === "GET") {
+      const bytes = store.get(path);
+      if (!bytes) return resp(404, "");
+      // A20 fault injection: corrupt snapshot reads so the integrity check
+      // fails and the refresh retains the local working copy untouched.
+      if (remote.corrupt && path.startsWith("snapshots/")) {
+        return resp(200, enc.encode("{ corrupted-not-json"));
+      }
+      return resp(200, bytes);
+    }
+    if (method === "MKCOL") return resp(201, "");
+    if (method === "PROPFIND") {
+      const children = [...store.keys()].filter((k) => k.startsWith(path + "/"));
+      const hrefs = children
+        .map((k) => `<d:response><d:href>/Koofr/${k}</d:href></d:response>`)
+        .join("");
+      return resp(207, `<d:multistatus xmlns:d="DAV:">${hrefs}</d:multistatus>`);
+    }
+    return resp(405, "");
+  }) as unknown as typeof fetch;
+
+  return remote;
+}
+
 export function installTestApi(wb: Workbench, bump: () => void): void {
   // Holds the bytes of the most recent exportBackup so stageLastExport can
   // round-trip a real export straight back through the staging validator.
   let lastExportBytes: Uint8Array | null = null;
+  // One shared deterministic in-memory Koofr remote for the whole session so a
+  // publish/refresh (and upload/pull) round-trip hits the same store (M4/M5).
+  const internalRemote = makeInternalRemote();
+  const koofrAdapter = (): KoofrStorageAdapter =>
+    new KoofrStorageAdapter({
+      baseUrl: internalRemote.baseUrl,
+      username: "test",
+      appPassword: "test",
+      fetchImpl: internalRemote.fetchImpl,
+    });
   const api: ItoTestApi = {
     openSourceIds() {
       return [...wb.snapshot().openSourceIds];
@@ -943,6 +1115,63 @@ export function installTestApi(wb: Workbench, bump: () => void): void {
     async setDragOffset(pageId, offset) {
       await wb.setDragOffset(pageId as PageId, offset.dx, offset.dy);
       bump();
+    },
+    async publishToRemote() {
+      // Clear any prior corrupt-fault flag before a real publish round-trip.
+      internalRemote.corrupt = false;
+      const status = await wb.publishToRemote(koofrAdapter());
+      bump();
+      return serializeSync(status);
+    },
+    async refreshFromRemote(opts) {
+      internalRemote.corrupt = Boolean(opts?.corrupt);
+      const status = await wb.refreshFromRemote(koofrAdapter());
+      internalRemote.corrupt = false;
+      bump();
+      return serializeSync(status);
+    },
+    syncStatus() {
+      return serializeSync(wb.syncStatus());
+    },
+    async createMobileCapture(input) {
+      const capture = await wb.createMobileCapture({
+        content: input.content,
+        ...(input.sourceId != null ? { sourceId: input.sourceId as SourceId } : {}),
+        ...(input.targetPageId != null ? { targetPageId: input.targetPageId as PageId } : {}),
+        ...(input.originDevice != null ? { originDevice: input.originDevice } : {}),
+        ...(input.queueForUpload != null ? { queueForUpload: input.queueForUpload } : {}),
+      });
+      bump();
+      return capture.id as string;
+    },
+    async uploadPendingCaptures() {
+      const results = await wb.uploadPendingCaptures(koofrAdapter());
+      bump();
+      return results.map((r) => ({
+        captureId: r.captureId,
+        status: r.status,
+        ...(r.error != null ? { error: r.error } : {}),
+      }));
+    },
+    async pullRemoteCaptures() {
+      const pulled = await wb.pullRemoteCaptures(koofrAdapter());
+      bump();
+      return pulled;
+    },
+    async handleCapture(captureId, action) {
+      const handling = await wb.handleCapture(captureId as CaptureId, action);
+      bump();
+      return handling ? handling.disposition : null;
+    },
+    captures() {
+      return wb.rawData().captures.map((c) => ({
+        id: c.id as string,
+        content: c.text,
+        text: c.text,
+        status: c.status ?? "local",
+        sourceId: (c.sourceId as string | null) ?? null,
+        targetPageId: (c.targetPageId as string | undefined) ?? null,
+      }));
     },
   };
 

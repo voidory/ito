@@ -177,11 +177,16 @@ export function SubjectEditor({
 
   return (
     <section data-testid="subject-editor" data-page-id={pageId} style={styles.root}>
-      <header style={styles.header}>
-        <h2 data-testid="subject-title" style={{ margin: 0, fontSize: "1.1rem" }}>
+      <header className="ito-pane-header" style={styles.header}>
+        <h2
+          data-testid="subject-title"
+          className="ito-pane-title"
+          title={page.title}
+          style={{ margin: 0, fontSize: "1.1rem" }}
+        >
           {page.title}
         </h2>
-        <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
+        <div className="ito-pane-actions">
           <button data-testid="insert-at-cursor" onClick={() => setPicking((v) => !v)} aria-pressed={picking}>
             Insert quote at cursor
           </button>
@@ -199,7 +204,12 @@ export function SubjectEditor({
           >
             {showDetails ? "Hide details" : "Show details"}
           </button>
-          <button data-testid="close-subject" aria-label="Close subject page" onClick={onClose}>
+          <button
+            data-testid="close-subject"
+            className="ito-pane-close"
+            aria-label="Close subject page"
+            onClick={onClose}
+          >
             ×
           </button>
         </div>
@@ -367,11 +377,15 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#fff",
   },
   header: {
+    // FIX-NARROW-PANE-TOOLBARS (§3.3): single-row toolbar that never wraps the
+    // close "×" onto a second row in a narrow 2/3-pane layout. The title
+    // ellipsizes; the action buttons stay compact and on one line (see
+    // .ito-pane-header/.ito-pane-title/.ito-pane-actions in theme.css).
     display: "flex",
     alignItems: "center",
-    justifyContent: "space-between",
-    gap: "0.5rem",
-    flexWrap: "wrap",
+    flexWrap: "nowrap",
+    gap: "6px",
+    overflowX: "auto",
     padding: "0.6rem 0.9rem",
     borderBottom: "1px solid #eee",
     background: "#fafafa",

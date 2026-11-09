@@ -29,11 +29,11 @@ Test kinds: `unit` (Vitest), `e2e` (Playwright chromium, real browser), `n/a`.
 | A17 | Graph `hide` never deletes content                  | M2        | e2e+unit  | `src/app/workbench.network.test.ts`; `e2e/three-d.spec.ts` (hidden nodes excluded) | implemented (M2) |
 | A18 | Categories group pages without duplicating them     | M2        | unit+e2e  | `Category.memberPageIds`; `src/network/scene.test.ts`, `e2e/concept-network.spec.ts` (A10-M2) | implemented (M2) |
 | A19 | Tentative associations distinct from relationships  | M5        | unit      | planned                                  | planned     |
-| A20 | Safe publication (no partial published state)       | M4        | unit      | `src/test/storage.test.ts` (planned)     | planned     |
-| A21 | Named revisions advance publicationRevision         | M6        | unit      | planned                                  | planned     |
-| A22 | Koofr/WebDAV remote adapter                          | M4        | unit      | planned                                  | deferred    |
-| A23 | Schema migration across versions                     | M7        | unit      | migration hook (planned)                 | planned     |
-| A24 | Delivery/hosting resolved                            | M4        | n/a       | ADR-0005 / FEAT-002 spike                | deferred    |
+| A20 | Safe publication (no partial published state)       | M4        | unit+e2e  | `src/app/workbench.koofr.test.ts`; `e2e/koofr-mobile-sync.spec.ts` (pointer-last + retain-local) | implemented |
+| A21 | Named revisions advance publicationRevision         | M6        | unit      | `src/app/workbench.koofr.test.ts` (publicationRevision)    | implemented |
+| A22 | Koofr/WebDAV remote adapter                          | M4        | unit+e2e  | `src/storage/koofrStorageAdapter.test.ts`; `e2e/koofr-mobile-sync.spec.ts` | implemented |
+| A23 | Schema migration across versions                     | M7        | unit      | `src/model/migrate.test.ts`              | implemented |
+| A24 | Delivery/hosting resolved                            | M4        | n/a       | ADR-0005 / ADR-0013 (KoofrStorageAdapter) | implemented |
 
 ## Requirements (R01–R20)
 
@@ -316,3 +316,29 @@ COMPILE + be DISCOVERED via `npx playwright test --list`.
 | FIX-3.5  | 3D `#141824` backdrop, glowing nodes, hull opacity 0.28 + rim, visible lines | unit | `src/app/threeScene.map.test.ts` | implemented |
 
 Decision: `docs/decisions/ADR-0012-m7-history-m6-sources-and-visual-polish.md`.
+
+## Pass B - M4 Koofr sync + M5 mobile captures + section 3 visual fixes (ADR-0013)
+
+Spec-milestone IDs for Pass B (the Pass B A20-A23 are the M4/M5 acceptance IDs
+from the spec's section 15/16, distinct from the legacy A01-A24 list above).
+Runtime behaviour is proven in Vitest; the two new e2e specs
+(`e2e/koofr-mobile-sync.spec.ts`, `e2e/mobile-captures.spec.ts`) are proven to
+COMPILE + be DISCOVERED via `npx playwright test --list` (total 71 / 13 specs).
+
+| ID       | Behaviour                                                                 | Test kind  | Test / location | Status |
+| -------- | ------------------------------------------------------------------------- | ---------- | --------------- | ------ |
+| §15, D08 | KoofrStorageAdapter WebDAV (PUT/GET-404->null/PROPFIND/MKCOL); injectable fetch; runtime-only Basic auth; publication-layout helpers | unit | `src/storage/koofrStorageAdapter.test.ts` | implemented |
+| §15, §16.1, H06 | Pointer-last publication: only-missing-asset upload (H06), write+verify snapshot (sha256), `current-revision.json` LAST; fault-before-pointer keeps prior pointer | unit + e2e | `src/app/workbench.koofr.test.ts`; `e2e/koofr-mobile-sync.spec.ts` | implemented |
+| A20      | Interrupted/corrupted refresh retains the local copy; `syncStatus` stale/offline + reason | unit + e2e | `src/app/workbench.koofr.test.ts`; `e2e/koofr-mobile-sync.spec.ts` | implemented |
+| A21      | Phone reading shell: related-writing sheet + return preserves source/scroll/zoom; offline cache controls | unit + e2e | `src/app/mobileReaderShell.render.test.ts`; `e2e/koofr-mobile-sync.spec.ts` | implemented |
+| A22      | Captures idempotent by CaptureId across repeated + out-of-order pulls; `handleCapture` idempotent | unit + e2e | `src/app/workbench.captures.test.ts`; `e2e/mobile-captures.spec.ts` | implemented |
+| A23      | `createMobileCapture` creates zero Page/Category/Relationship; create-subject only on explicit disposition | unit + e2e | `src/app/workbench.captures.test.ts`; `src/app/mobileCaptureComposer.render.test.ts`; `e2e/mobile-captures.spec.ts` | implemented |
+| D12      | Sync banner + publish/refresh + Import Zotero modal surfaced in the shell | unit | `src/app/syncBanner.render.test.ts`; `src/app/library.zotero.render.test.ts` | implemented |
+| FIX-3.1  | FIX-HORIZONTAL-HIGHLIGHT-DRIFT: canvas/textLayer/overlay locked 1:1; identical normalized left/width at 0.6x narrow-pane scale | unit | `src/pdf/anchorScale.test.ts`; `src/pdf/highlight.test.ts` | implemented |
+| FIX-3.2  | FIX-NODES-LABEL-OVERLAP: pill hidden until hub hover/select; category label at top arch with a halo | unit | `src/app/nodesCanvas.render.test.ts` | implemented |
+| FIX-3.3  | FIX-NARROW-PANE-TOOLBARS: single-row Reader + SubjectEditor headers | unit | `src/app/reader.m3.render.test.ts`; theme.css `.ito-pane-*` | implemented |
+| FIX-3.4  | FIX-HISTORY-FULL-LAYOUT: two-column `daily-review-panel` grid + empty state | unit | `src/app/historyReflectionPanel.render.test.ts`; theme.css | implemented |
+| FIX-3.5  | FIX-TOP-BAR-CLIPPING + Restore button style: flex-column app shell; Restore matches Backup | unit | `src/app/theme.render.test.ts`; theme.css `.app-shell`/`.shell-header`/`.view-body` | implemented |
+
+Decision: `docs/decisions/ADR-0013-m4-koofr-sync-and-m5-mobile-captures.md`.
+With Pass B merged, **all milestones M0 through M7 are complete.**

@@ -805,9 +805,12 @@ function SourcePane({
       data-ready={ready ? "true" : "false"}
       style={styles.pane}
     >
-      <div style={styles.paneHeader}>
-        <strong>{source?.title ?? "…"}</strong>
-        <span style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
+      <div className="ito-pane-header" style={styles.paneHeader}>
+        <strong className="ito-pane-title" title={source?.title ?? ""}>
+          {source?.title ?? "…"}
+        </strong>
+        <span className="ito-pane-actions">
+
           {isWebsite && (
             <span
               data-testid="website-availability-badge"
@@ -1794,7 +1797,10 @@ function PassageEvidenceLines({
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  root: { display: "flex", flexDirection: "column", height: "100vh" },
+  // FIX-TOP-BAR-CLIPPING (§3.5): fill the flex view-body (100%) rather than the
+  // full viewport (100vh) so the Reader sits below the shell header without the
+  // bottom being clipped by the app-shell's overflow:hidden.
+  root: { display: "flex", flexDirection: "column", height: "100%" },
   toolbar: {
     display: "flex",
     alignItems: "center",
@@ -1844,10 +1850,14 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: "0.85rem",
   },
   paneHeader: {
+    // FIX-NARROW-PANE-TOOLBARS (§3.3): single-row header that never wraps in
+    // 2/3-pane layouts; the title ellipsizes and the action buttons stay on one
+    // line (see .ito-pane-header/.ito-pane-title/.ito-pane-actions in theme.css).
     display: "flex",
     alignItems: "center",
-    justifyContent: "space-between",
-    gap: "1rem",
+    flexWrap: "nowrap",
+    gap: "6px",
+    overflowX: "auto",
     marginBottom: "0.5rem",
   },
   rangeSelector: {

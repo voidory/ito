@@ -1,4 +1,4 @@
-# MILESTONE MATRIX — M0 + M1 + M2 + M2.5 + M3
+# MILESTONE MATRIX — M0 + M1 + M2 + M2.5 + M3 + M4 + M5 + M6 + M7 (COMPLETE)
 
 The spec (section 22) requires an implemented / pending / unsupported matrix at
 every milestone. This is that matrix for the first two milestones. It is the
@@ -487,3 +487,57 @@ records the M7 history/checkpoint/reflection model, the M6 Zotero/website/area
 additions, the PDF stage/overlay restructuring + pane-fit + pageCount backfill,
 the 2D interaction + tactile theme + 3D contrast changes, and the decision to
 keep SCHEMA_VERSION at 2 (all additions additive + optional).
+
+## Pass B - M4 Koofr sync, M5 mobile captures, and the visual audit fixes (ADR-0013)
+
+Pass B closes the LAST two milestones (M4 delivery/sync + M5 mobile captures) and
+the section 3 mandatory visual audit fixes across three FEAT units. With it,
+**all milestones M0 through M7 are complete.** Runtime behaviour is proven
+headlessly in Vitest (the sandbox cannot run Playwright Chromium); the two new
+e2e specs (`koofr-mobile-sync.spec.ts`, `mobile-captures.spec.ts`) are proven to
+COMPILE + be DISCOVERED via `npx playwright test --list` (total 71 tests / 13
+specs).
+
+| ID       | Behaviour                                                                                     | Test kind  | Test / location | Status |
+| -------- | --------------------------------------------------------------------------------------------- | ---------- | --------------- | ------ |
+| §15, D08 | KoofrStorageAdapter: WebDAV PUT/GET(404->null)/PROPFIND/MKCOL; injectable fetch; Basic auth built only from runtime config; publication-layout helpers | unit | `src/storage/koofrStorageAdapter.test.ts` | implemented |
+| §15, §16.1, A20, H06 | `publishToRemote` pointer-last protocol: upload only missing assets (H06), write+verify snapshot (sha256), update `current-revision.json` LAST; a fault before the pointer leaves the prior pointer intact | unit + e2e | `src/app/workbench.koofr.test.ts`; `e2e/koofr-mobile-sync.spec.ts` "A20/H06: publish then refresh round-trip" | implemented |
+| A20      | `refreshFromRemote` retains the local working copy untouched on a dropped/corrupted/invalid update and sets a stale/offline `syncStatus` with a reason | unit + e2e | `src/app/workbench.koofr.test.ts`; `e2e/koofr-mobile-sync.spec.ts` "A20: an interrupted/invalid refresh retains the local copy" | implemented |
+| A21      | Phone reading shell: inspect-related-writing sheet opens and returning preserves the exact PDF source + scroll + zoom; per-source offline cache controls | unit + e2e | `src/app/mobileReaderShell.render.test.ts`; `e2e/koofr-mobile-sync.spec.ts` "A21: the mobile reader shell preserves the source" | implemented |
+| §16.2, A23 | `createMobileCapture` saves locally immediately and creates ZERO Page/Category/Relationship (with or without a source) | unit + e2e | `src/app/workbench.captures.test.ts`; `src/app/mobileCaptureComposer.render.test.ts`; `e2e/mobile-captures.spec.ts` "A23: creating a capture adds zero graph nodes" | implemented |
+| §16.2, A22 | `uploadPendingCaptures` / `pullRemoteCaptures` dedupe strictly by CaptureId across repeated + out-of-order pulls (incorporate each at most once) | unit + e2e | `src/app/workbench.captures.test.ts`; `e2e/mobile-captures.spec.ts` "A22: repeated and out-of-order pulls incorporate each capture at most once" | implemented |
+| §16.3, A22 | `handleCapture` four dispositions (insert-into-page/create-subject/dismiss), idempotent by CaptureId; the desktop capture processing queue | unit + e2e | `src/app/workbench.captures.test.ts`; `src/app/captureProcessingQueue.render.test.ts`; `e2e/mobile-captures.spec.ts` "A22/§16.3: the four queue dispositions record the right handling" | implemented |
+| D12      | Sync banner (`sync-publication-status` + publish/refresh) + Import Zotero button/modal surfaced in the shell | unit | `src/app/syncBanner.render.test.ts`; `src/app/library.zotero.render.test.ts` | implemented |
+| FIX-3.1  | FIX-HORIZONTAL-HIGHLIGHT-DRIFT: `max-width:100%` removed from `.pdf-page-stage`; canvas/textLayer/overlay locked 1:1; identical normalized left/width at 0.6x narrow-pane scale | unit | `src/pdf/anchorScale.test.ts`; `src/pdf/highlight.test.ts` | implemented |
+| FIX-3.2  | FIX-NODES-LABEL-OVERLAP: "Open connecting page" pill hidden until hub hover/select; category label at the squircle top arch with a readable halo | unit | `src/app/nodesCanvas.render.test.ts` | implemented |
+| FIX-3.3  | FIX-NARROW-PANE-TOOLBARS: Reader + SubjectEditor headers single-row (ellipsized title, compact buttons, close pinned right) | unit | `src/app/reader.m3.render.test.ts`; theme.css `.ito-pane-header`/`.ito-pane-title`/`.ito-pane-actions` | implemented |
+| FIX-3.4  | FIX-HISTORY-FULL-LAYOUT: `daily-review-panel` is a full-width two-column grid with an empty-state message | unit | `src/app/historyReflectionPanel.render.test.ts`; theme.css `[data-testid="daily-review-panel"]` | implemented |
+| FIX-3.5  | FIX-TOP-BAR-CLIPPING + RESTORE BUTTON STYLE: `.app-shell` strict flex column, `.shell-header` non-clipped, `.view-body` flex:1; Restore label styled like `.ito-btn`/button | unit | `src/app/theme.render.test.ts`; theme.css `.app-shell`/`.shell-header`/`.view-body`/`label[data-testid="open-restore-input"]` | implemented |
+
+Decision: `docs/decisions/ADR-0013-m4-koofr-sync-and-m5-mobile-captures.md`
+records the KoofrStorageAdapter WebDAV design + injectable fetch + runtime-only
+credentials, the pointer-last atomic publication protocol + the A20 retain-local
+guarantee, the idempotent-by-CaptureId capture engine + the A23 no-auto-graph-node
+rule, the six visual audit fixes, and the decision to keep SCHEMA_VERSION at 2
+(all capture additions additive + optional).
+
+## MILESTONE COMPLETION - M0 through M7 (final)
+
+With Pass B merged, every milestone in the plan is delivered and covered:
+
+| Milestone | Scope                                                             | Status    |
+| --------- | ----------------------------------------------------------------- | --------- |
+| M0        | Boot/READY + ERROR states, PDF fixtures, anchor spike             | complete  |
+| M1        | Reading workbench + subject layer + integrated three-pane workspace | complete  |
+| M2        | Concept network (2D NodesCanvas), Files/Nodes switch, 3D shift    | complete  |
+| M2.5      | Category master pages, open-together N06, search/locate, schema debt | complete  |
+| M3        | Complete backup, recovery, validation (SCHEMA_VERSION 1 -> 2)     | complete  |
+| M4        | Koofr delivery/hosting + safe pointer-last publication + refresh   | complete  |
+| M5        | Mobile captures (idempotent-by-CaptureId) + reader shell + queue   | complete  |
+| M6        | Zotero import, snapshot websites, area annotations                | complete  |
+| M7        | Linked history, checkpoints, multi-span reflection                | complete  |
+
+Final gate on this working tree (real runs): `npm run test` and
+`npx vitest run --no-file-parallelism` both 419 passed, `npm run typecheck`
+0 errors, `npm run build` succeeds, and `npx playwright test --list` discovers
+71 tests across 13 specs (including the two new Pass B specs).

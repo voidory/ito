@@ -208,3 +208,148 @@ input[type="radio"] {
     scroll-behavior: auto !important;
   }
 }
+
+/* --- FIX-TOP-BAR-CLIPPING (§3.5) app shell layout ---------------------- */
+/*
+ * The root app shell is a strict flex column so the header can never be
+ * overdrawn / clipped by the Nodes or 3D canvas. The header stays a fixed-size
+ * row above its own stacking context; the view body takes the remaining height
+ * and is the positioning context for the (absolutely-filled) view canvases.
+ */
+.app-shell {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.shell-header {
+  flex-shrink: 0;
+  position: relative;
+  z-index: 30;
+}
+
+.view-body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+/* --- FIX-RESTORE-BUTTON-STYLE (§3.5) --------------------------------- */
+/*
+ * The Restore control is a <label> wrapping a hidden file input. Style it (and
+ * the generic .ito-btn helper) exactly like the default button so "Restore"
+ * visually matches the adjacent "Backup" button.
+ */
+.ito-btn,
+label[data-testid="open-restore-input"] {
+  display: inline-flex;
+  align-items: center;
+  font: inherit;
+  color: var(--ito-ink);
+  background: var(--ito-bg-elevated);
+  border: 1px solid var(--ito-border);
+  border-radius: var(--ito-radius-sm);
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+  box-shadow: var(--ito-shadow-sm);
+  transition:
+    transform var(--ito-motion-fast) var(--ito-motion-ease),
+    box-shadow var(--ito-motion-fast) var(--ito-motion-ease),
+    background var(--ito-motion-fast) var(--ito-motion-ease),
+    border-color var(--ito-motion-fast) var(--ito-motion-ease);
+}
+
+.ito-btn:hover,
+label[data-testid="open-restore-input"]:hover {
+  box-shadow: var(--ito-shadow-md);
+  border-color: var(--ito-accent);
+}
+
+.ito-btn:active,
+label[data-testid="open-restore-input"]:active {
+  transform: scale(0.97);
+}
+
+/* --- FIX-NARROW-PANE-TOOLBARS (§3.3) pane headers --------------------- */
+/*
+ * Reader document headers and the SubjectEditor toolbar are single-row bars
+ * that never wrap in narrow 2/3-pane layouts: the title ellipsizes, the action
+ * buttons stay compact on one line, and the close "x" is pinned to the right.
+ */
+.ito-pane-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 6px;
+  overflow-x: auto;
+}
+
+.ito-pane-title {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ito-pane-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.ito-pane-header button,
+.ito-pane-actions button,
+.ito-pane-actions select {
+  white-space: nowrap;
+  padding: 3px 8px;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.ito-pane-close {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* --- FIX-HISTORY-FULL-LAYOUT (§3.4) ----------------------------------- */
+/*
+ * The History & Reflection surface is a full-width two-column workspace rather
+ * than a narrow card pinned top-left: a wide timeline column beside a reflection
+ * column, centered with a comfortable max width.
+ */
+[data-testid="daily-review-panel"] {
+  max-width: 1140px;
+  width: 100%;
+  margin: 20px auto;
+  padding: 0 24px;
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(380px, 1.25fr);
+  gap: 20px;
+  align-items: start;
+}
+
+/* The header + empty-state message span the full two-column width. */
+[data-testid="daily-review-panel"] .daily-review-header,
+[data-testid="daily-review-panel"] .daily-review-empty {
+  grid-column: 1 / -1;
+}
+
+.daily-review-empty {
+  margin: 0;
+  padding: 16px 18px;
+  color: var(--ito-muted);
+  background: var(--ito-bg-paper);
+  border: 1px dashed var(--ito-border);
+  border-radius: var(--ito-radius-sm);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.daily-review-left,
+.daily-review-right {
+  min-width: 0;
+}

@@ -107,16 +107,32 @@ export function HistoryReflectionPanel({
   const spanEnd = savedSpan?.end ?? selectionKeys[selectionKeys.length - 1] ?? "";
   const isMultiDay = Boolean(spanStart && spanEnd && spanStart !== spanEnd);
 
+  // FIX-HISTORY-FULL-LAYOUT (§3.4): empty-state when the brain has no revisions
+  // recorded at all yet (distinct from "none in the current date range").
+  const hasAnyRevisions = revisions.length > 0;
+
   return (
     <section
-      data-testid="history-reflection-panel"
+      data-testid="daily-review-panel"
       aria-label="Linked history and reflection"
-      style={styles.panel}
+      className="daily-review-panel"
     >
-      <header style={styles.header}>
+      {/* Back-compat marker: existing render tests + the M7 spec locate the
+          panel by this testid; the full-view grid lives on the section above. */}
+      <div data-testid="history-reflection-panel" style={{ display: "contents" }}>
+      <header style={styles.header} className="daily-review-header">
         <h2 style={{ margin: 0, fontSize: "1.1rem" }}>History &amp; Reflection</h2>
       </header>
 
+      {!hasAnyRevisions && (
+        <p data-testid="daily-review-empty" className="daily-review-empty">
+          No history yet. As you annotate sources and edit subject pages, each
+          change is recorded here so you can review a day or a date range and
+          weave a multi-span reflection across them.
+        </p>
+      )}
+
+      <div className="daily-review-left">
       <div style={styles.filters}>
         <label style={styles.filterLabel}>
           Day
@@ -214,8 +230,9 @@ export function HistoryReflectionPanel({
           </div>
         ))}
       </div>
+      </div>
 
-      <div style={styles.reflection}>
+      <div style={styles.reflection} className="daily-review-right">
         <h3 style={{ margin: "0 0 0.35rem" }}>Reflection</h3>
         <p style={styles.hint} data-testid="reflection-selection-count">
           {selectedIds.length} revision(s) selected across the timeline.
@@ -240,6 +257,7 @@ export function HistoryReflectionPanel({
         >
           Save reflection
         </button>
+      </div>
       </div>
     </section>
   );

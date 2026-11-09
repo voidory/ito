@@ -102,9 +102,15 @@ p.copied-comment::before {
 .pdf-page-stage {
   position: relative;
   /*
-   * FIX-PANE-CLIPPING (3.2): never overflow the pane horizontally. The Reader
-   * also applies a fitted --scale-factor; this cap is the safety net so a wide
-   * page is scaled down to the pane rather than clipped at its edge.
+   * FIX-HORIZONTAL-HIGHLIGHT-DRIFT (3.1): the stage, its <canvas>, its
+   * .textLayer and the highlight overlay stay locked at 1:1 pixel dimensions.
+   * NEVER apply `max-width: 100%` here (nor to the canvas independently): that
+   * shrinks the stage box while the canvas keeps its intrinsic pixel width, so
+   * the normalized overlay geometry drifts horizontally away from the glyphs.
+   * Narrow-pane auto-fit is instead applied by the Reader, which re-renders
+   * each page at a pane-fitted scale (`renderPage`/`rerender`) so canvas, text
+   * layer and overlays all shrink together and stay aligned. Anchor geometry is
+   * normalized strictly against `stage.getBoundingClientRect()`.
    */
-  max-width: 100%;
+  transform-origin: top left;
 }

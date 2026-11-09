@@ -245,6 +245,72 @@ interface ItoTestApi {
   // -- §3.3 interactive 2D canvas -------------------------------------------
   /** Persist a node's dragged OFFSET (D19); records NO history revision. */
   setDragOffset(pageId: string, offset: { dx: number; dy: number }): Promise<void>;
+  // -- M4 Koofr sync + M5 mobile captures (§15, §16.2, §16.3, A20-A23, H06) --
+  /**
+   * M4 (§15, A20, H06) publish the live brain to the internal deterministic
+   * in-memory Koofr remote (pointer-last). `opts` may name a {baseUrl,
+   * username?, appPassword?} but the transport is always the internal fake so
+   * the e2e specs round-trip without real network. Returns the serializable
+   * sync status after the attempt.
+   */
+  publishToRemote(opts?: {
+    baseUrl?: string;
+    username?: string;
+    appPassword?: string;
+  }): Promise<{ state: string; lastSyncedRevision: number | null; reason?: string }>;
+  /**
+   * M4 (§15, A20) refresh the live brain FROM the internal deterministic Koofr
+   * remote. On an interrupted/corrupted/invalid update the local copy is
+   * retained (A20) and the returned status is stale/offline with a reason.
+   */
+  refreshFromRemote(opts?: {
+    baseUrl?: string;
+    username?: string;
+    appPassword?: string;
+    /** Test-only: simulate a dropped/invalid refresh so A20 retain-local holds. */
+    corrupt?: boolean;
+  }): Promise<{ state: string; lastSyncedRevision: number | null; reason?: string }>;
+  /** The current remote-sync status: { state, lastSyncedRevision, reason? }. */
+  syncStatus(): { state: string; lastSyncedRevision: number | null; reason?: string };
+  /**
+   * M5 (§16.2, A23) create a loose mobile capture saved locally immediately.
+   * Creating a capture NEVER creates a Page/Category/Relationship. Returns the
+   * created capture id.
+   */
+  createMobileCapture(input: {
+    content: string;
+    sourceId?: string;
+    targetPageId?: string;
+    originDevice?: string;
+    queueForUpload?: boolean;
+  }): Promise<string>;
+  /** M5 (§16.2) upload every local/pending capture to the internal remote. */
+  uploadPendingCaptures(): Promise<{ captureId: string; status: string; error?: string }[]>;
+  /**
+   * M5 (§16.2, A22) pull captures FROM the internal remote, deduped strictly by
+   * CaptureId so repeated/out-of-order pulls incorporate each at most once.
+   * Returns the capture ids newly pulled on THIS call.
+   */
+  pullRemoteCaptures(): Promise<string[]>;
+  /**
+   * M5 (§16.3, A22) process a capture with one of the four dispositions:
+   * "insert-into-page" | "create-subject" | "dismiss". Idempotent by CaptureId.
+   * Returns the recorded disposition (or null when the capture is absent /
+   * cannot be incorporated).
+   */
+  handleCapture(
+    captureId: string,
+    action: "insert-into-page" | "create-subject" | "dismiss",
+  ): Promise<string | null>;
+  /** M5 (§16.2/§16.3) the local captures as serializable rows. */
+  captures(): {
+    id: string;
+    content: string;
+    text: string;
+    status: string;
+    sourceId: string | null;
+    targetPageId: string | null;
+  }[];
 }
 
 declare global {

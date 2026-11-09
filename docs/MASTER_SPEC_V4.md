@@ -1,6 +1,6 @@
 # Consolidated Master Build Specification — Research Reader and Concept Network ("Ito")
 ## Version: 4.0 Complete End-to-End Master Reference (M0–M7) | 10 November 2026
-## Status: M0–M2 Implemented, M2.5 In Progress, M3 Rulings Locked, M4–M7 Scoped
+## Status: M0–M7 COMPLETE (100%). M0–M3 + M2.5 delivered; Pass A delivered M6 (Zotero/website/area) + M7 (linked history) + the section 3 interaction polish (ADR-0012); Pass B delivered M4 (Koofr delivery + pointer-last publication + resilient refresh) + M5 (idempotent mobile captures + phone reader shell + capture queue) + the section 3 mandatory visual audit fixes (ADR-0013). Every milestone is covered by Vitest unit/jsdom tests plus Playwright e2e specs discovered via `npx playwright test --list`.
 
 ---
 
