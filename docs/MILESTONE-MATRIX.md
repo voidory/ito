@@ -1,4 +1,4 @@
-# MILESTONE MATRIX — M0 + M1 + M2 + M2.5
+# MILESTONE MATRIX — M0 + M1 + M2 + M2.5 + M3
 
 The spec (section 22) requires an implemented / pending / unsupported matrix at
 every milestone. This is that matrix for the first two milestones. It is the
@@ -44,8 +44,8 @@ Last run on this working tree (all green):
 | ------------------------- | ------------------- | -------------------- |
 | TypeScript typecheck      | `npm run typecheck` | pass (0 errors)      |
 | Production build          | `npm run build`     | pass                 |
-| Unit / integration        | `npm run test`      | 241 passed / 24 files (M2.5) |
-| Runtime (real browser)    | `npm run test:e2e`  | 50 tests / 8 specs WRITTEN; host-run in the publishing environment (sandbox: e2e deferred, CDN block — see §9) |
+| Unit / integration        | `npm run test`      | 315 passed / 36 files (M3; was 241 / 24 at M2.5 baseline) |
+| Runtime (real browser)    | `npm run test:e2e`  | 54 tests / 9 specs WRITTEN; host-run in the publishing environment (sandbox: e2e deferred, CDN block — see §9) |
 
 E2E specs: `e2e/ready.spec.ts` (boot), `e2e/pdf-anchor.spec.ts` (anchor
 round-trip spike), `e2e/reader-workbench.spec.ts` (M1 reading workbench),
@@ -56,8 +56,9 @@ A13 explanatory-page promotion + A14 master|member category-links),
 multi-PDF N06, N04/N05 reference-directed locating, search),
 `e2e/three-d.spec.ts` (M2 §3.4 3D dimensional shift — density reward),
 `e2e/workspace.spec.ts` (M1 integrated three-pane workspace + context-preserving
-transitions). The e2e count grew 43 → 50 at M2.5 (+3 in
-`concept-network.spec.ts`, +4 in `view-switch.spec.ts`).
+transitions), `e2e/backup-recovery.spec.ts` (M3 backup/recovery — A17/A18/A19/D02).
+The e2e count grew 43 → 50 at M2.5 (+3 in `concept-network.spec.ts`, +4 in
+`view-switch.spec.ts`) and 50 → 54 at M3 (+4 in `backup-recovery.spec.ts`).
 
 ---
 
@@ -159,7 +160,8 @@ edition yields an explicit `mismatched` state and never a silent navigation.
 | Remote storage (Koofr/WebDAV) adapter                 | M4        | ADR-0005; `docs/spikes/koofr-access.md`; D08/D09 |
 | Safe publication against a remote + delivery/hosting   | M4        | ADR-0005; D10, D17 |
 | Captures → structured pages; named revisions          | M6        | D15, D16 |
-| Schema migrations past v1                             | M7        | ADR-0004; D18 |
+| Schema migrations: first real bump v1 -> v2           | implemented (M3) | ADR-0011; D18; `src/model/migrate.ts`, `src/model/migrate.test.ts` |
+| Schema migrations past v2                             | M7        | ADR-0004; D18 |
 | Large-PDF performance pass; full keyboard a11y audit   | M7        | N06, N07 |
 | Dedicated `e2e/error.spec.ts` for the ERROR boot state | M2        | A02 (logic shipped, dedicated e2e pending) |
 
@@ -337,7 +339,36 @@ Additive schema guarantees (ADR-0010), proven in Vitest:
 | `createEmptyBrainData()` seeds `annotationStyles: {}` | implemented | `src/model/brain.test.ts` |
 | SCHEMA_VERSION stays 1 (no migration; M7 per ADR-0004) | implemented | `src/model/brain.test.ts`; `src/test/model.test.ts` |
 
-## 9. Sandbox verification note (M2)
+## 8g. M3 backup, recovery, and validation (FEAT-001..003)
+
+M3 delivers Complete Backup, Recovery, and Validation. The data contract gains
+the first REAL schema bump (SCHEMA_VERSION 1 -> 2) backed by a pure stepwise
+migration runner; all new fields are additive + optional + v1-safe (ADR-0011).
+The UI surfaces (backup export modal, Library offload control + badge, Reader
+two-mode deletion + binary-offloaded popover, import staging report) are proven
+headlessly by jsdom render tests against a REAL Workbench, and by the written
+`e2e/backup-recovery.spec.ts` (host-run in the publishing environment; the
+sandbox cannot run Chromium, so the spec is compiled + discovered via
+`npx playwright test --list` only — see §9).
+
+| ID  | Requirement (summary)                                                | Status      | Kind       | Covering test |
+| --- | -------------------------------------------------------------------- | ----------- | ---------- | ------------- |
+| A17 | Offline-first citations: offloading a source's PDF binary keeps the Source + annotations + citations; status flips to `binary-offloaded`; a followed quote resolves `binary-offloaded` (carrying the stored quote/comment/page); sha256-verified re-attach returns it to cached/resolved; a mismatched file is rejected | implemented (e2e deferred §9) | e2e + unit | `e2e/backup-recovery.spec.ts` "A17: offloading a PDF binary keeps the source + citations and flips the availability badge"; `src/app/workbench.backup.test.ts` (offload/attach/resolve); `src/app/library.offload.render.test.ts` (badge + offload row control); `src/app/reader.m3.render.test.ts` (binary-offloaded popover + attach) |
+| A18 | Targeted Backup Checklist: Full Archival Backup by default; unticking any optional box downgrades the `backup-mode-badge` to the Targeted text and stamps `manifest.backupMode='targeted'` + the matching `manifest.omissions` tokens (`presentation`/`captures`/`revisions`/`sourceBinaries`) | implemented (e2e deferred §9) | e2e + unit | `e2e/backup-recovery.spec.ts` "A18: the Targeted Backup Checklist drives the mode badge and omission stamping"; `src/app/workbench.backup-engine.test.ts` (exportBackup omission stamping); `src/app/backupExportModal.render.test.ts` (badge flip + options->omissions mapping) |
+| A19 | Isolated staging validator: hard-reject (corrupt/unparseable/bad %PDF-), default-reject needs-confirmation (schema/checksum/missing-array), and ready; `import-staging-report` lists findings; `try-import-anyway` commits leniently through the stepwise migration; the live store is never touched before commit | implemented (e2e deferred §9) | e2e + unit | `e2e/backup-recovery.spec.ts` "A19: a schema-mismatched bundle is staged (default reject) and Try Import Anyway commits leniently"; `src/storage/staging.test.ts`; `src/model/migrate.test.ts`; `src/app/importStagingReport.render.test.ts` (report + lenient commit path) |
+| D02 | Two-mode highlight deletion: `delete-highlight-only` removes the annotation but keeps every quote (pair derives `unresolved`); `delete-highlight-and-quotes` records a pre-mutation Revision snapshot then strips the inline quote while preserving surrounding prose | implemented (e2e deferred §9) | e2e + unit | `e2e/backup-recovery.spec.ts` "D02: delete-highlight-only keeps the quote; delete-highlight-and-quotes removes the inline quote"; `src/app/workbench.deletion.test.ts`; `src/app/reader.m3.render.test.ts` (both delete controls invoke the right methods) |
+| D09 | Two-lane disentangled backup (Lane 1 `brain.ito.json` + Lane 2 `.ito.zip` via fflate, assets stored byte-identical) and a batch PdfIngestionQueue (bounded concurrency, %PDF- + size guard, hydrate-existing vs create-new) | implemented | unit       | `src/storage/backup.test.ts` (two-lane round-trip); `src/app/workbench.backup-engine.test.ts`; `src/app/workbench.ingest.test.ts` (PdfIngestionQueue hydrate/create/reject) |
+
+Schema + migration (ADR-0011), proven in Vitest:
+
+| Capability                                                            | Status      | Covering test |
+| --------------------------------------------------------------------- | ----------- | ------------- |
+| SCHEMA_VERSION bumped 1 -> 2; additive `binary-offloaded` resolution, `manifest.backupMode`/`omissions`, Revision `beforeSnapshot`/`affectedObjectIds` are optional + v1-safe | implemented | `src/model/migrate.test.ts`; `src/test/model.test.ts` |
+| Pure stepwise `migrateBrainData(raw)` runner: v0->v1->v2 steps + fillDefaults; `FutureSchemaError` on a newer payload; shared registry with the StorageAdapter | implemented | `src/model/migrate.test.ts` |
+| `window.__ito` gains exportBackup/stageImport/stageLastExport/commitStagedImport/offloadSourceBinary/attachSourceBinary/sourceBinaryStatus/readSourceBytes/deleteAnnotationOnly/deleteAnnotationAndQuotes, mirrored exactly in `e2e/ito-globals.d.ts` (typecheck proves sync) | implemented | `src/app/testApi.ts`; `e2e/ito-globals.d.ts` (typecheck gate) |
+| fflate decision: `fflate@^0.8.3` installed successfully against the registry and is USED for the `.ito.zip` codec; a pure deterministic codec was the documented fallback had the install failed (ADR-0011) | implemented | `src/storage/backup.test.ts` (zip round-trip) |
+
+## 9. Sandbox verification note (M2 + M3)
 
 The Playwright Chromium binary CANNOT be downloaded in the build sandbox (the
 proxy returns HTTP 403 on the Playwright CDN; the Microsoft mirror transfers
@@ -362,14 +393,25 @@ browser:
   itself cannot run headlessly in the sandbox, so the ThreeScene renderer carries
   a WebGL guard with a 2D fallback that the e2e spec asserts conditionally.
 
-FINAL M2.5 gate results on this working tree (real runs, not fabricated):
+FINAL M3 gate results on this working tree (real runs, not fabricated):
 
 | Suite                  | Command             | Result            |
 | ---------------------- | ------------------- | ----------------- |
 | TypeScript typecheck   | `npm run typecheck` | pass (0 errors)   |
-| Unit / integration     | `npm run test`      | 241 passed / 24 files |
-| Production build        | `npm run build`     | pass (three.js bundled) |
-| Runtime (real browser) | `npm run test:e2e`  | 50 tests / 8 specs WRITTEN; host-run (sandbox e2e deferred — CDN block). Enumerated/compiled here via `npx playwright test --list`. |
+| Unit / integration     | `npm run test`      | 315 passed / 36 files (was 241 / 24 at M2.5) |
+| Production build        | `npm run build`     | pass (fflate + three.js bundled) |
+| Runtime (real browser) | `npm run test:e2e`  | 54 tests / 9 specs WRITTEN; host-run (sandbox e2e deferred — CDN block). Enumerated/compiled here via `npx playwright test --list` (lists `backup-recovery.spec.ts` A17/A18/A19/D02). |
+
+The M3 backup/recovery pass (ADR-0011) adds these headless mirrors for the e2e
+behaviours: `src/app/workbench.backup.test.ts` + `src/app/library.offload.render.test.ts`
++ `src/app/reader.m3.render.test.ts` (A17 offline-first citations + offload/attach),
+`src/app/workbench.backup-engine.test.ts` + `src/app/backupExportModal.render.test.ts`
+(A18 Targeted Backup Checklist + omission stamping), `src/storage/staging.test.ts`
++ `src/model/migrate.test.ts` + `src/app/importStagingReport.render.test.ts`
+(A19 staging reject + Try Import Anyway + stepwise migration),
+`src/app/workbench.deletion.test.ts` (D02 two-mode deletion), and
+`src/storage/backup.test.ts` + `src/app/workbench.ingest.test.ts` (D09
+two-lane backup + batch ingestion).
 
 The M2.5 refinements (ADR-0010: `explanatoryPageId` / `masterPageId` /
 `annotationStyles`) add the following headless mirrors for the e2e behaviours:

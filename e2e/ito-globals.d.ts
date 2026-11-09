@@ -131,6 +131,47 @@ interface ItoTestApi {
     }[];
   };
   squircleContainsPoint(categoryId: string, x: number, y: number): boolean;
+  /**
+   * Export the live brain as a backup (A18, D09). Returns a serializable
+   * summary: the stamped omission tokens, the backupMode 'full'|'targeted',
+   * and the byte length. The bytes are held internally for stageLastExport.
+   */
+  exportBackup(options?: {
+    presentation?: boolean;
+    captures?: boolean;
+    revisions?: boolean;
+    sourceBinaries?: boolean;
+  }): Promise<{ omissions: string[]; backupMode: string; byteLength: number }>;
+  /** Stage the bytes of the LAST exportBackup back through the validator. */
+  stageLastExport(): Promise<{ outcome: string; findings: string[]; reason: string | null }>;
+  /**
+   * Stage an incoming backup for validation WITHOUT touching the live store
+   * (A19). Accepts a serializable bundle: a number[] of bytes (a Lane-2
+   * `.ito.zip`) or a JSON string (a bare Lane-1 payload), converted to a
+   * Uint8Array inside. Returns a serializable staging summary.
+   */
+  stageImport(
+    bundle: number[] | string,
+  ): Promise<{ outcome: string; findings: string[]; reason: string | null }>;
+  /** The currently staged outcome, or null (mirrors the UI staging report). */
+  stagedImportState(): { outcome: string; findings: string[]; reason: string | null } | null;
+  /** Commit the held staged import; `lenient` is the 'Try Import Anyway' path. */
+  commitStagedImport(opts?: { lenient?: boolean }): Promise<{ committed: boolean; reason: string | null }>;
+  /** Offload a source's PDF binary locally (A17); records stay intact. */
+  offloadSourceBinary(sourceId: string): Promise<void>;
+  /** Re-attach a PDF binary (A17); accepts number[] bytes, sha256-verified. */
+  attachSourceBinary(
+    sourceId: string,
+    bytes: number[],
+  ): Promise<{ attached: boolean; reason: string | null }>;
+  /** Whether a source's binary is locally available ('cached'|'binary-offloaded'). */
+  sourceBinaryStatus(sourceId: string): string;
+  /** The stored PDF bytes of a source as a serializable number[] (null if gone). */
+  readSourceBytes(sourceId: string): Promise<number[] | null>;
+  /** D02 "delete highlight only": remove the annotation, keep every quote. */
+  deleteAnnotationOnly(annotationId: string): Promise<void>;
+  /** D02 "delete highlight and its quotes": remove the annotation + its quotes. */
+  deleteAnnotationAndQuotes(annotationId: string): Promise<void>;
   forceNextSaveFailures(count: number): void;
   forceSourceVersionDrift(sourceId: string): Promise<void>;
   counts(): {

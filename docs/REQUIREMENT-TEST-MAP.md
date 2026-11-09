@@ -243,6 +243,40 @@ ADR-0010 documents these three additive, v1-safe refinements
 (`explanatoryPageId` / `masterPageId` / `annotationStyles`) and cross-references
 ADR-0008 (hub topology) and ADR-0009 (presentation/3D state).
 
+## M3 backup, recovery, and validation (FEAT-001..003, ADR-0011)
+
+M3 is Complete Backup, Recovery, and Validation. The acceptance IDs below use
+the Master Build Spec v4.0 letters as named in the M3 handoff: A17 offline-first
+citations + binary-offloaded + re-attach; A18 Targeted Backup Checklist +
+`manifest.omissions` stamping; A19 staging reject + Try Import Anyway + stepwise
+migration; D02 two-mode highlight deletion; D09 two-lane backup + PdfIngestionQueue.
+(These M3 letters are distinct from the M2-era A17/A18 rows in the Acceptance
+table above, exactly as the M2.5 section reuses its own spec letters.) The first
+REAL schema bump lands here (SCHEMA_VERSION 1 -> 2) with a pure stepwise
+migration runner; all new fields are additive + optional + v1-safe. Each row
+names the REAL covering Vitest cases (sandbox-provable) and the
+`e2e/backup-recovery.spec.ts` cases (host-run in the publishing environment — see
+`docs/MILESTONE-MATRIX.md` §9; the spec is proven to COMPILE + be DISCOVERED here
+via `npx playwright test --list`, which lists the A17/A18/A19/D02 cases).
+
+| ID  | Behaviour                                                             | Test kind  | Test / location | Status |
+| --- | --------------------------------------------------------------------- | ---------- | --------------- | ------ |
+| A17 | Offline-first citations: offload evicts ONLY the PDF bytes (Source + annotations + citations survive); status flips to `binary-offloaded`; a followed quote resolves `binary-offloaded` carrying the stored quote/comment/page; sha256-verified re-attach returns it to cached/resolved; a mismatched file is rejected and writes nothing | e2e + unit | `e2e/backup-recovery.spec.ts` "A17: offloading a PDF binary keeps the source + citations and flips the availability badge"; `src/app/workbench.backup.test.ts`; `src/app/library.offload.render.test.ts`; `src/app/reader.m3.render.test.ts` | implemented (e2e deferred §9) |
+| A18 | Targeted Backup Checklist: Full Archival Backup by default; unticking any optional box downgrades the `backup-mode-badge` to "Targeted Backup (Partial - not a complete archival backup)" and stamps `manifest.backupMode='targeted'` + the ordered `manifest.omissions` tokens (presentation/captures/revisions/sourceBinaries) | e2e + unit | `e2e/backup-recovery.spec.ts` "A18: the Targeted Backup Checklist drives the mode badge and omission stamping"; `src/app/workbench.backup-engine.test.ts`; `src/app/backupExportModal.render.test.ts` | implemented (e2e deferred §9) |
+| A19 | Isolated staging validator: hard-reject / needs-confirmation (default reject) / ready; `import-staging-report` lists findings; `try-import-anyway` commits leniently via the stepwise migration; the live store is never mutated before commit | e2e + unit | `e2e/backup-recovery.spec.ts` "A19: a schema-mismatched bundle is staged (default reject) and Try Import Anyway commits leniently"; `src/storage/staging.test.ts`; `src/model/migrate.test.ts`; `src/app/importStagingReport.render.test.ts` | implemented (e2e deferred §9) |
+| D02 | Two-mode highlight deletion: `delete-highlight-only` removes the annotation but keeps every quote (pair derives `unresolved`); `delete-highlight-and-quotes` records a pre-mutation Revision snapshot then strips the inline quote while preserving surrounding prose | e2e + unit | `e2e/backup-recovery.spec.ts` "D02: delete-highlight-only keeps the quote; delete-highlight-and-quotes removes the inline quote"; `src/app/workbench.deletion.test.ts`; `src/app/reader.m3.render.test.ts` | implemented (e2e deferred §9) |
+| D09 | Two-lane disentangled backup (Lane 1 `brain.ito.json`; Lane 2 `.ito.zip` via fflate with manifest.json + brain.json + assets stored byte-identical) and a batch PdfIngestionQueue (bounded concurrency, %PDF- + size guard, hydrate-existing vs create-new) | unit | `src/storage/backup.test.ts`; `src/app/workbench.backup-engine.test.ts`; `src/app/workbench.ingest.test.ts` | implemented |
+| SV2 | SCHEMA_VERSION bumped 1 -> 2 with a pure stepwise `migrateBrainData(raw)` runner (v0->v1->v2 near-identity steps + fillDefaults; `FutureSchemaError` on a newer payload; registry shared with the StorageAdapter); new fields (`binary-offloaded` resolution, `manifest.backupMode`/`omissions`, Revision `beforeSnapshot`/`affectedObjectIds`) are additive + optional + v1-safe | unit | `src/model/migrate.test.ts`; `src/test/model.test.ts` | implemented |
+
+Decision: `docs/decisions/ADR-0011-m3-backup-offline-citations-and-deletion.md`
+records the two-lane architecture, the fflate-vs-pure-codec decision (fflate
+installed and USED; pure codec was the documented fallback), the Targeted Backup
+Checklist + omission stamping + D19 device-local/shared presentation split, the
+binary-offloaded resolution + offload/attach flow, the two-mode deletion with
+pre-mutation Revision snapshots, the staging validator + Try Import Anyway, and
+the SCHEMA_VERSION bump to 2. Cross-references D02, D09, D19 and
+ADR-0004/0007/0010.
+
 ## Non-functional (N01–N08)
 
 | ID  | Requirement (summary)                        | Milestone | Status      |

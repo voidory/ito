@@ -93,6 +93,7 @@ export function Library({
             {section.sources.map((source) => (
               <LibraryRow
                 key={source.id}
+                wb={wb}
                 source={source}
                 checked={selected.has(source.id)}
                 onToggle={() => toggle(source.id)}
@@ -107,16 +108,35 @@ export function Library({
 }
 
 function LibraryRow({
+  wb,
   source,
   checked,
   onToggle,
   onOpen,
 }: {
+  wb: Workbench;
   source: Source;
   checked: boolean;
   onToggle: () => void;
   onOpen: () => void;
 }): JSX.Element {
+  // A17: the source's PDF binary availability. Offloading evicts ONLY the bytes
+  // (the Source + its annotations + citations survive), flipping the badge to
+  // "binary-offloaded". Reading the status synchronously keeps the row simple;
+  // a bump() after offload re-renders this row from the fresh status.
+  const [busy, setBusy] = useState(false);
+  const status = wb.sourceBinaryStatus(source.id);
+  const offloaded = status === "binary-offloaded";
+
+  const onOffload = async (): Promise<void> => {
+    setBusy(true);
+    try {
+      await wb.offloadSourceBinary(source.id);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <li
       data-testid="library-item"
@@ -137,6 +157,30 @@ function LibraryRow({
         title="Open document"
       >
         {source.title}
+      </button>
+      <span
+        data-testid="source-binary-status"
+        data-source-id={source.id}
+        data-status={status}
+        style={{
+          fontSize: "0.72rem",
+          padding: "0.05rem 0.4rem",
+          borderRadius: "4px",
+          background: offloaded ? "#fef3c7" : "#e6f4ea",
+          color: offloaded ? "#92400e" : "#166534",
+        }}
+      >
+        {status}
+      </span>
+      <button
+        data-testid="offload-pdf-binary"
+        data-source-id={source.id}
+        disabled={busy || offloaded}
+        title="Offload the PDF binary to reclaim space (citations are preserved)"
+        onClick={() => void onOffload()}
+        style={{ fontSize: "0.75rem" }}
+      >
+        Offload PDF Binary
       </button>
       <span style={{ color: "#999", fontSize: "0.8rem" }}>{source.pageCount}pp</span>
     </li>

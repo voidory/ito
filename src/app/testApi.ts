@@ -26,8 +26,32 @@ import {
   type DocumentJson,
 } from "../editor";
 import { buildScene, squircleContains, type SceneGraphInput } from "../network";
+import type { StagedImport } from "../storage";
 import { isWebGLAvailable } from "./ThreeScene";
 import type { Workbench } from "./workbench";
+
+/**
+ * Flatten a StagedImport into the serializable summary the e2e spec asserts:
+ * the discriminated outcome, the human-readable finding messages (empty for a
+ * clean 'ready'), and the abort reason for a hard-reject (null otherwise).
+ */
+function serializeStaged(staged: StagedImport): {
+  outcome: string;
+  findings: string[];
+  reason: string | null;
+} {
+  if (staged.outcome === "hard-reject") {
+    return { outcome: staged.outcome, findings: [], reason: staged.reason };
+  }
+  if (staged.outcome === "needs-confirmation") {
+    return {
+      outcome: staged.outcome,
+      findings: staged.findings.map((f) => `${f.kind}: ${f.message}`),
+      reason: null,
+    };
+  }
+  return { outcome: staged.outcome, findings: [], reason: null };
+}
 
 /** Map the live Workbench graph to the scene mapper's input shape. */
 function graphToSceneInput(wb: Workbench): SceneGraphInput {
@@ -249,6 +273,49 @@ interface ItoTestApi {
   hideNode(pageId: string): Promise<void>;
   /** Hide a relationship (presentation only; never deletes the Relationship). */
   hideRelationship(relationshipId: string): Promise<void>;
+  /**
+   * Export the live brain as a backup (A18, D09). Returns a SERIALIZABLE
+   * summary the spec can assert (the stamped omission tokens, the backupMode
+   * 'full'|'targeted', and the byte length). The produced bytes are held
+   * internally so `stageLastExport` can round-trip the export straight back
+   * through the staging validator without the spec having to marshal bytes.
+   */
+  exportBackup(options?: {
+    presentation?: boolean;
+    captures?: boolean;
+    revisions?: boolean;
+    sourceBinaries?: boolean;
+  }): Promise<{ omissions: string[]; backupMode: string; byteLength: number }>;
+  /** Stage the bytes of the LAST `exportBackup` back through the validator. */
+  stageLastExport(): Promise<{ outcome: string; findings: string[]; reason: string | null }>;
+  /**
+   * Stage an incoming backup bundle for validation WITHOUT touching the live
+   * store (A19). Accepts a serializable bundle: a number[] of bytes (a Lane-2
+   * `.ito.zip`) or a JSON string (a bare Lane-1 payload); it is converted to a
+   * Uint8Array inside. Returns a serializable staging summary.
+   */
+  stageImport(
+    bundle: number[] | string,
+  ): Promise<{ outcome: string; findings: string[]; reason: string | null }>;
+  /** The currently staged outcome, or null (mirrors the UI staging report). */
+  stagedImportState(): { outcome: string; findings: string[]; reason: string | null } | null;
+  /** Commit the held staged import; `lenient` is the 'Try Import Anyway' path. */
+  commitStagedImport(opts?: { lenient?: boolean }): Promise<{ committed: boolean; reason: string | null }>;
+  /** Offload a source's PDF binary locally (A17); records stay intact. */
+  offloadSourceBinary(sourceId: string): Promise<void>;
+  /** Re-attach a PDF binary (A17); accepts number[] bytes, sha256-verified. */
+  attachSourceBinary(
+    sourceId: string,
+    bytes: number[],
+  ): Promise<{ attached: boolean; reason: string | null }>;
+  /** Whether a source's binary is locally available ('cached'|'binary-offloaded'). */
+  sourceBinaryStatus(sourceId: string): string;
+  /** The stored PDF bytes of a source as a serializable number[] (null if gone). */
+  readSourceBytes(sourceId: string): Promise<number[] | null>;
+  /** D02 "delete highlight only": remove the annotation, keep every quote. */
+  deleteAnnotationOnly(annotationId: string): Promise<void>;
+  /** D02 "delete highlight and its quotes": remove the annotation + its quotes. */
+  deleteAnnotationAndQuotes(annotationId: string): Promise<void>;
   /** Test-only: force the next N persist() calls to fail (R12). */
   forceNextSaveFailures(count: number): void;
   /** Test-only: drift a source's stored version hash to trigger A17 mismatch. */
@@ -298,6 +365,9 @@ function glyphMap(layer: HTMLElement): { text: string; runs: { node: Text; start
 }
 
 export function installTestApi(wb: Workbench, bump: () => void): void {
+  // Holds the bytes of the most recent exportBackup so stageLastExport can
+  // round-trip a real export straight back through the staging validator.
+  let lastExportBytes: Uint8Array | null = null;
   const api: ItoTestApi = {
     openSourceIds() {
       return [...wb.snapshot().openSourceIds];
@@ -627,6 +697,60 @@ export function installTestApi(wb: Workbench, bump: () => void): void {
     },
     async hideRelationship(relationshipId) {
       await wb.hideRelationship(relationshipId as RelationshipId);
+      bump();
+    },
+    async exportBackup(options) {
+      const { bytes, manifest } = await wb.exportBackup(options ?? {});
+      lastExportBytes = bytes;
+      return {
+        omissions: [...(manifest.omissions ?? [])],
+        backupMode: manifest.backupMode ?? "full",
+        byteLength: bytes.byteLength,
+      };
+    },
+    async stageLastExport() {
+      if (!lastExportBytes) {
+        return { outcome: "hard-reject", findings: [], reason: "no prior export" };
+      }
+      const staged = await wb.stageImport(lastExportBytes);
+      return serializeStaged(staged);
+    },
+    async stageImport(bundle) {
+      const input = typeof bundle === "string" ? bundle : Uint8Array.from(bundle);
+      const staged = await wb.stageImport(input);
+      return serializeStaged(staged);
+    },
+    stagedImportState() {
+      const staged = wb.stagedImportState();
+      return staged ? serializeStaged(staged) : null;
+    },
+    async commitStagedImport(opts) {
+      const result = await wb.commitStagedImport(opts ?? {});
+      bump();
+      return { committed: result.committed, reason: result.reason ?? null };
+    },
+    async offloadSourceBinary(sourceId) {
+      await wb.offloadSourceBinary(sourceId as SourceId);
+      bump();
+    },
+    async attachSourceBinary(sourceId, bytes) {
+      const result = await wb.attachSourceBinary(sourceId as SourceId, Uint8Array.from(bytes));
+      bump();
+      return { attached: result.attached, reason: result.reason ?? null };
+    },
+    sourceBinaryStatus(sourceId) {
+      return wb.sourceBinaryStatus(sourceId as SourceId);
+    },
+    async readSourceBytes(sourceId) {
+      const bytes = await wb.readSourceBytes(sourceId as SourceId);
+      return bytes ? Array.from(bytes) : null;
+    },
+    async deleteAnnotationOnly(annotationId) {
+      await wb.deleteAnnotationOnly(annotationId as AnnotationId);
+      bump();
+    },
+    async deleteAnnotationAndQuotes(annotationId) {
+      await wb.deleteAnnotationAndQuotes(annotationId as AnnotationId);
       bump();
     },
     forceNextSaveFailures(count) {

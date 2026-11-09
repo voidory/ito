@@ -6,8 +6,11 @@ import { Reader } from "./Reader";
 import { NodesCanvas } from "./NodesCanvas";
 import { NetworkSearch } from "./NetworkSearch";
 import { ThreeScene } from "./ThreeScene";
+import { BackupExportModal } from "./BackupExportModal";
+import { ImportStagingReport } from "./ImportStagingReport";
 import { revealPresentation } from "./threeScene.map";
 import { installTestApi } from "./testApi";
+import type { StagedImport } from "../storage";
 import type { SourceId } from "../model";
 import { loadDocument, hashBytes } from "../pdf";
 
@@ -31,6 +34,21 @@ export function App(): JSX.Element {
   const [boot, setBoot] = useState<Boot>({ kind: "booting" });
   const { wb, state, bump, error } = useWorkbench();
   const [importing, setImporting] = useState(false);
+  // M3 backup/restore surfaces (A18/A19): the export modal and the staged
+  // import report are mounted from the shell behind visible triggers.
+  const [backupModalOpen, setBackupModalOpen] = useState(false);
+  const [staged, setStaged] = useState<StagedImport | null>(null);
+
+  const onRestoreFile = useCallback(
+    async (file: File | null) => {
+      if (!wb || !file) return;
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const result = await wb.stageImport(bytes);
+      setStaged(result);
+      bump();
+    },
+    [wb, bump],
+  );
 
   const onToggleTab = useCallback(
     (open: boolean) => {
@@ -146,7 +164,41 @@ export function App(): JSX.Element {
               transitions and creates ZERO durable records.
             */}
             <NetworkSearch wb={wb} categoryScope={state.categoryScope} bump={bump} />
+            {/* M3 backup/restore triggers (A18/A19): always reachable. */}
+            <span style={{ marginLeft: "auto", display: "flex", gap: "0.5rem", paddingRight: "1rem" }}>
+              <button data-testid="open-backup-export" onClick={() => setBackupModalOpen(true)}>
+                Backup
+              </button>
+              <label data-testid="restore-backup-label" style={{ cursor: "pointer" }}>
+                Restore
+                <input
+                  data-testid="restore-backup-input"
+                  type="file"
+                  accept=".ito,.zip,.json,application/zip,application/json"
+                  style={{ display: "none" }}
+                  onChange={(e) => void onRestoreFile(e.target.files?.[0] ?? null)}
+                />
+              </label>
+            </span>
           </div>
+          {backupModalOpen && (
+            <BackupExportModal wb={wb} onClose={() => setBackupModalOpen(false)} />
+          )}
+          {staged && (
+            <ImportStagingReport
+              wb={wb}
+              staged={staged}
+              onDone={(committed) => {
+                if (committed) setStaged(null);
+                bump();
+              }}
+              onCancel={() => {
+                wb.clearStagedImport();
+                setStaged(null);
+                bump();
+              }}
+            />
+          )}
           {state.viewMode === "nodes" ? (
             <NodesView
               wb={wb}

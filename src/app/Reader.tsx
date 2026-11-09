@@ -29,6 +29,21 @@ interface ReturnTarget {
 }
 
 /**
+ * The stored context shown when a followed quote resolves to 'binary-offloaded'
+ * (A17). The citation still FUNCTIONS from this metadata; the popover offers
+ * re-attachment of the PDF binary to restore the live render.
+ */
+export interface OffloadedPopover {
+  readonly evidenceId: string;
+  readonly sourceId: SourceId;
+  readonly sourceTitle: string;
+  readonly quotedText: string;
+  readonly comment: string;
+  readonly pageNumber: number;
+  readonly reason: string;
+}
+
+/**
  * The reading workbench (spec section 6). Renders one or more open documents
  * with real selectable pdf.js text. When the highlights tab is closed the
  * reader is centred + expanded and the sidebar reserves ZERO width (R18).
@@ -60,6 +75,11 @@ export function Reader({
   const together = openSourceIds.length > 1;
   const [returnTarget, setReturnTarget] = useState<ReturnTarget | null>(null);
   const [returnNotice, setReturnNotice] = useState<string | null>(null);
+  // A17/D02: when a followed quote resolves to 'binary-offloaded' we surface a
+  // popover that renders the stored quote + comment + page number + source
+  // title and offers "Attach PDF Binary". The citation still functions from
+  // this stored metadata; attaching re-hydrates the live render.
+  const [offloadedPopover, setOffloadedPopover] = useState<OffloadedPopover | null>(null);
   const nonceRef = useRef(0);
 
   // Source-return (A17): resolve the evidence's live source WITHOUT closing the
@@ -70,6 +90,30 @@ export function Reader({
       const resolved = wb.resolveEvidenceSource(evidenceId);
       if (!resolved) return;
       nonceRef.current += 1;
+      // A17: a binary-offloaded resolution does NOT navigate to unrelated
+      // content; it opens a popover with the stored quote/comment/page/title
+      // and an "Attach PDF Binary" action to re-hydrate the live render.
+      if (resolved.resolution.kind === "binary-offloaded") {
+        const data = wb.rawData();
+        const evidence = data.evidenceInstances.find((e) => e.id === evidenceId);
+        const annotation = data.annotations.find(
+          (a) => a.id === evidence?.annotationId,
+        );
+        const source = data.sources.find((s) => s.id === resolved.sourceId);
+        const pageIndex = resolved.anchor?.pageIndex ?? resolved.scopeStartPageIndex;
+        setReturnNotice(null);
+        setReturnTarget(null);
+        setOffloadedPopover({
+          evidenceId,
+          sourceId: resolved.sourceId,
+          sourceTitle: source?.title ?? "Source",
+          quotedText: evidence?.quotedText ?? "",
+          comment: annotation?.comment ?? "",
+          pageNumber: pageIndex + 1,
+          reason: resolved.resolution.reason,
+        });
+        return;
+      }
       if (resolved.resolution.kind !== "resolved") {
         setReturnNotice(
           resolved.resolution.kind === "mismatched"
@@ -204,6 +248,20 @@ export function Reader({
             ×
           </button>
         </div>
+      )}
+
+      {offloadedPopover && (
+        <BinaryOffloadedPopover
+          wb={wb}
+          popover={offloadedPopover}
+          onClose={() => setOffloadedPopover(null)}
+          onAttached={() => {
+            setOffloadedPopover(null);
+            // Re-follow so the now-cached source resolves + scrolls to the quote.
+            followSource(offloadedPopover.evidenceId);
+            bump();
+          }}
+        />
       )}
 
       <div
@@ -406,7 +464,7 @@ interface ToolbarState {
   readonly y: number;
 }
 
-interface MenuState {
+export interface MenuState {
   readonly annotationId: AnnotationId;
   readonly sourceId: SourceId;
   readonly x: number;
@@ -887,7 +945,7 @@ function CommentSurface({
  * Right-click / keyboard-menu equivalent (R15). Offers "Associate with
  * subject..." (tentative dotted) and a separate "Insert into subject page...".
  */
-function AssociationMenu({
+export function AssociationMenu({
   wb,
   menu,
   onClose,
@@ -928,6 +986,18 @@ function AssociationMenu({
     bump();
     onClose();
   };
+  // D02 "delete highlight only": removes the annotation, keeps every quote.
+  const doDeleteOnly = async (): Promise<void> => {
+    await wb.deleteAnnotationOnly(menu.annotationId);
+    bump();
+    onClose();
+  };
+  // D02 "delete highlight and its quotes": destructive, snapshots then strips.
+  const doDeleteAndQuotes = async (): Promise<void> => {
+    await wb.deleteAnnotationAndQuotes(menu.annotationId);
+    bump();
+    onClose();
+  };
 
   return (
     <div
@@ -958,6 +1028,25 @@ function AssociationMenu({
             onClick={() => setPicking("insert")}
           >
             Insert into subject page…
+          </button>
+          {/* D02 two-mode deletion. "Delete highlight only" removes the
+              annotation but PRESERVES every quote (the cited text lives on in
+              its subject pages; the reference derives as 'unresolved').
+              "Delete highlight and its quotes" is the destructive variant that
+              also strips the inline quote nodes after a revision snapshot. */}
+          <button
+            data-testid="delete-highlight-only"
+            role="menuitem"
+            onClick={() => void doDeleteOnly()}
+          >
+            Delete highlight only
+          </button>
+          <button
+            data-testid="delete-highlight-and-quotes"
+            role="menuitem"
+            onClick={() => void doDeleteAndQuotes()}
+          >
+            Delete highlight and its quotes
           </button>
           <button data-testid="menu-close" role="menuitem" onClick={onClose}>
             Cancel
@@ -1236,6 +1325,94 @@ function ShowInNodes({
         </div>
       )}
     </span>
+  );
+}
+
+/**
+ * The binary-offloaded citation popover (A17). The followed quote's source has
+ * had its PDF binary evicted locally, so the live render is unavailable. The
+ * popover still shows the citation's stored quote + comment + page number +
+ * source title (the citation FUNCTIONS from this metadata) and offers an
+ * "Attach PDF Binary" file action. Attaching runs `wb.attachSourceBinary`
+ * (sha256-verified): a matching file re-hydrates the source back to resolved; a
+ * mismatching file is rejected with an inline reason and writes nothing.
+ */
+export function BinaryOffloadedPopover({
+  wb,
+  popover,
+  onClose,
+  onAttached,
+}: {
+  wb: Workbench;
+  popover: OffloadedPopover;
+  onClose: () => void;
+  onAttached: () => void;
+}): JSX.Element {
+  const [error, setError] = useState<string | null>(null);
+  const [attaching, setAttaching] = useState(false);
+
+  const onFile = async (file: File | null): Promise<void> => {
+    if (!file) return;
+    setAttaching(true);
+    setError(null);
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const result = await wb.attachSourceBinary(popover.sourceId, bytes);
+      if (!result.attached) {
+        setError(result.reason ?? "the file did not match this source");
+        return;
+      }
+      onAttached();
+    } finally {
+      setAttaching(false);
+    }
+  };
+
+  return (
+    <div
+      data-testid="binary-offloaded-popover"
+      data-return-resolution="binary-offloaded"
+      data-source-id={popover.sourceId}
+      data-evidence-id={popover.evidenceId}
+      role="dialog"
+      aria-label="Offloaded source citation"
+      style={styles.offloadedPopover}
+    >
+      <div style={styles.offloadedHeader}>
+        <strong data-testid="offloaded-source-title">{popover.sourceTitle}</strong>
+        <button data-testid="offloaded-popover-close" aria-label="Close" onClick={onClose}>
+          ×
+        </button>
+      </div>
+      <p style={styles.offloadedReason}>{popover.reason}</p>
+      <blockquote data-testid="offloaded-quote" style={styles.offloadedQuote}>
+        {popover.quotedText}
+      </blockquote>
+      {popover.comment !== "" && (
+        <p data-testid="offloaded-comment" style={{ fontSize: "0.82rem", color: "#555" }}>
+          {popover.comment}
+        </p>
+      )}
+      <div data-testid="offloaded-page" style={{ fontSize: "0.78rem", color: "#777" }}>
+        Page {popover.pageNumber}
+      </div>
+      {error && (
+        <p data-testid="attach-pdf-error" role="alert" style={{ color: "#c5221f", fontSize: "0.8rem" }}>
+          {error}
+        </p>
+      )}
+      <label data-testid="attach-pdf-binary" style={styles.attachLabel}>
+        {attaching ? "Attaching…" : "Attach PDF Binary"}
+        <input
+          data-testid="attach-pdf-input"
+          type="file"
+          accept=".pdf,application/pdf"
+          style={{ display: "none" }}
+          disabled={attaching}
+          onChange={(e) => void onFile(e.target.files?.[0] ?? null)}
+        />
+      </label>
+    </div>
   );
 }
 
@@ -1560,5 +1737,43 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid #ccc",
     borderRadius: "6px",
     boxShadow: "0 6px 24px rgba(0,0,0,0.2)",
+  },
+  offloadedPopover: {
+    position: "absolute",
+    zIndex: 1003,
+    top: "20%",
+    left: "50%",
+    transform: "translateX(-50%)",
+    width: "24rem",
+    maxWidth: "90vw",
+    padding: "0.9rem 1rem",
+    background: "#fff",
+    border: "1px solid #f0c38a",
+    borderRadius: "10px",
+    boxShadow: "0 8px 30px rgba(0,0,0,0.22)",
+  },
+  offloadedHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: "0.35rem",
+  },
+  offloadedReason: { fontSize: "0.8rem", color: "#7a4b00", margin: "0 0 0.5rem" },
+  offloadedQuote: {
+    margin: "0 0 0.5rem",
+    padding: "0.35rem 0.6rem",
+    borderLeft: "3px solid #1a56db",
+    background: "#f6f8ff",
+    fontSize: "0.9rem",
+  },
+  attachLabel: {
+    display: "inline-block",
+    marginTop: "0.4rem",
+    padding: "0.35rem 0.75rem",
+    background: "#1a56db",
+    color: "#fff",
+    borderRadius: "6px",
+    cursor: "pointer",
+    fontSize: "0.85rem",
   },
 };
