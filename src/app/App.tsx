@@ -17,6 +17,7 @@ import { installTestApi } from "./testApi";
 import type { KoofrStorageAdapter, StagedImport } from "../storage";
 import type { SourceId } from "../model";
 import { loadDocument, hashBytes } from "../pdf";
+import { importPdfFiles } from "./pdfImport";
 
 // Import the two real fixtures so the library has documents to open. One is the
 // 3+ page fixture required for the range-annotation flow.
@@ -55,6 +56,19 @@ export function App(): JSX.Element {
       setStaged(result);
       bump();
     },
+    [wb, bump],
+  );
+
+  // Full-window drop guard (spec section 1.2). A .pdf dropped ANYWHERE in the
+  // app (Reader/Nodes/3D/History views, not just the Library dropzone) must
+  // never navigate the browser tab away, so the shell root preventDefaults
+  // every drag-over/drop and routes the dropped PDFs through the SAME shared
+  // import path the Library button and dropzone use (sha256 versionHash +
+  // numPages fallback + wb.importSource). The Library dropzone keeps its own
+  // handler; this is the outer safety net for the rest of the shell.
+  const onShellDragOver = useCallback(shellDragOverHandler, []);
+  const onShellDrop = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => shellDropHandler(e, wb, bump),
     [wb, bump],
   );
 
@@ -158,6 +172,10 @@ export function App(): JSX.Element {
       // Propagate the motion-suppression gate to the shell root so theme.css
       // disables every transition/keyframe app-wide (R19, A09-M2).
       data-suppress-motion={state?.suppressMotion ? "true" : "false"}
+      // Full-window drop guard (spec section 1.2): a stray PDF dropped on any
+      // view never navigates the tab away and is imported via the shared path.
+      onDragOver={onShellDragOver}
+      onDrop={onShellDrop}
       style={{ fontFamily: "system-ui, sans-serif" }}
     >
       {/* Hidden boot confirmation retained for traceability to the M0 checks. */}
@@ -650,6 +668,34 @@ function NodesView({
       </div>
     </div>
   );
+}
+
+/**
+ * Full-window drop guard handlers (spec section 1.2), extracted so the exact
+ * behavior wired onto the `.app-shell` root is unit-testable. `onDragOver`
+ * preventDefaults and sets a copy drop effect; `onDrop` preventDefaults (so a
+ * stray PDF never navigates the tab away) and imports every dropped PDF via the
+ * SAME shared path (sha256 versionHash + numPages + wb.importSource) the
+ * Library button and dropzone use.
+ */
+export function shellDragOverHandler(e: React.DragEvent<HTMLDivElement>): void {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "copy";
+}
+
+export function shellDropHandler(
+  e: React.DragEvent<HTMLDivElement>,
+  wb: ReturnType<typeof useWorkbench>["wb"],
+  bump: () => void,
+): void {
+  e.preventDefault();
+  if (!wb) return;
+  const files = e.dataTransfer.files;
+  if (!files || files.length === 0) return;
+  void (async () => {
+    const count = await importPdfFiles(wb, Array.from(files));
+    if (count > 0) bump();
+  })();
 }
 
 async function importFixture(

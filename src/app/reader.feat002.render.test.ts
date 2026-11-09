@@ -29,6 +29,7 @@ import {
   LiveSelectionPreview,
   ReaderContextMenu,
   SelectionToolbar,
+  serializedRerender,
   type AnchorRect,
   type ContextMenuState,
   type EditPopoverState,
@@ -365,6 +366,70 @@ describe("FEAT-002 2.5 clampZoom steps between 50% and 300%", () => {
   it("steps cleanly without float drift", () => {
     expect(clampZoom(1 + 0.1)).toBe(1.1);
     expect(clampZoom(1 - 0.1)).toBe(0.9);
+  });
+});
+
+describe("FEAT-002 2.5 serializedRerender guards overlapping page renders", () => {
+  /**
+   * A fake RenderedPage whose rerender resolves only when the test releases it,
+   * so we can observe whether two renders ever overlap on the same canvas (the
+   * pdf.js "same canvas during multiple render()" hazard the zoom + fit effects
+   * both drive).
+   */
+  function makeFakePage() {
+    const scales: number[] = [];
+    let inFlight = 0;
+    let maxConcurrent = 0;
+    let resolveCurrent: (() => void) | null = null;
+    const page = {
+      rerender(scale: number): Promise<void> {
+        scales.push(scale);
+        inFlight += 1;
+        maxConcurrent = Math.max(maxConcurrent, inFlight);
+        return new Promise<void>((resolve) => {
+          resolveCurrent = () => {
+            inFlight -= 1;
+            resolveCurrent = null;
+            resolve();
+          };
+        });
+      },
+    };
+    return {
+      page,
+      scales,
+      get maxConcurrent() {
+        return maxConcurrent;
+      },
+      release(): Promise<void> {
+        resolveCurrent?.();
+        return Promise.resolve();
+      },
+    };
+  }
+
+  it("never runs two renders on the same page at once and applies the latest target", async () => {
+    const fake = makeFakePage();
+    const pageArg = fake.page as unknown as Parameters<typeof serializedRerender>[0];
+
+    // Three rapid requests while the first render is still in flight.
+    const p1 = serializedRerender(pageArg, 1.3);
+    const p2 = serializedRerender(pageArg, 2.6);
+    const p3 = serializedRerender(pageArg, 1.9);
+
+    // Only the first render actually started; the others coalesced.
+    expect(fake.scales).toEqual([1.3]);
+    expect(fake.maxConcurrent).toBe(1);
+
+    // Release the first render: the serializer should now run ONLY the latest
+    // pending target (1.9), dropping the intermediate 2.6.
+    await fake.release();
+    await Promise.resolve();
+    await fake.release();
+    await Promise.all([p1, p2, p3]);
+
+    expect(fake.scales).toEqual([1.3, 1.9]);
+    expect(fake.maxConcurrent).toBe(1);
   });
 });
 

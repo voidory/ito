@@ -12,11 +12,17 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { act, createElement } from "react";
+import type { DragEvent as ReactDragEvent } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { InMemoryStorageAdapter } from "../test/InMemoryStorageAdapter";
 import { Workbench } from "./workbench";
 import { Library } from "./Library";
-import { SubjectsLauncher, SaveErrorBanner } from "./App";
+import {
+  SubjectsLauncher,
+  SaveErrorBanner,
+  shellDragOverHandler,
+  shellDropHandler,
+} from "./App";
 import { CommentSurface } from "./Reader";
 import type { AnnotationId } from "../model";
 
@@ -136,6 +142,56 @@ describe("m8 Library import affordances", () => {
     expect(drop.defaultPrevented).toBe(true); // never navigates the tab away
     await waitFor(() => wb.rawData().sources.length === 1);
     expect(wb.rawData().sources[0]!.title).toBe("dropped");
+  });
+});
+
+describe("m8 full-window drop guard on the .app-shell root", () => {
+  // The spec (section 1.2) requires the shell ROOT to guard drops anywhere in
+  // the app (Reader/Nodes/3D views, not only the Library dropzone) so a stray
+  // PDF never navigates the tab away, importing via the shared path. This
+  // mounts the exact `.app-shell` wiring (the real onDragOver/onDrop handlers)
+  // against a real Workbench and asserts both the preventDefault guard and the
+  // import.
+  function shell(wb: Workbench): ReturnType<typeof createElement> {
+    return createElement("div", {
+      className: "app-shell",
+      "data-testid": "app-shell",
+      onDragOver: shellDragOverHandler,
+      onDrop: (e: ReactDragEvent<HTMLDivElement>) => shellDropHandler(e, wb, () => undefined),
+    });
+  }
+
+  it("preventDefaults a drag-over and sets a copy drop effect", async () => {
+    const wb = await Workbench.open(new InMemoryStorageAdapter());
+    const el = await render(shell(wb));
+    const root = el.querySelector('[data-testid="app-shell"]') as HTMLElement;
+    const dataTransfer = { files: [], dropEffect: "" } as unknown as DataTransfer;
+    const over = new Event("dragover", { bubbles: true, cancelable: true }) as unknown as DragEvent;
+    Object.defineProperty(over, "dataTransfer", { value: dataTransfer, configurable: true });
+    await act(async () => {
+      root.dispatchEvent(over);
+    });
+    expect(over.defaultPrevented).toBe(true);
+    expect(dataTransfer.dropEffect).toBe("copy");
+  });
+
+  it("preventDefaults a dropped PDF and imports it via the shared path", async () => {
+    const wb = await Workbench.open(new InMemoryStorageAdapter());
+    const el = await render(shell(wb));
+    const root = el.querySelector('[data-testid="app-shell"]') as HTMLElement;
+    const file = pdfFile(PDF_BYTES, "stray.pdf");
+    const dataTransfer = { files: [file], dropEffect: "" } as unknown as DataTransfer;
+    const drop = new Event("drop", { bubbles: true, cancelable: true }) as unknown as DragEvent;
+    Object.defineProperty(drop, "dataTransfer", { value: dataTransfer, configurable: true });
+    await act(async () => {
+      root.dispatchEvent(drop);
+    });
+    expect(drop.defaultPrevented).toBe(true); // never navigates the tab away
+    await waitFor(() => wb.rawData().sources.length === 1);
+    const src = wb.rawData().sources[0]!;
+    expect(src.title).toBe("stray");
+    expect(src.versionHash).toMatch(/^[0-9a-f]{64}$/); // sha256 hex, shared path
+    expect(src.pageCount).toBe(1); // numPages fallback in jsdom
   });
 });
 

@@ -845,7 +845,10 @@ function SourcePane({
   // so glyphs + canvas + overlays stay aligned at the fitted scale. A
   // ResizeObserver keeps it in sync as dividers are dragged. Idempotent: it
   // only re-renders when the fitted scale meaningfully changes.
-  const fittedScaleRef = useRef<number>(1.3);
+  // The current fit-to-pane TARGET scale (<= BASE_SCALE). It doubles as the
+  // base multiplier the zoom composes with, so it starts at BASE_ZOOM (the
+  // unzoomed base scale) and is narrowed by the ResizeObserver refit.
+  const fittedScaleRef = useRef<number>(BASE_ZOOM);
   useEffect(() => {
     if (!ready || isWebsite) return;
     const mount = mountRef.current;
@@ -874,9 +877,14 @@ function SourcePane({
       const target = Math.min(BASE_SCALE, Math.max(0.4, avail / intrinsicWidth));
       if (Math.abs(target - fittedScaleRef.current) < 0.02) return;
       fittedScaleRef.current = target;
+      // Compose the fit target with the CURRENT user zoom so a resize tick
+      // after a zoom re-fits the width WITHOUT discarding the zoom. The applied
+      // scale is the fit target scaled by the live zoom multiplier (zoom === 1
+      // leaves the pure fit behavior unchanged).
+      const applied = target * zoomRef.current;
       void (async () => {
         for (const page of pages) {
-          await page.rerender(target);
+          await serializedRerender(page, applied);
         }
         redrawOverlays();
       })();
@@ -1325,17 +1333,24 @@ function SourcePane({
     return () => document.removeEventListener("selectionchange", onSelectionChange);
   }, []);
 
-  // FEAT-002 (2.5) apply the zoom scale: re-render every page at BASE_ZOOM *
-  // zoom so canvas, text layer and overlays all stay locked 1:1. Skipped for
-  // websites (no pdf.js pages).
+  // FEAT-002 (2.5) apply the zoom scale: re-render every page at the current
+  // fit target * zoom so canvas, text layer and overlays all stay locked 1:1.
+  // Skipped for websites (no pdf.js pages).
   useEffect(() => {
     if (!ready || isWebsite) return;
     zoomRef.current = zoom;
     const pages = pagesRef.current;
     if (pages.length === 0) return;
+    // Apply the zoom ON TOP of the current fit-to-pane target (fittedScaleRef)
+    // so zooming a pane that was fitted-down does not jump back to the base
+    // width, and so the zoom and fit effects agree on a single applied scale.
+    // Renders are serialized per page so the zoom effect and a concurrent
+    // ResizeObserver refit can never drive overlapping pdf.js render() calls on
+    // the same canvas (the "same canvas during multiple render()" error).
+    const applied = fittedScaleRef.current * zoom;
     void (async () => {
       for (const page of pages) {
-        await page.rerender(BASE_ZOOM * zoom);
+        await serializedRerender(page, applied);
       }
       redrawOverlays();
     })();
@@ -2816,6 +2831,44 @@ export function drawAnnotation(
 
 function swatch(c: HighlightColor): string {
   return { yellow: "#ffdd57", green: "#82dc96", blue: "#82beff", pink: "#ff96c8" }[c];
+}
+
+/**
+ * Per-page rerender serializer. The zoom effect and the fit-to-pane
+ * ResizeObserver both drive `page.rerender()` on the SAME canvases; pdf.js
+ * throws "Cannot use the same canvas during multiple render() operations" if
+ * two renders overlap on one canvas. This coalesces concurrent requests per
+ * page: at most one rerender runs at a time, and if newer requests arrive while
+ * one is in flight only the LATEST target scale is rendered next (intermediate
+ * targets are dropped, which is correct since each is a full re-render). The
+ * returned promise resolves once the page has settled at a scale no older than
+ * this request.
+ */
+type RerenderState = { running: Promise<void> | null; pending: number | null };
+const rerenderStates = new WeakMap<RenderedPage, RerenderState>();
+
+export function serializedRerender(page: RenderedPage, scale: number): Promise<void> {
+  let state = rerenderStates.get(page);
+  if (!state) {
+    state = { running: null, pending: null };
+    rerenderStates.set(page, state);
+  }
+  if (state.running) {
+    // A render is in flight: remember only the newest target (latest wins).
+    state.pending = scale;
+    return state.running;
+  }
+  const run = (target: number): Promise<void> =>
+    page.rerender(target).then(() => {
+      const next = state!.pending;
+      state!.pending = null;
+      if (next !== null && next !== target) return run(next);
+      state!.running = null;
+      return undefined;
+    });
+  const started = run(scale);
+  state.running = started;
+  return started;
 }
 
 /** FEAT-002 (2.5) zoom bounds: step the PDF scale between 50% and 300%. */
