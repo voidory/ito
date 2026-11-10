@@ -99,13 +99,17 @@ describe("M18 FEAT-004 — equation boundary: model LaTeX -> MathML structure", 
 
 describe("M18 FEAT-004 — molecule boundary: model SMILES -> validation", () => {
   // [smiles, assertion on the normalizedSmiles]
-  // The deterministic normalizer canonicalizes to an atom sequence (ring-closure
-  // digits + branch parens are dropped), so assertions target the ATOMS it keeps.
+  // The deterministic normalizer faithfully round-trips the connective skeleton:
+  // bond orders, branch parens and ring-closure digits all survive, so these
+  // assertions target the TOPOLOGY it preserves (ring stays a ring, C=O stays a
+  // double bond), not just the retained atoms.
   const cases: Array<[string, (n: string) => void]> = [
     ["C", (n) => expect(n).toBe("C")],
-    ["CCO", (n) => expect(n.toUpperCase()).toContain("CCO")],
-    ["CC(=O)O", (n) => expect(n.toUpperCase()).toContain("CCOO")],
-    ["C1CCCCC1", (n) => expect(n.toUpperCase()).toBe("CCCCCC")],
+    ["CCO", (n) => expect(n.toUpperCase()).toBe("CCO")],
+    // Carbonyl + branch survive: the double bond (=) and the branch are kept.
+    ["CC(=O)O", (n) => expect(n).toBe("CC(=O)O")],
+    // Cyclohexane stays a RING (ring-closure digit survives), not a hexane chain.
+    ["C1CCCCC1", (n) => expect(n).toBe("C1CCCCC1")],
   ];
 
   for (const [smiles, assertNorm] of cases) {

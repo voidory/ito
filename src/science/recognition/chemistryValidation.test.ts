@@ -140,3 +140,93 @@ describe("M18 FEAT-002 — disconnected components and reactions", () => {
     expect(normalizeSmiles("c1ccccc1")).toBe(normalizeSmiles("c1ccccc1"));
   });
 });
+
+describe("M18 review-fix — normalizeSmiles round-trips the connective skeleton", () => {
+  // The previous serializer dropped bond orders, branch parens and ring-closure
+  // digits (CC(=O)O -> CCOO, C1CCCCC1 -> CCCCCC, C=C -> CC), so the normalized
+  // string — used both as a dedupe key and persisted as AreaAnchor.smiles —
+  // described a chemically DIFFERENT molecule. These tests pin the fix: parse ->
+  // serialize -> parse must yield the SAME graph.
+
+  // Compare two SMILES by their parsed graph shape (atom count, bond count, bond
+  // orders, aromaticity) so we assert TOPOLOGY, not an exact string.
+  const graphShape = (smiles: string): string => {
+    const comps = parseSmilesGraph(smiles);
+    return comps
+      .map((m) => {
+        const atoms = m.atoms
+          .map((a) => `${a.element}${a.aromatic ? "a" : ""}${a.charge}`)
+          .sort()
+          .join(",");
+        const bonds = m.bonds
+          .map((b) => `${b.order}${b.aromatic ? "a" : ""}`)
+          .sort()
+          .join(",");
+        return `atoms[${m.atoms.length}:${atoms}]bonds[${m.bonds.length}:${bonds}]`;
+      })
+      .join("|");
+  };
+
+  const roundTripCases = [
+    "C",
+    "CC",
+    "C=C",
+    "C#N",
+    "CCO",
+    "CC(=O)O",
+    "C1CCCCC1",
+    "c1ccccc1",
+    "OC1=CC=CC=C1",
+    "C1CC2CCC1CC2",
+    "CCO.O",
+  ];
+
+  for (const smiles of roundTripCases) {
+    it(`"${smiles}" survives parse -> serialize -> parse with the same graph`, () => {
+      const normalized = normalizeSmiles(smiles);
+      // Re-serializing is idempotent (stable key).
+      expect(normalizeSmiles(normalized)).toBe(normalized);
+      // The normalized string parses back to the SAME molecular graph.
+      expect(graphShape(normalized)).toBe(graphShape(smiles));
+      // And the normalized string is itself valid.
+      expect(validateSmiles(normalized).valid).toBe(true);
+    });
+  }
+
+  it("a RING stays a ring: C1CCCCC1 keeps 6 atoms AND 6 bonds (not a 5-bond chain)", () => {
+    const [ring] = parseSmilesGraph(normalizeSmiles("C1CCCCC1"));
+    expect(ring!.atoms).toHaveLength(6);
+    expect(ring!.bonds).toHaveLength(6); // ring closure survives
+  });
+
+  it("a DOUBLE BOND stays double: C=C is not collapsed to CC", () => {
+    const norm = normalizeSmiles("C=C");
+    const [eth] = parseSmilesGraph(norm);
+    expect(eth!.bonds.some((b) => b.order === 2)).toBe(true);
+    // C=C and CC must NOT collide as a dedupe key.
+    expect(norm).not.toBe(normalizeSmiles("CC"));
+  });
+
+  it("the CARBONYL + branch survive: CC(=O)O keeps its C=O double bond", () => {
+    const [acid] = parseSmilesGraph(normalizeSmiles("CC(=O)O"));
+    expect(acid!.atoms).toHaveLength(4);
+    expect(acid!.bonds.some((b) => b.order === 2)).toBe(true);
+  });
+
+  it("aromatic ring stays distinct from its aliphatic ring (c1ccccc1 != C1CCCCC1)", () => {
+    expect(normalizeSmiles("c1ccccc1")).not.toBe(normalizeSmiles("C1CCCCC1"));
+    const [benzene] = parseSmilesGraph(normalizeSmiles("c1ccccc1"));
+    expect(benzene!.atoms.every((a) => a.aromatic)).toBe(true);
+    expect(benzene!.bonds).toHaveLength(6); // still a ring
+  });
+
+  it("a reaction round-trips reactants and products distinctly (CCO>>CC=O)", () => {
+    const norm = normalizeSmiles("CCO>>CC=O");
+    const rxn = parseReactionGraph(norm);
+    expect(rxn.reactants).toHaveLength(1);
+    expect(rxn.products).toHaveLength(1);
+    // The product keeps its double bond — reactant != product.
+    expect(rxn.products[0]!.bonds.some((b) => b.order === 2)).toBe(true);
+    expect(rxn.reactants[0]!.bonds.every((b) => b.order !== 2)).toBe(true);
+  });
+});

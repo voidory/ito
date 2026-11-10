@@ -22,6 +22,8 @@ import { Workbench } from "../workbench";
 import { HighlightEditPopover } from "./AnnotationOverlays";
 import { createRecognitionService } from "../../science/recognition";
 import type { ImageModelBackend } from "../../science/recognition";
+import { parseSmilesGraph } from "../../science/recognition/chemGraph";
+import { validateSmiles } from "../../science/recognition/chemistryValidation";
 import type { NormalizedRect, Source } from "../../model";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -234,10 +236,24 @@ describe("M18 FEAT-004 — unconfigured service routes to manual entry (Phase 9)
     const stored = wb2.rawData().annotations.find((a) => a.id === area.annotation.id)!;
     expect(stored.scope.kind).toBe("area");
     if (stored.scope.kind === "area") {
+      const storedSmiles = stored.scope.anchor.smiles!;
       // Aromaticity preserved: c1ccccc1 is not uppercased.
-      expect(stored.scope.anchor.smiles).toContain("c");
-      expect(stored.scope.anchor.smiles).not.toContain("C");
+      expect(storedSmiles).toContain("c");
+      expect(storedSmiles).not.toContain("C");
+      // Topology preserved: the benzene RING survives Accept (ring-closure
+      // digit is not dropped), so the stored molecule is still a ring, not an
+      // open aromatic chain. Round-trip: the stored smiles parses to the SAME
+      // graph the user confirmed (6 aromatic carbons, 6 bonds forming a cycle).
+      expect(storedSmiles).toMatch(/c1cccc.*1|c1ccccc1/);
+      const graph = parseSmilesGraph(storedSmiles);
+      expect(graph).toHaveLength(1);
+      expect(graph[0]!.atoms).toHaveLength(6);
+      expect(graph[0]!.atoms.every((a) => a.aromatic)).toBe(true);
+      // 6 atoms + 6 bonds = exactly one ring (a chain would have only 5 bonds).
+      expect(graph[0]!.bonds).toHaveLength(6);
+      expect(validateSmiles(storedSmiles).valid).toBe(true);
       expect(stored.scope.anchor.mechanism).toBeTruthy();
+      expect(stored.scope.anchor.mechanism!.smiles).toBe(storedSmiles);
       expect(stored.scope.anchor.mechanism!.arrows).toEqual([]);
     }
   });

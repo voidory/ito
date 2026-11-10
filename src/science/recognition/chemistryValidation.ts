@@ -277,9 +277,12 @@ function bracketElementSymbol(inner: string): string | null {
 
 /**
  * Produce a deterministic (NOT RDKit-canonical) normalized SMILES from the
- * parsed graph. Aromaticity, charge, isotope and chirality are preserved in the
- * output; reaction fields are rebuilt around their '>' separators. This is a
- * stable, reproducible echo of the parsed structure, suitable as a dedupe key.
+ * parsed graph. The full connective skeleton is preserved: bond orders
+ * (`=`/`#`), branch parentheses and ring-closure digits are reconstructed, as
+ * are aromaticity, charge, isotope, explicit-H and chirality. Reaction fields
+ * are rebuilt around their '>' separators. The transform round-trips (parse →
+ * serialize → parse yields the same graph: a ring stays a ring, a double bond
+ * stays double), so it is safe BOTH as a dedupe key AND as persisted structure.
  */
 export function normalizeSmiles(smiles: string): string {
   const raw = (smiles ?? "").trim();
@@ -293,46 +296,143 @@ export function normalizeSmiles(smiles: string): string {
   return parseSmilesGraph(raw).map(moleculeToSmiles).join(".");
 }
 
+/** Render a single atom as its SMILES token (bracketed when necessary). */
+function atomToken(atom: ParsedMolecule["atoms"][number]): string {
+  const needsBracket =
+    atom.charge !== 0 ||
+    atom.isotope !== undefined ||
+    atom.chirality ||
+    atom.explicitH !== undefined ||
+    !ALIPHATIC_ORGANIC.has(atom.element);
+  if (needsBracket) {
+    const iso = atom.isotope !== undefined ? String(atom.isotope) : "";
+    const sym = atom.aromatic ? atom.element.toLowerCase() : atom.element;
+    const chir = atom.chirality ?? "";
+    const h = atom.explicitH !== undefined ? (atom.explicitH === 1 ? "H" : `H${atom.explicitH}`) : "";
+    const chg =
+      atom.charge === 0
+        ? ""
+        : atom.charge > 0
+          ? `+${atom.charge === 1 ? "" : atom.charge}`
+          : `-${atom.charge === -1 ? "" : -atom.charge}`;
+    return `[${iso}${sym}${chir}${h}${chg}]`;
+  }
+  return atom.aromatic ? atom.element.toLowerCase() : atom.element;
+}
+
+/** Render a bond-order prefix ("" single, "=" double, "#" triple). Aromatic
+ * bonds between two aromatic atoms are left implicit (lowercase atoms imply the
+ * aromatic bond), matching the input SMILES convention. */
+function bondPrefix(bond: ParsedMolecule["bonds"][number]): string {
+  if (bond.order === 2) return "=";
+  if (bond.order === 3) return "#";
+  return "";
+}
+
 /**
- * Serialize one parsed molecule as a deterministic SMILES-like string. This is
- * a linear echo (atoms in parse order, each bond rendered once); it is NOT a
- * ring-perception / canonical-ranking algorithm, but it is stable and preserves
- * the structural flags the default backend tracks.
+ * Serialize one parsed molecule into a SMILES string that faithfully round-trips
+ * the graph: bond orders (`=`/`#`), branch parentheses, and ring-closure digits
+ * are all reconstructed, and aromaticity / charge / isotope / explicit-H /
+ * chirality are preserved. A depth-first spanning tree over the bond graph emits
+ * tree edges inline (with branches), and every non-tree edge becomes a matched
+ * pair of ring-closure digits on its two endpoints. The result is a stable,
+ * deterministic echo: parse → serialize → parse yields the same molecule
+ * (a ring stays a ring, a double bond stays double), so it is safe both as a
+ * dedupe key and as persisted structure.
  */
 function moleculeToSmiles(mol: ParsedMolecule): string {
-  return mol.atoms
-    .map((atom, idx) => {
-      const needsBracket =
-        atom.charge !== 0 ||
-        atom.isotope !== undefined ||
-        atom.chirality ||
-        atom.explicitH !== undefined ||
-        !ALIPHATIC_ORGANIC.has(atom.element);
-      let token: string;
-      if (needsBracket) {
-        const iso = atom.isotope !== undefined ? String(atom.isotope) : "";
-        const sym = atom.aromatic ? atom.element.toLowerCase() : atom.element;
-        const chir = atom.chirality ?? "";
-        const h = atom.explicitH !== undefined ? (atom.explicitH === 1 ? "H" : `H${atom.explicitH}`) : "";
-        const chg =
-          atom.charge === 0
-            ? ""
-            : atom.charge > 0
-              ? `+${atom.charge === 1 ? "" : atom.charge}`
-              : `-${atom.charge === -1 ? "" : -atom.charge}`;
-        token = `[${iso}${sym}${chir}${h}${chg}]`;
-      } else {
-        token = atom.aromatic ? atom.element.toLowerCase() : atom.element;
+  const n = mol.atoms.length;
+  if (n === 0) return "";
+
+  // Adjacency: for each atom, the bonds that touch it (with the neighbour).
+  const adjacency: Array<Array<{ other: number; bond: ParsedMolecule["bonds"][number]; bondIndex: number }>> =
+    mol.atoms.map(() => []);
+  mol.bonds.forEach((bond, bondIndex) => {
+    if (bond.a < 0 || bond.b < 0 || bond.a >= n || bond.b >= n || bond.a === bond.b) return;
+    adjacency[bond.a]!.push({ other: bond.b, bond, bondIndex });
+    adjacency[bond.b]!.push({ other: bond.a, bond, bondIndex });
+  });
+
+  const visitedAtoms = new Array<boolean>(n).fill(false);
+  const usedBonds = new Array<boolean>(mol.bonds.length).fill(false);
+  // Ring-closure labels keyed by atom index; each closure bond assigns one digit
+  // to both of its endpoints so they match when serialized.
+  const ringLabels = new Map<number, Array<{ digit: number; bond: ParsedMolecule["bonds"][number] }>>();
+  let nextRingDigit = 1;
+
+  // First pass over a DFS spanning tree to allocate ring-closure digits for the
+  // non-tree (back) edges, so the digits can be emitted on both endpoints.
+  const treeChildren: Array<Array<{ child: number; bond: ParsedMolecule["bonds"][number] }>> =
+    mol.atoms.map(() => []);
+  const assignRings = (start: number): void => {
+    const stack: number[] = [start];
+    visitedAtoms[start] = true;
+    while (stack.length > 0) {
+      const atom = stack[stack.length - 1]!;
+      let advanced = false;
+      for (const edge of adjacency[atom]!) {
+        if (usedBonds[edge.bondIndex]) continue;
+        if (!visitedAtoms[edge.other]) {
+          // Tree edge: descend.
+          usedBonds[edge.bondIndex] = true;
+          visitedAtoms[edge.other] = true;
+          treeChildren[atom]!.push({ child: edge.other, bond: edge.bond });
+          stack.push(edge.other);
+          advanced = true;
+          break;
+        }
+        // Non-tree (ring-closure) edge: allocate a shared digit once.
+        usedBonds[edge.bondIndex] = true;
+        const digit = nextRingDigit++;
+        for (const endpoint of [atom, edge.other]) {
+          const list = ringLabels.get(endpoint) ?? [];
+          list.push({ digit, bond: edge.bond });
+          ringLabels.set(endpoint, list);
+        }
       }
-      // Append any ring-closure labels for bonds whose partner has a HIGHER
-      // index (i.e. non-sequential bonds) to keep the echo reversible-ish.
-      const closures = mol.bonds
-        .filter((b) => (b.a === idx && b.b > idx + 1) || (b.b === idx && b.a > idx + 1))
-        .map(() => "")
-        .join("");
-      return token + closures;
-    })
-    .join("");
+      if (!advanced) stack.pop();
+    }
+  };
+
+  // Second pass: emit the SMILES recursively from the spanning tree.
+  const emit = (atom: number, incoming: ParsedMolecule["bonds"][number] | null): string => {
+    let out = (incoming ? bondPrefix(incoming) : "") + atomToken(mol.atoms[atom]!);
+    // Ring-closure digits (with the bond's own order prefix, once, on the
+    // lower-indexed endpoint's first appearance — here simply on each endpoint).
+    for (const { digit, bond } of ringLabels.get(atom) ?? []) {
+      out += `${bondPrefix(bond)}${digit > 9 ? `%${digit}` : digit}`;
+    }
+    const children = treeChildren[atom]!;
+    children.forEach(({ child, bond }, idx) => {
+      const sub = emit(child, bond);
+      // Last child continues the main chain without parentheses; earlier
+      // children are branches.
+      out += idx < children.length - 1 ? `(${sub})` : sub;
+    });
+    return out;
+  };
+
+  const parts: string[] = [];
+  for (let i = 0; i < n; i++) {
+    if (!visitedAtoms[i]) assignRings(i);
+  }
+  // Emit each connected component starting from its DFS root (first atom seen).
+  const emitted = new Array<boolean>(n).fill(false);
+  const markEmitted = (root: number): void => {
+    const stack = [root];
+    while (stack.length > 0) {
+      const a = stack.pop()!;
+      if (emitted[a]) continue;
+      emitted[a] = true;
+      for (const { child } of treeChildren[a]!) stack.push(child);
+    }
+  };
+  for (let i = 0; i < n; i++) {
+    if (emitted[i]) continue;
+    parts.push(emit(i, null));
+    markEmitted(i);
+  }
+  return parts.join(".");
 }
 
 /** The active backend (default: deterministic). Swappable for RDKit later. */
