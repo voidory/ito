@@ -120,8 +120,12 @@ function rectsIntersect(a: NormalizedRect, b: NormalizedRect): boolean {
  * Normalize an arbitrary math string into valid LaTeX: map Unicode Greek +
  * operator glyphs, turn `√x` / `√(expr)` into `\sqrt{...}`, turn simple `a/b`
  * into `\frac{a}{b}`, and brace multi-char super/subscript runs.
+ *
+ * Exported (M18 FEAT-003) so the recognition layer's math recognizer can route
+ * a model backend's raw LaTeX through the SAME normalization the text-layer
+ * extraction uses, before compiling it to MathML. Behavior is unchanged.
  */
-function normalizeToLatex(input: string): string {
+export function normalizeToLatex(input: string): string {
   let s = (input ?? "").trim();
   if (s.length === 0) return "";
 
