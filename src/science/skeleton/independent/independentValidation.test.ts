@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { independentCorpusSize, runIndependentBenchmark } from "./benchmark";
-import { matchVertices } from "../realworld/metrics";
+import { matchVerticesOptimal } from "./independentMetrics";
 
 describe("FEAT-005C independent-renderer validation", () => {
   it("contains a locked, evaluation-only corpus", () => {
@@ -12,9 +12,7 @@ describe("FEAT-005C independent-renderer validation", () => {
   });
 
   it("uses one-to-one optimal geometric matching rather than greedy matching", () => {
-    // Greedy nearest-neighbour would take GT 0 for prediction 0 and leave
-    // prediction 1 unmatched. The optimal assignment matches both.
-    const mapping = matchVertices(
+    const mapping = matchVerticesOptimal(
       [{ x: 0, y: 0 }, { x: 1, y: 0 }],
       [{ x: 0.9, y: 0 }, { x: 2.0, y: 0 }],
       1.1,
