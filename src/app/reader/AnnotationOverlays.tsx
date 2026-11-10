@@ -1,12 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
 import { Icons } from "../ui/icons";
 import { Popover } from "../ui/primitives";
-import type { AnnotationId, ChemicalMechanismSpec, ElectronFlowArrow } from "../../model";
+import type { AnnotationId, ChemicalMechanismSpec, ElectronFlowArrow, NormalizedRect } from "../../model";
 import {
   convertLatexToMathML,
   copyScienceToWordClipboard,
   renderMechanismSvg,
 } from "../../pdf/scienceOcr";
+import {
+  createRecognitionService,
+  type RecognitionService,
+  type ScienceRecognitionKind,
+} from "../../science/recognition";
+import type { MathRecognitionResult } from "../../science/recognition/mathRecognizer";
+import type { MoleculeRecognitionResult } from "../../science/recognition/moleculeRecognizer";
+import { validateSmiles } from "../../science/recognition/chemistryValidation";
 import {
   HIGHLIGHT_COLORS,
   type AnnotationStyle,
@@ -189,6 +197,7 @@ export function HighlightEditPopover({
   onClose,
   bump,
   resolveAnchor,
+  recognitionService,
 }: {
   wb: Workbench;
   popover: EditPopoverState;
@@ -200,6 +209,13 @@ export function HighlightEditPopover({
    * resizes instead of staying where it first opened.
    */
   resolveAnchor?: (annotationId: AnnotationId) => AnchorRect | null;
+  /**
+   * M18 FEAT-004 seam: the scientific {@link RecognitionService} used by the
+   * Identify UI. Defaults (below, in SciencePanel) to a not-configured service
+   * so the out-of-the-box build makes no network call; tests inject a service
+   * with a fake backend to exercise the success / low-confidence paths.
+   */
+  recognitionService?: RecognitionService;
 }): JSX.Element {
   const POPOVER_WIDTH = 300;
   // The anchor starts at the click/selection rect, then tracks the highlight so
@@ -308,7 +324,10 @@ export function HighlightEditPopover({
           latex={areaAnchor.latex}
           smiles={areaAnchor.smiles}
           mechanism={areaAnchor.mechanism}
+          imageDataUrl={areaAnchor.imageDataUrl}
+          rect={areaAnchor.rect}
           bump={bump}
+          {...(recognitionService ? { recognitionService } : {})}
         />
       )}
       <CommentSurface
@@ -428,14 +447,20 @@ function SciencePanel({
   latex,
   smiles,
   mechanism,
+  imageDataUrl,
+  rect,
   bump,
+  recognitionService,
 }: {
   wb: Workbench;
   annotationId: AnnotationId;
   latex?: string | undefined;
   smiles?: string | undefined;
   mechanism?: ChemicalMechanismSpec | undefined;
+  imageDataUrl?: string | undefined;
+  rect?: NormalizedRect | undefined;
   bump: () => void;
+  recognitionService?: RecognitionService;
 }): JSX.Element {
   const [editing, setEditing] = useState<null | "latex" | "chem">(null);
   const [latexDraft, setLatexDraft] = useState(latex ?? "");
@@ -468,6 +493,89 @@ function SciencePanel({
     bump();
   };
 
+  // M18 FEAT-004 — the Identify / verify-&-accept state machine. The service
+  // defaults to a not-configured RecognitionService so the out-of-the-box build
+  // makes no network call; a configured/fake service may be injected for tests.
+  const service = useMemo(
+    () => recognitionService ?? createRecognitionService(),
+    [recognitionService],
+  );
+  const [verify, setVerify] = useState<null | {
+    kind: ScienceRecognitionKind;
+    status: string;
+    value: string;
+    errors: string[];
+    busy: boolean;
+  }>(null);
+
+  /**
+   * Build a {@link RecognitionInput} from the ALREADY-STORED area crop. Per the
+   * spec this never re-renders or re-crops the PDF: imageDataUrl is the crop
+   * captured at commit time, and width/height derive from the normalized rect
+   * against a nominal page size when exact crop pixels are unavailable.
+   */
+  const buildInput = (): { imageDataUrl: string; width: number; height: number } | null => {
+    if (!imageDataUrl) return null;
+    const NOMINAL_PAGE_PX = 1000;
+    const width = Math.max(1, Math.round((rect?.width ?? 0.2) * NOMINAL_PAGE_PX));
+    const height = Math.max(1, Math.round((rect?.height ?? 0.2) * NOMINAL_PAGE_PX));
+    return { imageDataUrl, width, height };
+  };
+
+  const runIdentify = async (kind: "equation" | "molecule"): Promise<void> => {
+    const input = buildInput();
+    if (!input) {
+      setVerify({
+        kind,
+        status: "error",
+        value: "",
+        errors: ["No captured crop image is available for this area."],
+        busy: false,
+      });
+      return;
+    }
+    setVerify({ kind, status: "pending", value: "", errors: [], busy: true });
+    const result = await service.recognize(kind, input);
+    const value =
+      kind === "equation"
+        ? (result as MathRecognitionResult).latex ?? ""
+        : (result as MoleculeRecognitionResult).normalizedSmiles ??
+          (result as MoleculeRecognitionResult).smiles ??
+          "";
+    setVerify({
+      kind,
+      status: result.status,
+      // Prefill the editable field with the recognizer's output. On
+      // 'unsupported' this is empty, routing the user to manual entry.
+      value,
+      errors: result.errors ?? [],
+      busy: false,
+    });
+  };
+
+  const acceptVerification = async (): Promise<void> => {
+    if (!verify) return;
+    const value = verify.value.trim();
+    if (value.length === 0) return;
+    if (verify.kind === "equation") {
+      await wb.setAnnotationScienceData(annotationId, { latex: value });
+    } else {
+      // Validate once more before persisting a molecule; never accept invalid.
+      const validation = validateSmiles(value);
+      if (!validation.valid) {
+        setVerify({ ...verify, status: "invalid", errors: validation.errors });
+        return;
+      }
+      const normalized = validation.normalizedSmiles ?? value;
+      await wb.setAnnotationScienceData(annotationId, {
+        smiles: normalized,
+        mechanism: { smiles: normalized, arrows: [] },
+      });
+    }
+    setVerify(null);
+    bump();
+  };
+
   const addCurlyArrow = async (barb: "full" | "fishhook"): Promise<void> => {
     const base = mechSpec ?? { smiles: smilesDraft || "C=C", arrows: [] };
     const nextArrow: ElectronFlowArrow = {
@@ -484,8 +592,159 @@ function SciencePanel({
     bump();
   };
 
+  const verifyPreview = useMemo(() => {
+    if (!verify || verify.value.trim().length === 0) return null;
+    if (verify.kind === "equation") return convertLatexToMathML(verify.value);
+    const validation = validateSmiles(verify.value);
+    if (!validation.valid) return null;
+    return renderMechanismSvg({
+      smiles: validation.normalizedSmiles ?? verify.value,
+      arrows: [],
+    });
+  }, [verify]);
+
   return (
     <div data-testid="science-panel" className="ito-science-panel">
+      {/* M18 FEAT-004 — unified Identify control. Manual type selection only
+          (Equation / Molecule); automatic classification is explicitly NOT
+          required (spec Phase 10/11). Reaction is deferred (Phases 6-8). */}
+      <div className="ito-annot-popover-actions ito-identify-controls">
+        <span data-testid="identify-btn" className="ito-identify-label">
+          Identify:
+        </span>
+        <button
+          type="button"
+          data-testid="identify-equation-btn"
+          className="ito-ctx-item"
+          disabled={!imageDataUrl || verify?.busy === true}
+          onClick={() => void runIdentify("equation")}
+        >
+          <span className="ito-ctx-item-label">Equation</span>
+        </button>
+        <button
+          type="button"
+          data-testid="identify-molecule-btn"
+          className="ito-ctx-item"
+          disabled={!imageDataUrl || verify?.busy === true}
+          onClick={() => void runIdentify("molecule")}
+        >
+          <span className="ito-ctx-item-label">Molecule</span>
+        </button>
+        <button
+          type="button"
+          data-testid="identify-reaction-btn"
+          className="ito-ctx-item"
+          disabled
+          title="Reaction recognition is coming soon"
+        >
+          <span className="ito-ctx-item-label">Reaction (coming soon)</span>
+        </button>
+      </div>
+
+      {verify && (
+        <div data-testid="recognition-verify" className="ito-recognition-verify">
+          {/* Original crop — shown for reference, NEVER overwritten. */}
+          {imageDataUrl && (
+            <img
+              data-testid="recognition-original-crop"
+              src={imageDataUrl}
+              alt="Original crop"
+              className="ito-area-figure-preview"
+            />
+          )}
+
+          {verify.status === "pending" && (
+            <div data-testid="recognition-pending">Recognizing…</div>
+          )}
+
+          {verify.status === "unsupported" && (
+            <div data-testid="recognition-unsupported" className="ito-recognition-note">
+              Recognition model not configured — enter the{" "}
+              {verify.kind === "equation" ? "LaTeX" : "SMILES"} manually below.
+            </div>
+          )}
+
+          {verify.status === "low-confidence" && (
+            <div data-testid="recognition-low-confidence" className="ito-recognition-note">
+              Recognition uncertain — review the result before accepting.
+            </div>
+          )}
+
+          {(verify.status === "invalid" || verify.status === "error") && (
+            <div data-testid="recognition-errors" className="ito-recognition-error">
+              {verify.errors.join(" ") || "Recognition failed."}
+            </div>
+          )}
+
+          {verify.status !== "pending" && (
+            <>
+              {verify.kind === "equation" ? (
+                <textarea
+                  data-testid="recognized-latex-input"
+                  value={verify.value}
+                  onChange={(e) =>
+                    setVerify((v) => (v ? { ...v, value: e.target.value } : v))
+                  }
+                  rows={2}
+                  placeholder="\frac{-b \pm \sqrt{b^2 - 4ac}}{2a}"
+                  style={{ width: "100%", fontFamily: "monospace" }}
+                />
+              ) : (
+                <textarea
+                  data-testid="recognized-smiles-input"
+                  value={verify.value}
+                  onChange={(e) =>
+                    setVerify((v) => (v ? { ...v, value: e.target.value } : v))
+                  }
+                  rows={2}
+                  placeholder="c1ccccc1"
+                  style={{ width: "100%", fontFamily: "monospace" }}
+                />
+              )}
+
+              {verifyPreview && (
+                <div
+                  data-testid="recognition-live-preview"
+                  className="ito-recognition-preview"
+                  // Self-generated MathML / SVG markup; no user HTML.
+                  dangerouslySetInnerHTML={{ __html: verifyPreview }}
+                />
+              )}
+
+              <div className="ito-annot-popover-actions">
+                <button
+                  type="button"
+                  data-testid="recognition-accept-btn"
+                  className="ito-ctx-item"
+                  disabled={verify.value.trim().length === 0}
+                  onClick={() => void acceptVerification()}
+                >
+                  <span className="ito-ctx-item-label">Accept</span>
+                </button>
+                <button
+                  type="button"
+                  data-testid="recognition-edit-btn"
+                  className="ito-ctx-item"
+                  // Edit simply keeps the verification view open so the user can
+                  // refine the editable field; it never auto-accepts.
+                  onClick={() => undefined}
+                >
+                  <span className="ito-ctx-item-label">Edit</span>
+                </button>
+                <button
+                  type="button"
+                  data-testid="recognition-cancel-btn"
+                  className="ito-ctx-item"
+                  onClick={() => setVerify(null)}
+                >
+                  <span className="ito-ctx-item-label">Cancel</span>
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       <div className="ito-annot-popover-actions">
         <button
           type="button"
