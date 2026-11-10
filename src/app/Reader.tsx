@@ -314,6 +314,31 @@ export function Reader({
     .rawData()
     .sources.filter((s) => !openSourceIds.includes(s.id));
 
+  // M13 (§2.2): the Source Switcher Pill data for a node / node-intersection
+  // workspace — the cited sources ranked by citation count DESC. The open
+  // workspace shows the TOP-2 in the pane slots; any cited source NOT currently
+  // open is offered under "Swap to:". Only shown when there are cited sources
+  // AND the open page is a node / node-intersection workspace page.
+  const openPageKind = wb.snapshot().openPageKind;
+  const sourceRanking =
+    openPageKind === "node" || openPageKind === "node-intersection"
+      ? wb.citedSourceRankingForOpenWorkspace()
+      : [];
+  const swapTargets = sourceRanking.filter((r) => !openSourceIds.includes(r.sourceId));
+  // Swap a cited source into a reader pane: if two panes are open, replace the
+  // lowest-ranked open source; otherwise add alongside (ensureSourceOpen). This
+  // keeps the subject page open and the other panes untouched (§8.2 note).
+  const swapInSource = useCallback(
+    (toSourceId: SourceId) => {
+      const openCited = sourceRanking.filter((r) => openSourceIds.includes(r.sourceId));
+      const replaceTarget = openCited.length >= 2 ? openCited[openCited.length - 1]!.sourceId : null;
+      if (replaceTarget) wb.switchReaderPane(replaceTarget, toSourceId);
+      else wb.ensureSourceOpen(toSourceId);
+      bump();
+    },
+    [wb, bump, sourceRanking, openSourceIds],
+  );
+
   return (
     <div data-testid="reader" data-view="reader" style={styles.root}>
       <ReaderToolbar
@@ -371,6 +396,61 @@ export function Reader({
       {together && (
         <div data-testid="open-together-indicator" className="ito-open-together">
           Shared workspace · no analysis
+        </div>
+      )}
+
+      {/* M13 (§2.2): Source Switcher Pill — lists cited sources with counts and
+          offers to "Swap to:" any cited source not currently in a pane (e.g.
+          "Paper A (5) · Paper B (3) · Swap to: Paper C (1)"). Toggling swaps a
+          3rd+ PDF into a pane via switchReaderPane/ensureSourceOpen. */}
+      {sourceRanking.length > 0 && (
+        <div
+          data-testid="workspace-source-switcher"
+          className="ito-source-switcher"
+          role="group"
+          aria-label="Cited sources"
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            gap: "0.3rem",
+            padding: "0.35rem 0.75rem",
+            fontSize: "0.82rem",
+            background: "#f4f1ea",
+            borderBottom: "1px solid #e5e2dc",
+          }}
+        >
+          <span style={{ fontWeight: 600, marginRight: "0.25rem" }}>Sources:</span>
+          {sourceRanking.map((r, i) => (
+            <span
+              key={r.sourceId}
+              data-testid="source-switcher-cited"
+              data-source-id={r.sourceId}
+              data-count={r.count}
+              data-open={openSourceIds.includes(r.sourceId) ? "true" : "false"}
+              style={{ opacity: openSourceIds.includes(r.sourceId) ? 1 : 0.7 }}
+            >
+              {i > 0 ? " · " : ""}
+              {r.title} ({r.count})
+            </span>
+          ))}
+          {swapTargets.length > 0 && (
+            <span style={{ marginLeft: "0.5rem" }}>
+              Swap to:{" "}
+              {swapTargets.map((r) => (
+                <button
+                  key={r.sourceId}
+                  data-testid="source-switcher-swap"
+                  data-source-id={r.sourceId}
+                  data-count={r.count}
+                  className="ito-source-swap-btn"
+                  onClick={() => swapInSource(r.sourceId)}
+                >
+                  {r.title} ({r.count})
+                </button>
+              ))}
+            </span>
+          )}
         </div>
       )}
 

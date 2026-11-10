@@ -100,6 +100,10 @@ function fillDefaults(data: BrainData): BrainData {
     // M5 (§16.3, A22): additive optional collection; a v2 brain without it
     // reads fine and gets the empty default here (no version bump needed).
     captureHandlings: data.captureHandlings ?? defaults.captureHandlings ?? [],
+    // M13 (§2.2, FEAT-003): additive optional map; a pre-M13 brain without it
+    // reads fine and gets the empty default here (no version bump needed).
+    subjectIntersectionPages:
+      data.subjectIntersectionPages ?? defaults.subjectIntersectionPages ?? {},
     presentation: {
       ...defaults.presentation,
       ...(data.presentation ?? {}),

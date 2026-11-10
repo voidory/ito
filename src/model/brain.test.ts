@@ -31,6 +31,8 @@ describe("createEmptyBrainData — fresh brain with M2 presentation defaults", (
     expect(data.presentation.hiddenPageIds).toEqual([]);
     expect(data.presentation.hiddenRelationshipIds).toEqual([]);
     expect(data.presentation.positions).toEqual({});
+    // M13 (§2.2): the Subject-intersection page map seeds to an empty object.
+    expect(data.subjectIntersectionPages).toEqual({});
   });
 
   it("seeds the M2 presentation fields with sane defaults (ADR-0009)", () => {

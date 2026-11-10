@@ -108,6 +108,64 @@ interface ItoTestApi {
   getOrCreateCategoryMasterPage(categoryId: string): Promise<string>;
   /** Connect two categories at their boundaries (A14-M2); returns the rel id. */
   connectCategoryBoundaries(fromCategoryId: string, toCategoryId: string): Promise<string>;
+  // -- M13 (§2.1) spatial Subject basins + promote-to-node ------------------
+  promoteAnnotationToNode(
+    annotationId: string,
+    opts?: { title?: string; includeComment?: boolean },
+  ): Promise<{ pageId: string; evidenceId: string }>;
+  getOrCreateSubjectBasinPage(categoryId: string): Promise<string>;
+  subjectBasinPageId(categoryId: string): string | null;
+  isSubjectBasinPage(pageId: string): boolean;
+  subjectBasin(
+    categoryId: string,
+  ): { x: number; y: number; rx: number; ry: number } | null;
+  setSubjectBasin(
+    categoryId: string,
+    basin: { x: number; y: number; rx: number; ry: number },
+  ): Promise<void>;
+  pointInSubjectBasin(
+    pos: { x: number; y: number },
+    basin: { x: number; y: number; rx: number; ry: number },
+  ): boolean;
+  syncNodeBasinMembership(
+    pageId: string,
+    pos: { x: number; y: number },
+  ): Promise<string[]>;
+  placeNodeInSubjects(
+    pageId: string,
+    categoryIds: string[],
+  ): Promise<{ x: number; y: number }>;
+  // -- M13 (§2.2, FEAT-003) 4-tier hit-testing + workspace routing ----------
+  hitTestCanvas(
+    point: { x: number; y: number },
+    opts?: { pickRadius?: number },
+  ):
+    | { kind: "node"; pageId: string; distance: number }
+    | { kind: "hub"; relationshipId: string; distance: number }
+    | { kind: "overlap"; subjectIds: string[] }
+    | { kind: "basin"; subjectId: string }
+    | { kind: "none" };
+  topCitedSourcesForNode(pageId: string): { sourceId: string; count: number }[];
+  topCitedSourcesForRelationship(
+    relationshipId: string,
+  ): { sourceId: string; count: number }[];
+  openNodeWorkspace(pageId: string): string[];
+  openRelationshipWorkspace(relationshipId: string): Promise<string>;
+  getOrCreateRelationshipPage(relationshipId: string): Promise<string>;
+  getOrCreateSubjectIntersectionPage(sortedSubjectIds: string[]): Promise<string>;
+  openPageKind(): string | null;
+  intersectionAspects(): {
+    subjects: { categoryId: string; name: string }[];
+    corePill: { subjectIds: string[]; label: string; kind: string };
+    pairwisePills: { subjectIds: string[]; label: string; kind: string }[];
+    relationshipKind: string;
+    nodesInside: { pageId: string; title: string }[];
+  } | null;
+  citedSourceRankingForOpenWorkspace(): {
+    sourceId: string;
+    title: string;
+    count: number;
+  }[];
   addPageToCategory(categoryId: string, pageId: string): Promise<void>;
   sceneGeometry(): {
     nodes: { pageId: string; x: number; y: number }[];

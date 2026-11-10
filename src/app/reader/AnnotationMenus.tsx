@@ -157,6 +157,17 @@ export function ReaderContextMenu({
       />
       <MenuRow testId="ctx-associate" icon={Icons.link} label="Associate with Subject…" onClick={() => setPicking("associate")} />
       <MenuRow testId="ctx-insert" icon={Icons.quote} label="Insert quote into Subject…" onClick={() => setPicking("insert")} />
+      <MenuRow
+        testId="promote-to-node-btn"
+        icon={Icons.nodes}
+        label="Promote to Observation Node"
+        onClick={() => {
+          void wb.promoteAnnotationToNode(menu.annotationId).then(() => {
+            bump();
+            onClose();
+          });
+        }}
+      />
       <ShowInNodes wb={wb} annotationId={menu.annotationId} bump={bump} asMenuRow />
       <div className="ito-ctx-sep" role="separator" />
       <MenuRow

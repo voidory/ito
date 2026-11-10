@@ -311,6 +311,21 @@ export function HighlightEditPopover({
             </span>
             <span className="ito-ctx-item-label">Associate / insert into Subject…</span>
           </button>
+          <button
+            data-testid="promote-to-node-btn"
+            className="ito-ctx-item"
+            onClick={() => {
+              void wb.promoteAnnotationToNode(popover.annotationId).then(() => {
+                bump();
+                onClose();
+              });
+            }}
+          >
+            <span className="ito-ctx-item-icon" aria-hidden="true">
+              {Icons.nodes}
+            </span>
+            <span className="ito-ctx-item-label">Promote to Observation Node</span>
+          </button>
           <ShowInNodes wb={wb} annotationId={popover.annotationId} bump={bump} asMenuRow />
         </div>
       )}

@@ -215,7 +215,73 @@ export function WaterBackdrop({
   );
 }
 
-/** Colour-mixing zones where two category washes overlap. */
+/**
+ * M13 (§2.1(4)) continuous SUBTRACTIVE glazed watercolour washes — one per
+ * Subject basin (including EMPTY Subjects, whose scene squircle is basin-driven).
+ *
+ * Each basin is rendered as:
+ *   - a continuous translucent WASH filling the whole basin interior with
+ *     `mix-blend-mode: multiply` so where two basins cross the pigments darken
+ *     OPTICALLY (subtractive glaze) instead of being replaced by one averaged
+ *     mud colour — the user sees BOTH washes crossing; and
+ *   - a distinct darker WET-EDGE pigment ring (higher stroke alpha) along the
+ *     ENTIRE basin perimeter so each Subject reads as its own territory.
+ *
+ * This layer is additive: it does NOT replace the legacy radial-gradient
+ * `.category-squircle-fill` rendered by NodesCanvas, it sits over it to deliver
+ * the glaze + ring the §2.1(4) spec requires. `data-testid="basin-wash-layer"`
+ * wraps the layer; each basin carries `data-testid="category-basin-wash"`.
+ */
+export function BasinWashes({
+  squircles,
+}: {
+  squircles: readonly SceneSquircle[];
+}): JSX.Element {
+  return (
+    <g data-testid="basin-wash-layer" aria-hidden="true" pointerEvents="none">
+      {squircles.map((sq) => {
+        const pigment = categoryPigment(sq.categoryId, sq.colorCode);
+        return (
+          <g
+            key={`basin-${safeId(sq.categoryId)}`}
+            data-testid="category-basin-wash"
+            data-category-id={sq.categoryId}
+            data-basin={sq.basin ? "true" : "false"}
+          >
+            {/* Continuous translucent wash — multiply so overlaps glaze. */}
+            <path
+              className="ito-basin-wash-fill"
+              d={sq.d}
+              fill={pigment}
+              fillOpacity={0.26}
+              style={{ mixBlendMode: "multiply" }}
+            />
+            {/* Darker wet-edge pigment ring along the ENTIRE perimeter. */}
+            <path
+              className="ito-basin-wash-edge"
+              d={sq.d}
+              fill="none"
+              stroke={pigment}
+              strokeOpacity={0.55}
+              strokeWidth={2.4}
+            />
+          </g>
+        );
+      })}
+    </g>
+  );
+}
+
+/**
+ * Colour-mixing zones where two category washes overlap. KEEPS the legacy
+ * `overlap-layer` / `category-overlap` testids (back-compat, specs poll them)
+ * and ADDS, for each overlapping pair, a true subtractive INTERSECTION LENS
+ * (`data-testid="watercolor-overlap-zone"`) — the optically glazed `multiply`
+ * intersection the user inspects in the DOM (M13 §2.1(4)). The lens is the
+ * geometric A∩B region (basin B clipped to basin A) painted with `multiply`,
+ * so the overlap darkens where the two washes cross rather than being replaced
+ * by a single averaged blob.
+ */
 export function OverlapBleeds({
   squircles,
   motion,
@@ -232,6 +298,8 @@ export function OverlapBleeds({
         const midX = (a.bounds.cx + b.bounds.cx) / 2;
         const midY = (a.bounds.cy + b.bounds.cy) / 2;
         const rr = Math.min(a.bounds.rx, b.bounds.rx, a.bounds.ry, b.bounds.ry) * 0.55;
+        const ca = categoryPigment(a.categoryId, a.colorCode);
+        const cb = categoryPigment(b.categoryId, b.colorCode);
         return (
           <g
             key={`${ida}|${idb}`}
@@ -249,6 +317,21 @@ export function OverlapBleeds({
               <ellipse className="ito-bloom ito-bloom-a" cx={midX - rr * 0.35} cy={midY - rr * 0.1} rx={rr * 1.5} ry={rr * 1.05} fill={`url(#soft-${ida})`} />
               <ellipse className="ito-bloom ito-bloom-b" cx={midX + rr * 0.35} cy={midY + rr * 0.1} rx={rr * 1.35} ry={rr * 1.1} fill={`url(#soft-${idb})`} />
             </g>
+            {/*
+              M13 §2.1(4): the subtractive glazed INTERSECTION LENS. Painting
+              basin B's whole shape with `multiply`, clipped to basin A (the
+              group's clipPath), yields exactly the A∩B region darkened by BOTH
+              pigments — the glaze — while both basins' own washes/edges remain
+              fully visible crossing each other. Inspectable via its testid.
+            */}
+            <path
+              data-testid="watercolor-overlap-zone"
+              className="ito-overlap-lens"
+              d={b.d}
+              fill={mixHex(ca, cb, 0.5)}
+              fillOpacity={0.3}
+              style={{ mixBlendMode: "multiply" }}
+            />
           </g>
         );
       })}

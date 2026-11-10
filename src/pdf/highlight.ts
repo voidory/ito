@@ -18,6 +18,167 @@ import type { NormalizedRect } from "../model";
 
 export type OverlayStyleKind = "highlight" | "underline";
 
+// ---------------------------------------------------------------------------
+// M13 (§1.3) live quote-to-rect re-anchoring
+// ---------------------------------------------------------------------------
+
+/**
+ * M13 (§1.3) normalize a quote / text-node run for a whitespace-insensitive
+ * substring match: lowercase + collapse every whitespace run (incl. newlines)
+ * to a single space. Mirrors `normalizeForMatch` in src/app/workbench.ts so the
+ * DOM re-anchoring and the pure workbench re-anchoring agree on what "matches".
+ * Unlike the workbench helper this does NOT trim, so character offsets stay
+ * aligned with the normalized concatenation of the text nodes.
+ */
+function normalizeForMatch(text: string): string {
+  return (text ?? "").toLowerCase().replace(/\s+/g, " ");
+}
+
+/** A single text-node run inside a `.textLayer`, with its offset span in the
+ * whitespace-normalized concatenation of the layer's text. */
+interface QuoteRun {
+  readonly node: Text;
+  readonly start: number;
+  readonly end: number;
+}
+
+/**
+ * M13 (§1.3) re-derive on-page NORMALIZED rects (0..1 relative to
+ * `pageStageEl`) for a stored `quote` by locating it in the LIVE `.textLayer`
+ * DOM of the stage and measuring a DOM Range over the matched characters.
+ *
+ * This is the DOM counterpart to the model/anchor layer's `resolveAnchor`: it
+ * is pure (reads the DOM, mutates nothing) and lets a revised PDF whose
+ * paragraph shifted to a new vertical position re-anchor its highlight to the
+ * glyphs' NEW coordinates instead of replaying stale stored rects.
+ *
+ * Matching is whitespace-normalized (see {@link normalizeForMatch}) so a quote
+ * captured at one zoom/line-wrap matches text re-flowed at another. The build
+ * walks the text nodes in document order, records each node's offset span in
+ * the normalized concatenation, finds the quote's start offset, and builds a
+ * `Range` spanning exactly those characters.
+ *
+ * jsdom has no layout engine, so `range.getClientRects()` returns 0×0 rects.
+ * In that case this falls back to the matched `.textLayer span`'s
+ * bounding/style box; if even that is unavailable it returns `[]` so the caller
+ * keeps the annotation's existing rects (never clobbering good geometry with an
+ * empty set).
+ */
+export function recomputeRectsFromQuote(
+  pageStageEl: HTMLElement,
+  quote: string,
+): NormalizedRect[] {
+  const textLayer = pageStageEl.querySelector<HTMLElement>(".textLayer");
+  if (!textLayer) return [];
+
+  const normQuote = normalizeForMatch(quote);
+  if (normQuote.trim().length === 0) return [];
+
+  // Walk text nodes in document order, concatenating the whitespace-normalized
+  // text and recording each node's [start, end) span in that concatenation.
+  const runs: QuoteRun[] = [];
+  let text = "";
+  const walker = document.createTreeWalker(textLayer, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const node = n as Text;
+    const content = normalizeForMatch(node.data);
+    if (content.length === 0) continue;
+    runs.push({ node, start: text.length, end: text.length + content.length });
+    text += content;
+  }
+
+  const matchStart = text.indexOf(normQuote);
+  if (matchStart < 0) return [];
+  const matchEnd = matchStart + normQuote.length;
+
+  const startRun = runs.find((r) => matchStart >= r.start && matchStart < r.end);
+  const endRun = runs.find((r) => matchEnd > r.start && matchEnd <= r.end);
+  if (!startRun || !endRun) return [];
+
+  const stageBox = pageStageEl.getBoundingClientRect();
+
+  // Primary path: a DOM Range over the matched characters → per-line rects.
+  try {
+    const range = document.createRange();
+    range.setStart(startRun.node, matchStart - startRun.start);
+    range.setEnd(endRun.node, matchEnd - endRun.start);
+    const clientRects = Array.from(range.getClientRects()).filter(
+      (r) => r.width > 0 && r.height > 0,
+    );
+    if (clientRects.length > 0 && stageBox.width > 0 && stageBox.height > 0) {
+      return clientRects.map((r) => normalizeDomRect(r, stageBox));
+    }
+  } catch {
+    // Fall through to the span-box fallback below.
+  }
+
+  // jsdom fallback: measure the matched spans' bounding/style box. Walk the
+  // ancestor spans that the matched text nodes live inside and union them.
+  const spans = new Set<HTMLElement>();
+  for (const run of runs) {
+    if (run.end <= matchStart || run.start >= matchEnd) continue;
+    const span = run.node.parentElement?.closest<HTMLElement>("span");
+    if (span) spans.add(span);
+  }
+  const fallback: NormalizedRect[] = [];
+  for (const span of spans) {
+    const box = spanBox(span);
+    if (!box) continue;
+    const norm = normalizeBox(box, stageBox);
+    if (norm) fallback.push(norm);
+  }
+  return fallback;
+}
+
+/** Normalize a DOMRect against a stage box into 0..1 coordinates. */
+function normalizeDomRect(rect: DOMRect, box: DOMRect): NormalizedRect {
+  return {
+    x: (rect.left - box.left) / box.width,
+    y: (rect.top - box.top) / box.height,
+    width: rect.width / box.width,
+    height: rect.height / box.height,
+  };
+}
+
+/** Normalize a plain left/top/width/height box against a stage box (0..1). */
+function normalizeBox(
+  r: { left: number; top: number; width: number; height: number },
+  box: DOMRect,
+): NormalizedRect | null {
+  const boxW = box.width || 0;
+  const boxH = box.height || 0;
+  if (boxW <= 0 || boxH <= 0) return null;
+  return {
+    x: (r.left - box.left) / boxW,
+    y: (r.top - box.top) / boxH,
+    width: r.width / boxW,
+    height: r.height / boxH,
+  };
+}
+
+/**
+ * Best-effort bounding box of a `.textLayer` span in jsdom, where
+ * `getClientRects()` is 0×0. Prefers a real getBoundingClientRect when it has
+ * size, else reads the absolute left/top/width/height the pdf.js TextLayer sets
+ * as inline styles (the fixture builder in tests sets these too), so a page's
+ * live glyph position is recoverable without a layout engine.
+ */
+function spanBox(
+  span: HTMLElement,
+): { left: number; top: number; width: number; height: number } | null {
+  const rect = span.getBoundingClientRect();
+  if (rect.width > 0 && rect.height > 0) {
+    return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+  }
+  const style = span.style;
+  const left = parseFloat(style.left || "");
+  const top = parseFloat(style.top || "");
+  const width = parseFloat(style.width || "");
+  const height = parseFloat(style.height || "");
+  if ([left, top, width, height].some((v) => Number.isNaN(v))) return null;
+  return { left, top, width, height };
+}
+
 export interface OverlayOptions {
   readonly kind: OverlayStyleKind;
   readonly color: string;

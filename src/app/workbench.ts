@@ -78,6 +78,8 @@ import {
 import {
   deriveHubBlendColor,
   neighborhood as computeNeighborhood,
+  pointInSubjectBasin,
+  resolveBasin,
   search as runSearch,
   type SearchEdge,
   type SearchIndex,
@@ -467,7 +469,84 @@ export interface WorkbenchState {
   readonly categoryScope: string | null;
   /** Last save failure, if any; cleared on the next successful save. */
   readonly saveError: SaveError | null;
+  /**
+   * M13 (§2.2, FEAT-003) which KIND of page the open subject page is, so the
+   * Reader/SubjectEditor render the right surface + aspect bar:
+   *   - "subject-basin"        — a Subject's overarching Subject Page (P4).
+   *   - "subject-intersection" — the unified A∩B∩… overlap page (P3).
+   *   - "node-intersection"    — a relationship/hub's Connecting Page (P2).
+   *   - "node"                 — an ordinary Observation Node / subject page.
+   *   - null                   — no subject page is open.
+   * Additive/derived: computed from the open page id + the durable records, so
+   * it never adds durable state. See {@link openPageKind}.
+   */
+  readonly openPageKind: OpenPageKind | null;
+  /**
+   * M13 (§2.2) the data the Intersection Aspect Selector Bar renders when a
+   * subject-intersection page is open, else null. See {@link intersectionAspects}.
+   */
+  readonly intersectionAspects: IntersectionAspects | null;
 }
+
+/** M13 (§2.2) the kind of the open subject page, driving the workspace surface. */
+export type OpenPageKind =
+  | "subject-basin"
+  | "subject-intersection"
+  | "node-intersection"
+  | "node";
+
+/** M13 (§2.2) one Subject (category) involved in an overlap, with a display name. */
+export interface IntersectionSubject {
+  readonly categoryId: CategoryId;
+  readonly name: string;
+}
+
+/** M13 (§2.2) a pill in the Intersection Aspect Selector Bar (core or pairwise). */
+export interface IntersectionAspectPill {
+  /** The subject ids this aspect spans (sorted); length N for core, 2 pairwise. */
+  readonly subjectIds: readonly CategoryId[];
+  /** The human label, e.g. "A ∩ B ∩ C" (core) or "A ∩ B" (pairwise). */
+  readonly label: string;
+  /** "core" = the full overlap; "pairwise" = a 2-subject sub-overlap. */
+  readonly kind: "core" | "pairwise";
+}
+
+/**
+ * M13 (§2.2) the full aspect-bar data for an open Subject-intersection page:
+ * the participating Subjects, the CORE pill (A∩B∩C…), each PAIRWISE pill
+ * (A∩B, B∩C, A∩C…), the relationship-kind selector value, and the LIVE list of
+ * Observation Nodes currently sitting inside the overlap (computed via
+ * pointInSubjectBasin over node positions).
+ */
+export interface IntersectionAspects {
+  readonly subjects: readonly IntersectionSubject[];
+  readonly corePill: IntersectionAspectPill;
+  readonly pairwisePills: readonly IntersectionAspectPill[];
+  /** UI-local relationship-kind selector value (not the model RelationshipKind). */
+  readonly relationshipKind: IntersectionRelationshipKind;
+  /** The Observation Nodes (subject pages) currently inside the overlap. */
+  readonly nodesInside: readonly { readonly pageId: PageId; readonly title: string }[];
+}
+
+/**
+ * M13 (§2.2) the aspect bar's relationship-kind selector values. These are a
+ * UI-local vocabulary distinct from the model's `RelationshipKind` — the
+ * handoff specifies `relates`/`bridges`/`contrasts`/`synthesizes` for how two
+ * Subjects relate at their intersection.
+ */
+export type IntersectionRelationshipKind =
+  | "relates"
+  | "bridges"
+  | "contrasts"
+  | "synthesizes";
+
+/** The ordered aspect-bar relationship-kind options (single source of truth). */
+export const INTERSECTION_RELATIONSHIP_KINDS: readonly IntersectionRelationshipKind[] = [
+  "relates",
+  "bridges",
+  "contrasts",
+  "synthesizes",
+];
 
 /**
  * The node-count threshold at which the §3.4 density reward (3D presentation)
@@ -512,6 +591,23 @@ export interface ConceptCategory {
    * master-page -> master-page relationship renders a 'master' category link.
    */
   readonly masterPageId?: PageId;
+  /**
+   * M13 (§2.1(2)) the Subject's explicit watercolour BASIN geometry, if set.
+   * Threaded into `SceneGraphInput`/`buildScene` so a Subject's basin (and the
+   * deterministic default for an empty Subject) renders a visible wash on the
+   * canvas. Optional/additive.
+   */
+  readonly basin?: {
+    readonly x: number;
+    readonly y: number;
+    readonly rx: number;
+    readonly ry: number;
+  };
+  /**
+   * M13 (§2.1(2)) id of the Subject's overarching Subject Page, if one has been
+   * created via `getOrCreateSubjectBasinPage`. Distinct from `masterPageId`.
+   */
+  readonly subjectPageId?: PageId;
 }
 
 /** The full derived concept-network graph the view renders from. */
@@ -558,6 +654,13 @@ export class Workbench {
   private data: BrainData;
   private openSourceIds: SourceId[] = [];
   private openSubjectPageId: PageId | null = null;
+  /**
+   * M13 (§2.2, FEAT-003) the aspect-bar relationship-kind selector value chosen
+   * per Subject-intersection page, keyed by page id. Transient UI-local session
+   * state (like view state): it writes NO durable record and defaults to
+   * "relates" for an intersection page with no explicit choice yet.
+   */
+  private intersectionRelationshipKinds = new Map<PageId, IntersectionRelationshipKind>();
   private highlightsTabOpen = false;
   private suppressMotion = false;
   private view: ViewMode = "files";
@@ -742,6 +845,8 @@ export class Workbench {
       workspaceLayout: this.workspaceLayout,
       categoryScope: this.activeCategoryScope,
       saveError: this.saveError,
+      openPageKind: this.openPageKind(),
+      intersectionAspects: this.intersectionAspects(),
     };
   }
 
@@ -1121,8 +1226,69 @@ export class Workbench {
         }
       }
 
-      return this.withAnchorPatch(a, versionHash, pageDelta, absolutePage, clamp);
+      const patched = this.withAnchorPatch(a, versionHash, pageDelta, absolutePage, clamp);
+
+      // M13 (§1.3) when a TEXT annotation's pageIndex actually moved due to the
+      // content/version-hash change, its stored normalized rects still hold the
+      // PREVIOUS draft's coordinates. Mark it `rectsStale: true` so the Reader
+      // re-measures the quote against the live text layer on render (then calls
+      // updateAnnotationRects to write fresh rects + clear the flag). Omit the
+      // key when unchanged — exactOptionalPropertyTypes forbids assigning
+      // `undefined` to an optional field.
+      if (
+        patched.scope.kind === "text" &&
+        a.scope.kind === "text" &&
+        patched.scope.anchor.pageIndex !== a.scope.anchor.pageIndex
+      ) {
+        return { ...patched, rectsStale: true };
+      }
+      return patched;
     });
+  }
+
+  /**
+   * M13 (§1.3) persist freshly re-measured normalized rects for a text
+   * annotation and clear its `rectsStale` flag. Called by the Reader after it
+   * re-anchors a quote against the live `.textLayer` (via
+   * `recomputeRectsFromQuote`) when a revised PDF shifted the paragraph's
+   * coordinates. A no-op for an unknown id, a non-text annotation, or an empty
+   * `rects` array (the caller keeps the existing geometry rather than clobbering
+   * it with nothing). Follows the anchor-patch + `this.data = {...}` + persist +
+   * logChange pattern used by the other annotation mutators.
+   */
+  async updateAnnotationRects(
+    annotationId: AnnotationId,
+    rects: readonly NormalizedRect[],
+  ): Promise<void> {
+    if (rects.length === 0) return;
+    const idx = this.data.annotations.findIndex((a) => a.id === annotationId);
+    if (idx < 0) return;
+    const prev = this.data.annotations[idx]!;
+    if (prev.scope.kind !== "text") return;
+
+    // Immutably patch the anchor's rects; drop the now-resolved stale flag via
+    // destructuring so the key is OMITTED (exactOptionalPropertyTypes forbids
+    // assigning `undefined`).
+    const { rectsStale: _wasStale, ...rest } = prev;
+    void _wasStale;
+    const updated: Annotation = {
+      ...rest,
+      scope: {
+        kind: "text",
+        anchor: { ...prev.scope.anchor, rects: rects.map((r) => ({ ...r })) },
+      },
+      updatedAt: new Date().toISOString(),
+    };
+    const annotations = this.data.annotations.slice();
+    annotations[idx] = updated;
+    this.data = { ...this.data, annotations };
+    await this.persist();
+    await this.logChange(
+      "other",
+      "annotation-rects",
+      "Re-anchored a highlight to its revised page position",
+      [annotationId],
+    );
   }
 
   /**
@@ -2526,6 +2692,52 @@ export class Workbench {
     return { page, evidence };
   }
 
+  /**
+   * M13 (§2.1(1)) PROMOTE a Memory (a reader Note / Highlight / Area figure)
+   * into an OBSERVATION NODE on the Nodes canvas. A Memory lives inside the PDF
+   * reader first and never auto-clutters the canvas; when one grows into an idea
+   * of its own the user escalates it into a first-class node. An Observation
+   * Node is simply a subject `Page` (there is NO distinct node record type — the
+   * canvas renders subject pages as nodes), so this creates that page and
+   * inserts the annotation as provenance-bearing evidence so the new node CITES
+   * the Memory it was promoted from (the (annotation, page) pair derives to
+   * SOLID). Modelled on {@link createSubjectFromAnnotation}; the source
+   * annotation is never moved or deleted.
+   */
+  async promoteAnnotationToNode(
+    annotationId: AnnotationId,
+    opts: { title?: string; includeComment?: boolean } = {},
+  ): Promise<{ page: Page; evidence: EvidenceInstance }> {
+    const annotation = this.data.annotations.find((a) => a.id === annotationId);
+    if (!annotation) throw new Error("promoteAnnotationToNode: unknown annotation");
+    // Seed a readable node title from the promoted Memory's quoted text.
+    const snippet = quotedTextForScope(annotation).trim().slice(0, 60);
+    const title = opts.title ?? (snippet.length > 0 ? snippet : "Observation Node");
+    const now = new Date().toISOString();
+    const page: Page = {
+      id: newPageId(),
+      kind: "subject",
+      title,
+      documentJson: emptyDocJson(),
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.data = { ...this.data, pages: [...this.data.pages, page] };
+    await this.persist();
+    await this.logChange(
+      "other",
+      "page-created",
+      `Promoted a highlight into node “${title}”`,
+      [page.id],
+    );
+    // Cite the promoted annotation into the new node (SOLID).
+    const evidence = await this.insertEvidenceIntoPage(annotationId, page.id, {
+      pos: null,
+      includeComment: opts.includeComment ?? false,
+    });
+    return { page, evidence };
+  }
+
   /** The stored ProseMirror document JSON for a subject page (source of truth). */
   subjectDocJson(pageId: PageId): DocumentJson {
     const page = this.data.pages.find((p) => p.id === pageId);
@@ -3233,6 +3445,508 @@ export class Workbench {
     return page.id;
   }
 
+  // -- M13 (§2.1(2)) Subject basins + Subject Pages -------------------------
+
+  /**
+   * M13 (§2.1(2)) the id of a Subject's overarching SUBJECT PAGE, if one has
+   * been created. Pure getter — null when the category is unknown or has no
+   * Subject Page yet. Distinct from `categoryMasterPageId`.
+   */
+  subjectBasinPageId(categoryId: CategoryId): PageId | null {
+    const cat = this.data.categories.find((c) => c.id === categoryId);
+    return cat?.subjectPageId ?? null;
+  }
+
+  /**
+   * M13 (§2.1(2)) true iff `pageId` is the Subject Page of some Subject basin.
+   * Lets the SubjectEditor (and FEAT-003 routing) discriminate a basin page
+   * from an ordinary subject / node page via workbench state. Pure read.
+   */
+  isSubjectBasinPage(pageId: PageId): boolean {
+    return this.data.categories.some((c) => c.subjectPageId === pageId);
+  }
+
+  /**
+   * M13 (§2.1(2)) get or create a Subject's overarching SUBJECT PAGE — the real
+   * subject `Page` (editable in SubjectEditor) that holds the user's macro
+   * thoughts about the whole Subject. Cloned from
+   * {@link getOrCreateCategoryMasterPage} but writes `Category.subjectPageId`
+   * (a DISTINCT field from `masterPageId`), seeds the title from the category
+   * name, and is IDEMPOTENT — if the Subject already has a `subjectPageId` and
+   * that Page still exists it is returned unchanged. The Subject Page is NOT
+   * added to the category's `memberPageIds` (membership semantics unchanged).
+   */
+  async getOrCreateSubjectBasinPage(categoryId: CategoryId): Promise<PageId> {
+    const idx = this.data.categories.findIndex((c) => c.id === categoryId);
+    if (idx < 0) throw new Error("getOrCreateSubjectBasinPage: unknown category");
+    const category = this.data.categories[idx]!;
+    const existingId = category.subjectPageId;
+    if (existingId != null && this.data.pages.some((p) => p.id === existingId)) {
+      // M13 (§2.2, P4): opening a Subject basin opens its overarching Subject
+      // Page so the Reader/SubjectEditor render the basin-page surface.
+      this.openSubjectPage(existingId);
+      return existingId;
+    }
+    const now = new Date().toISOString();
+    const page: Page = {
+      id: newPageId(),
+      kind: "subject",
+      title: category.name,
+      documentJson: emptyDocJson(),
+      createdAt: now,
+      updatedAt: now,
+    };
+    const updatedCategory: Category = { ...category, subjectPageId: page.id };
+    const categories = this.data.categories.slice();
+    categories[idx] = updatedCategory;
+    this.data = {
+      ...this.data,
+      pages: [...this.data.pages, page],
+      categories,
+    };
+    await this.persist();
+    await this.logChange(
+      "category",
+      "subject-page-created",
+      `Opened Subject Page for “${category.name}”`,
+      [categoryId, page.id],
+    );
+    // M13 (§2.2, P4): open the newly created Subject Page.
+    this.openSubjectPage(page.id);
+    return page.id;
+  }
+
+  /**
+   * M13 (§2.1(2)) the EFFECTIVE basin geometry for a Subject: its explicit
+   * `Category.basin` when set, else the deterministic default derived from the
+   * Subject's index in the category list (so even a 0-node Subject has a stable
+   * visible basin). Pure read — null when the category is unknown.
+   */
+  subjectBasin(
+    categoryId: CategoryId,
+  ): { x: number; y: number; rx: number; ry: number } | null {
+    const index = this.data.categories.findIndex((c) => c.id === categoryId);
+    if (index < 0) return null;
+    const cat = this.data.categories[index]!;
+    return resolveBasin(cat.basin, index, this.data.categories.length);
+  }
+
+  /**
+   * M13 (§2.1(2)) set (or move/resize) a Subject's explicit watercolour basin
+   * geometry. Durable record edit — the basin is a Subject's first-class
+   * spatial identity, so dragging/resizing a basin so it overlaps another is a
+   * real model change (A∩B membership is then re-derived from positions).
+   */
+  async setSubjectBasin(
+    categoryId: CategoryId,
+    basin: { x: number; y: number; rx: number; ry: number },
+  ): Promise<void> {
+    const idx = this.data.categories.findIndex((c) => c.id === categoryId);
+    if (idx < 0) return;
+    const prev = this.data.categories[idx]!;
+    const categories = this.data.categories.slice();
+    categories[idx] = { ...prev, basin };
+    this.data = { ...this.data, categories };
+    await this.persist();
+    await this.logChange("category", "subject-basin-moved", "Moved a Subject basin", [
+      categoryId,
+    ]);
+  }
+
+  /**
+   * M13 (§2.1(3)) BIDIRECTIONAL spatial coincidence = Subject membership.
+   * Given an Observation Node's resolved `[x, y]` canvas position, recompute the
+   * Subject basins that geometrically contain it and set the node's category
+   * membership to EXACTLY those Subjects:
+   *   - into Subject A alone        -> `[A]`
+   *   - into the A∩B overlap lens   -> `[A, B]`
+   *   - out onto the bare paper     -> `[]`
+   * Uses the pure {@link pointInSubjectBasin} ellipse test against each
+   * Subject's effective basin, then reconciles via the existing idempotent
+   * `addPageToCategory` / `removePageFromCategory`. A node is only tested
+   * against real Subject basins; membership of a Subject's own Subject Page /
+   * master page is never auto-mutated here (those are not Observation Nodes
+   * resting in the territory).
+   */
+  async syncNodeBasinMembership(
+    pageId: PageId,
+    pos: { x: number; y: number },
+  ): Promise<void> {
+    const categories = this.data.categories;
+    const containing = new Set<CategoryId>();
+    categories.forEach((cat, index) => {
+      const basin = resolveBasin(cat.basin, index, categories.length);
+      if (pointInSubjectBasin(pos, basin)) containing.add(cat.id);
+    });
+    for (const cat of categories) {
+      const isMember = cat.memberPageIds.includes(pageId);
+      const shouldBeMember = containing.has(cat.id);
+      if (shouldBeMember && !isMember) {
+        await this.addPageToCategory(cat.id, pageId);
+      } else if (!shouldBeMember && isMember) {
+        await this.removePageFromCategory(cat.id, pageId);
+      }
+    }
+  }
+
+  /**
+   * M13 (§2.1(3)) the inverse of {@link syncNodeBasinMembership}: when a node's
+   * Subject membership is set PROGRAMMATICALLY (table / menu), place its `[x,y]`
+   * inside the target basin (or the centroid of the A∩B overlap zone for two
+   * Subjects) by writing a durable `nodePosition`, then reconcile membership so
+   * the spatial and set-membership views agree. The node is added to EXACTLY
+   * `categoryIds`. Returns the placed position.
+   */
+  async placeNodeInSubjects(
+    pageId: PageId,
+    categoryIds: readonly CategoryId[],
+  ): Promise<{ x: number; y: number }> {
+    const cats = this.data.categories;
+    const basins = categoryIds
+      .map((id) => {
+        const index = cats.findIndex((c) => c.id === id);
+        if (index < 0) return null;
+        return resolveBasin(cats[index]!.basin, index, cats.length);
+      })
+      .filter((b): b is NonNullable<typeof b> => b != null);
+    let target: { x: number; y: number };
+    if (basins.length === 0) {
+      target = { x: 0, y: 0 };
+    } else if (basins.length === 1) {
+      target = { x: basins[0]!.x, y: basins[0]!.y };
+    } else {
+      // Centroid of the two (or more) target basins — inside the overlap lens.
+      let sx = 0;
+      let sy = 0;
+      for (const b of basins) {
+        sx += b.x;
+        sy += b.y;
+      }
+      target = { x: sx / basins.length, y: sy / basins.length };
+    }
+    await this.setNodePosition(pageId, target.x, target.y);
+    await this.syncNodeBasinMembership(pageId, target);
+    return target;
+  }
+
+  // -- M13 (§2.2, FEAT-003) 4-tier workspace routing ------------------------
+
+  /**
+   * M13 (§2.2) rank the cited SOURCES for an Observation Node's Page by how many
+   * cited highlights point into it, DESC. For each `EvidenceInstance` whose
+   * `destinationPageId === pageId`, follow its `annotationId` to the owning
+   * `Annotation.sourceId` and tally per source. Returns `[{sourceId, count}]`
+   * ordered by count DESC (ties broken by sourceId for determinism). This feeds
+   * the Top-2 source workspace + the Source Switcher Pill (Test 5). Pure read.
+   */
+  topCitedSourcesForNode(pageId: PageId): { sourceId: SourceId; count: number }[] {
+    return this.rankCitedSources(this.citedSourceCountsForPage(pageId));
+  }
+
+  /**
+   * M13 (§2.2) rank the cited SOURCES for a Node-to-Node intersection (hub /
+   * relationship) by cited-highlight count, DESC, AGGREGATED across the pages of
+   * ALL the relationship's connected Observation Nodes. Each endpoint page's
+   * cited-source counts are summed, so a source cited from two member nodes
+   * counts twice. Returns `[{sourceId, count}]` ordered DESC. Pure read.
+   */
+  topCitedSourcesForRelationship(
+    relationshipId: RelationshipId,
+  ): { sourceId: SourceId; count: number }[] {
+    const rel = this.data.relationships.find((r) => r.id === relationshipId);
+    if (!rel) return [];
+    const totals = new Map<SourceId, number>();
+    for (const endpointPageId of relationshipEndpoints(rel)) {
+      for (const [sourceId, count] of this.citedSourceCountsForPage(endpointPageId)) {
+        totals.set(sourceId, (totals.get(sourceId) ?? 0) + count);
+      }
+    }
+    return this.rankCitedSources(totals);
+  }
+
+  /**
+   * The per-source cited-highlight counts for a single page: a map
+   * `sourceId -> number of EvidenceInstances citing that source into the page`.
+   * Private helper shared by the node + relationship rankings.
+   */
+  private citedSourceCountsForPage(pageId: PageId): Map<SourceId, number> {
+    const counts = new Map<SourceId, number>();
+    for (const ev of this.data.evidenceInstances) {
+      if (ev.destinationPageId !== pageId) continue;
+      const annotation = this.data.annotations.find((a) => a.id === ev.annotationId);
+      if (!annotation) continue;
+      counts.set(annotation.sourceId, (counts.get(annotation.sourceId) ?? 0) + 1);
+    }
+    return counts;
+  }
+
+  /** Order a source-count map by count DESC, ties broken by sourceId ASC. */
+  private rankCitedSources(
+    counts: Map<SourceId, number>,
+  ): { sourceId: SourceId; count: number }[] {
+    return [...counts.entries()]
+      .map(([sourceId, count]) => ({ sourceId, count }))
+      .sort((a, b) => (b.count - a.count) || String(a.sourceId).localeCompare(String(b.sourceId)));
+  }
+
+  /**
+   * M13 (§2.2) the cited-source ranking for the CURRENTLY OPEN workspace page,
+   * resolved by the open page's kind so the Reader's Source Switcher Pill can
+   * render counts without re-deriving the kind:
+   *   - a node-intersection page -> aggregate across the relationship's nodes;
+   *   - any other open subject page -> that page's own cited sources.
+   * Each entry carries the source title for display. Returns `[]` when no
+   * subject page is open. Pure read.
+   */
+  citedSourceRankingForOpenWorkspace(): {
+    sourceId: SourceId;
+    title: string;
+    count: number;
+  }[] {
+    const pageId = this.openSubjectPageId;
+    if (pageId == null) return [];
+    let ranked: { sourceId: SourceId; count: number }[];
+    const rel = this.data.relationships.find((r) => r.explanatoryPageId === pageId);
+    if (rel) {
+      ranked = this.topCitedSourcesForRelationship(rel.id);
+    } else {
+      ranked = this.topCitedSourcesForNode(pageId);
+    }
+    return ranked.map((r) => ({
+      sourceId: r.sourceId,
+      title: this.data.sources.find((s) => s.id === r.sourceId)?.title ?? String(r.sourceId),
+      count: r.count,
+    }));
+  }
+
+  /**
+   * M13 (§2.2, P1) open the OBSERVATION NODE's workspace: the Node's Page
+   * alongside its TOP-2 most-populated cited PDFs, jumped to the first cited
+   * highlight with EvidenceLines active. The subject page is opened; the top-2
+   * cited sources are opened TOGETHER (or fewer when the node cites <2). The
+   * Source Switcher Pill (rendered by the Reader) lists every cited source so a
+   * 3rd+ PDF can be swapped in. Returns the opened source ids (the top 2).
+   */
+  openNodeWorkspace(pageId: PageId): SourceId[] {
+    const ranked = this.topCitedSourcesForNode(pageId);
+    const top2 = ranked.slice(0, 2).map((r) => r.sourceId);
+    this.openTogether(top2);
+    this.openSubjectPage(pageId);
+    this.setLinesVisible(true);
+    return top2;
+  }
+
+  /**
+   * M13 (§2.2, P2) open the NODE-INTERSECTION workspace: lazily create/open the
+   * relationship's own Connecting Page (via {@link getOrCreateRelationshipPage})
+   * alongside the TOP-2 cited PDFs aggregated across the connected nodes, with
+   * EvidenceLines active. Returns the created/opened page id. The Reader renders
+   * the Source Switcher + member-node quick-jump pills.
+   */
+  async openRelationshipWorkspace(relationshipId: RelationshipId): Promise<PageId> {
+    const ranked = this.topCitedSourcesForRelationship(relationshipId);
+    const top2 = ranked.slice(0, 2).map((r) => r.sourceId);
+    const pageId = await this.getOrCreateRelationshipPage(relationshipId);
+    this.openTogether(top2);
+    this.openSubjectPage(pageId);
+    this.setLinesVisible(true);
+    return pageId;
+  }
+
+  /**
+   * M13 (§2.2, P2) get or create the Node-Intersection's own Page. This ALIASES
+   * the existing {@link developRelationshipPage} (§12.1, A13-M2): a relationship
+   * already has a first-class explanatory subject Page home, so the intersection
+   * page is exactly that page. Idempotent — reuses `Relationship.explanatoryPageId`
+   * when present. The SubjectEditor renders this surface with
+   * `data-testid="intersection-page-editor"` (driven by `openPageKind`).
+   */
+  async getOrCreateRelationshipPage(relationshipId: RelationshipId): Promise<PageId> {
+    return this.developRelationshipPage(relationshipId);
+  }
+
+  /**
+   * M13 (§2.2, P3) get or create the ONE unified SUBJECT-INTERSECTION Page for a
+   * set of overlapping Subjects. Regardless of how many Subjects overlap at the
+   * clicked point (2, 3, …, N) there is exactly one page per DISTINCT sorted
+   * subject set, deduped by the deterministic key `sortedSubjectIds.join("|")`
+   * stored in `BrainData.subjectIntersectionPages`. Idempotent — an existing key
+   * whose page still exists reopens that page unchanged. Opens the page and
+   * returns its id. The input ids are sorted defensively so caller order never
+   * forks the key.
+   */
+  async getOrCreateSubjectIntersectionPage(
+    sortedSubjectIds: readonly CategoryId[],
+  ): Promise<PageId> {
+    if (sortedSubjectIds.length < 2) {
+      throw new Error("getOrCreateSubjectIntersectionPage: need >= 2 subjects");
+    }
+    const sorted = [...sortedSubjectIds].map((id) => String(id)).sort();
+    const key = sorted.join("|");
+    const existingMap = this.data.subjectIntersectionPages ?? {};
+    const existingId = existingMap[key];
+    if (existingId != null && this.data.pages.some((p) => p.id === existingId)) {
+      this.openSubjectPage(existingId);
+      return existingId;
+    }
+    // Seed a readable title from the participating Subject names (A ∩ B ∩ C).
+    const names = sorted.map(
+      (id) => this.data.categories.find((c) => String(c.id) === id)?.name ?? id,
+    );
+    const title = names.join(" ∩ ");
+    const now = new Date().toISOString();
+    const page: Page = {
+      id: newPageId(),
+      kind: "subject",
+      title,
+      documentJson: emptyDocJson(),
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.data = {
+      ...this.data,
+      pages: [...this.data.pages, page],
+      subjectIntersectionPages: { ...existingMap, [key]: page.id },
+    };
+    await this.persist();
+    await this.logChange(
+      "other",
+      "page-created",
+      `Opened Subject intersection “${title}”`,
+      [page.id],
+    );
+    this.openSubjectPage(page.id);
+    return page.id;
+  }
+
+  /**
+   * M13 (§2.2, P3) the sorted subject-id SET a Subject-intersection page covers,
+   * or null when `pageId` is not a Subject-intersection page. Reverses the
+   * `subjectIntersectionPages` map. Pure read.
+   */
+  subjectIntersectionSubjectIds(pageId: PageId): CategoryId[] | null {
+    const map = this.data.subjectIntersectionPages ?? {};
+    for (const [key, id] of Object.entries(map)) {
+      if (id === pageId) return key.split("|") as CategoryId[];
+    }
+    return null;
+  }
+
+  /** M13 (§2.2) true iff `pageId` is a unified Subject-intersection page (P3). */
+  isSubjectIntersectionPage(pageId: PageId): boolean {
+    return this.subjectIntersectionSubjectIds(pageId) !== null;
+  }
+
+  /** M13 (§2.2) true iff `pageId` is a relationship's Connecting Page (P2). */
+  isNodeIntersectionPage(pageId: PageId): boolean {
+    return this.data.relationships.some((r) => r.explanatoryPageId === pageId);
+  }
+
+  /**
+   * M13 (§2.2) the KIND of the currently open subject page (null when none is
+   * open), discriminated so the Reader/SubjectEditor render the right surface:
+   * subject-basin (P4) > subject-intersection (P3) > node-intersection (P2) >
+   * node (P1 / ordinary). Pure read over the durable records.
+   */
+  openPageKind(): OpenPageKind | null {
+    const pageId = this.openSubjectPageId;
+    if (pageId == null) return null;
+    if (this.isSubjectBasinPage(pageId)) return "subject-basin";
+    if (this.isSubjectIntersectionPage(pageId)) return "subject-intersection";
+    if (this.isNodeIntersectionPage(pageId)) return "node-intersection";
+    return "node";
+  }
+
+  /**
+   * M13 (§2.2) the aspect-bar relationship-kind selector value for the open
+   * Subject-intersection page (defaults to "relates"), or null when the open
+   * page is not a Subject-intersection page. UI-local session state.
+   */
+  intersectionRelationshipKind(pageId: PageId): IntersectionRelationshipKind {
+    return this.intersectionRelationshipKinds.get(pageId) ?? "relates";
+  }
+
+  /**
+   * M13 (§2.2) set the aspect-bar relationship-kind selector value for a
+   * Subject-intersection page. Transient UI-local session state — writes NO
+   * durable record (mirrors the view-state setters).
+   */
+  setIntersectionRelationshipKind(
+    pageId: PageId,
+    kind: IntersectionRelationshipKind,
+  ): void {
+    this.intersectionRelationshipKinds.set(pageId, kind);
+  }
+
+  /**
+   * M13 (§2.2) the full Intersection Aspect Selector Bar data for the OPEN
+   * Subject-intersection page, or null when no such page is open. Builds the
+   * CORE pill (A∩B∩C…), every PAIRWISE pill (A∩B, B∩C, A∩C…), the current
+   * relationship-kind value, and the LIVE list of Observation Nodes currently
+   * inside the overlap — a node is "inside" when its resolved canvas position
+   * lies within EVERY participating Subject's basin (pointInSubjectBasin).
+   */
+  intersectionAspects(forPageId?: PageId): IntersectionAspects | null {
+    const pageId = forPageId ?? this.openSubjectPageId;
+    if (pageId == null) return null;
+    const subjectIds = this.subjectIntersectionSubjectIds(pageId);
+    if (subjectIds == null) return null;
+
+    const categories = this.data.categories;
+    const subjects: IntersectionSubject[] = subjectIds.map((id) => {
+      const cat = categories.find((c) => String(c.id) === String(id));
+      return { categoryId: id, name: cat?.name ?? String(id) };
+    });
+    const nameOf = (id: CategoryId): string =>
+      subjects.find((s) => String(s.categoryId) === String(id))?.name ?? String(id);
+
+    const corePill: IntersectionAspectPill = {
+      subjectIds,
+      label: subjects.map((s) => s.name).join(" ∩ "),
+      kind: "core",
+    };
+
+    // Every unordered pair of participating Subjects -> a pairwise sub-overlap.
+    const pairwisePills: IntersectionAspectPill[] = [];
+    for (let i = 0; i < subjectIds.length; i++) {
+      for (let j = i + 1; j < subjectIds.length; j++) {
+        const a = subjectIds[i]!;
+        const b = subjectIds[j]!;
+        pairwisePills.push({
+          subjectIds: [a, b],
+          label: `${nameOf(a)} ∩ ${nameOf(b)}`,
+          kind: "pairwise",
+        });
+      }
+    }
+
+    // LIVE Observation Nodes inside the overlap: resolved canvas position lies
+    // within EVERY participating Subject's effective basin.
+    const positions = this.data.presentation.nodePositions ?? this.data.presentation.positions;
+    const basins = subjectIds.map((id) => {
+      const index = categories.findIndex((c) => String(c.id) === String(id));
+      return index < 0
+        ? null
+        : resolveBasin(categories[index]!.basin, index, categories.length);
+    });
+    const nodesInside: { pageId: PageId; title: string }[] = [];
+    for (const page of this.data.pages) {
+      if (page.kind !== "subject") continue;
+      const pos = positions[page.id];
+      if (!pos) continue;
+      const inAll = basins.every((b) => b != null && pointInSubjectBasin(pos, b));
+      if (inAll) nodesInside.push({ pageId: page.id, title: page.title });
+    }
+
+    return {
+      subjects,
+      corePill,
+      pairwisePills,
+      relationshipKind: this.intersectionRelationshipKind(pageId),
+      nodesInside,
+    };
+  }
+
   /**
    * Connect two categories at their BOUNDARIES (§12.2, A14-M2): the explicit
    * "a category master page may connect to another category boundary"
@@ -3295,6 +4009,8 @@ export class Workbench {
       colorCode: this.categoryColor(category),
       memberPageIds: category.memberPageIds,
       ...(category.masterPageId != null ? { masterPageId: category.masterPageId } : {}),
+      ...(category.basin != null ? { basin: category.basin } : {}),
+      ...(category.subjectPageId != null ? { subjectPageId: category.subjectPageId } : {}),
     }));
 
     return { nodes, links, categories };

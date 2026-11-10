@@ -47,6 +47,10 @@ export function createEmptyBrainData(
     // M5 (§16.3, A22): mobile-capture handling audit log. Optional/additive so
     // a v2 brain loads fine; seeded here so a fresh brain is fully populated.
     captureHandlings: [],
+    // M13 (§2.2, FEAT-003): Subject-intersection pages keyed by the sorted
+    // overlap key. Optional/additive so a pre-M13 brain loads fine; seeded here
+    // so a fresh brain is fully populated. SCHEMA_VERSION stays 2.
+    subjectIntersectionPages: {},
     presentation: {
       hiddenPageIds: [],
       hiddenRelationshipIds: [],

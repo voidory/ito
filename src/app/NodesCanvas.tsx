@@ -2,7 +2,9 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import {
   buildScene,
   categoryPigment,
+  hitTestCanvas,
   NATURAL_PALETTE_ORDER,
+  type HitTestBasin,
   type Scene,
   type SceneGraphInput,
   type SceneOffset,
@@ -10,7 +12,7 @@ import {
 import type { CategoryId, PageId, RelationshipId, RelationshipKind, SourceId } from "../model";
 import type { ConceptGraph, Workbench } from "./workbench";
 import { Button, IconButton } from "./ui/primitives";
-import { OverlapBleeds, SheenOverlay, WatercolorDefs, WaterBackdrop } from "./WatercolorLayer";
+import { BasinWashes, OverlapBleeds, SheenOverlay, WatercolorDefs, WaterBackdrop } from "./WatercolorLayer";
 import "./network.css";
 
 /** The relationship kinds a user can pick when creating a hub (§3.1). */
@@ -177,6 +179,12 @@ export function NodesCanvas({
       colorCode: c.colorCode,
       memberPageIds: c.memberPageIds,
       ...(c.masterPageId != null ? { masterPageId: c.masterPageId } : {}),
+      // M13 (§2.1(2)/2.2): thread the Subject's explicit watercolour BASIN
+      // geometry into the scene so a dragged/resized basin (and the 4-tier
+      // hit-testing + overlap glaze that key off it) render from the real
+      // geometry, not only the deterministic default. Omitted when unset so an
+      // empty Subject still falls back to its default basin (additive).
+      ...(c.basin != null ? { basin: c.basin } : {}),
     })),
   };
   const signature = JSON.stringify(graphInput);
@@ -209,6 +217,25 @@ export function NodesCanvas({
     // the expensive layout only recomputes on real data / offset changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [signature, offsetsSignature, positionsSignature],
+  );
+
+  // M13 (§2.2): the Subject basins the 4-tier hit-tester tests for P3/P4. Each
+  // rendered category squircle contributes its bounds as a basin ellipse (both
+  // basin-driven washes for empty Subjects AND member-hull squircles), tagged
+  // with its category id, so clicking anywhere inside a Subject's visible
+  // watercolour territory routes to the overlap (P3) or single-basin (P4) page.
+  const hitTestBasins = useMemo<HitTestBasin[]>(
+    () =>
+      scene.squircles.map((sq) => ({
+        categoryId: sq.categoryId,
+        basin: {
+          x: sq.bounds.cx,
+          y: sq.bounds.cy,
+          rx: sq.bounds.rx,
+          ry: sq.bounds.ry,
+        },
+      })),
+    [scene],
   );
 
   // Base view box padded around the scene extents so everything is visible
@@ -402,6 +429,42 @@ export function NodesCanvas({
     [viewBox],
   );
 
+  // M13 (§2.2): map an ABSOLUTE client point (clientX/clientY) into scene
+  // coordinates using what is ACTUALLY on screen (the eased displayed view
+  // `dvRef`, falling back to the target viewBox), honouring preserveAspectRatio
+  // "xMidYMid meet" centring exactly as the wheel-zoom mapping does. Returns
+  // null when the svg has no box yet. Pure w.r.t. inputs (reads live refs).
+  const clientToScene = useCallback(
+    (clientX: number, clientY: number): { x: number; y: number } | null => {
+      const svg = svgRef.current;
+      if (!svg) return null;
+      const rect = svg.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return null;
+      const shown = dvRef.current ?? parseViewBox(viewBox);
+      const s = Math.min(rect.width / shown.w, rect.height / shown.h);
+      const ox = (rect.width - shown.w * s) / 2;
+      const oy = (rect.height - shown.h * s) / 2;
+      const sx = clientX - rect.left;
+      const sy = clientY - rect.top;
+      return { x: shown.x + (sx - ox) / s, y: shown.y + (sy - oy) / s };
+    },
+    [viewBox],
+  );
+
+  // M13 (§2.2): the client-pixel pick radius (<=24px) converted into SCENE
+  // units at the current zoom, so the pure DOM-free hitTestCanvas receives a
+  // scene-space radius. One scene unit spans `s` client px (same scale as
+  // clientToScene), so 24px -> 24 / s scene units.
+  const sceneClickRadius = useCallback((): number => {
+    const svg = svgRef.current;
+    const shown = dvRef.current ?? parseViewBox(viewBox);
+    const rect = svg?.getBoundingClientRect();
+    const w = rect && rect.width > 0 ? rect.width : shown.w;
+    const h = rect && rect.height > 0 ? rect.height : shown.h;
+    const s = Math.min(w / shown.w, h / shown.h) || 1;
+    return CLEAN_CLICK_PICK_PX / s;
+  }, [viewBox]);
+
   const onNodePointerDown = useCallback(
     (e: React.PointerEvent<SVGGElement>, pageId: string): void => {
       e.stopPropagation();
@@ -485,10 +548,22 @@ export function NodesCanvas({
     inertiaFrame.current = requestAnimationFrame(tick);
   }, []);
 
-  const endGesture = useCallback((): void => {
+  const endGesture = useCallback((e?: React.PointerEvent<SVGSVGElement>): void => {
     const drag = dragRef.current;
     dragRef.current = null;
     if (!drag) return;
+    // M13 (§2.2): a CLEAN background click — a "pan" press that never crossed
+    // the move threshold AND whose total client travel is <= 5px — is routed
+    // through the 4-tier hit-tester to open the clicked overlap / basin page.
+    if (drag.kind === "pan" && !drag.moved && e) {
+      const clientTravel = Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY);
+      if (clientTravel <= CLEAN_CLICK_MAX_PX) {
+        snapRef.current = false;
+        velRef.current = null;
+        dispatchCleanClick(e.clientX, e.clientY);
+        return;
+      }
+    }
     if (drag.kind === "pan") {
       const v = velRef.current;
       velRef.current = null;
@@ -505,15 +580,23 @@ export function NodesCanvas({
       const dx = drag.baseDx + (live?.dx ?? 0);
       const dy = drag.baseDy + (live?.dy ?? 0);
       // Commit the dragged OFFSET so it persists (D19); setDragOffset records
-      // NO history revision (FEAT-001 excludes drag frames).
-      void wb.setDragOffset(drag.pageId as PageId, dx, dy).then(() => {
+      // NO history revision (FEAT-001 excludes drag frames). Then re-derive the
+      // node's Subject-basin membership from its FINAL resolved canvas position
+      // (M13 §2.1(3)): dragging into Basin A adds it to A, into the A∩B overlap
+      // lens adds it to both, out onto the bare paper removes it from all.
+      const pid = drag.pageId as PageId;
+      const finalPos = scene.positions[pid] ?? null;
+      void wb.setDragOffset(pid, dx, dy).then(async () => {
+        if (finalPos) {
+          await wb.syncNodeBasinMembership(pid, { x: finalPos.x, y: finalPos.y });
+        }
         setLiveDrag(null);
         bump();
       });
     } else {
       setLiveDrag(null);
     }
-  }, [liveDrag, wb, bump, motion, startInertia]);
+  }, [liveDrag, wb, bump, motion, startInertia, scene]);
 
   const onBackgroundPointerDown = useCallback(
     (e: React.PointerEvent<SVGSVGElement>): void => {
@@ -556,6 +639,22 @@ export function NodesCanvas({
     void wb.developRelationshipPage(relationshipId as RelationshipId).then(bump);
   };
 
+  // M13 (§2.2, P2): a CLEAN click on a Node-Intersection hub/line opens the full
+  // Node-Intersection workspace — the relationship's own Connecting Page beside
+  // its top-2 aggregated cited PDFs with EvidenceLines active. Switches to the
+  // Files/Reader workspace so the panes + aspect surface are visible.
+  const openHubWorkspace = useCallback(
+    (relationshipId: string): void => {
+      void wb
+        .openRelationshipWorkspace(relationshipId as RelationshipId)
+        .then(() => {
+          wb.setViewMode("files");
+          bump();
+        });
+    },
+    [wb, bump],
+  );
+
   const onNodeClick = (pageId: string): void => {
     // A drag that moved should not also open the page (gesture disambiguation).
     if (dragRef.current?.moved) return;
@@ -569,11 +668,65 @@ export function NodesCanvas({
       );
       return;
     }
-    // Reuse the SubjectEditor open flow: a node IS a page, so clicking opens it
-    // for composition (the connecting-page editor path for subject nodes).
-    wb.openSubjectPage(pageId as PageId);
+    // M13 (§2.2, P1): open the OBSERVATION NODE's workspace — its Page beside
+    // the TOP-2 most-populated cited PDFs with EvidenceLines active (the Source
+    // Switcher Pill lists the rest). Switch to the Files/Reader workspace so the
+    // panes render; when the node cites no sources this degrades to opening the
+    // page alone (openNodeWorkspace handles the empty top-2).
+    wb.openNodeWorkspace(pageId as PageId);
+    wb.setViewMode("files");
     bump();
   };
+
+  // M13 (§2.2): route a CLEAN background click (<=5px client drag) through the
+  // pure 4-tier hit-tester. P1/P2 are normally caught by the node/hub click
+  // handlers (nodes stop propagation), but the hit-tester also resolves them so
+  // a click on bare canvas still finds the nearest entity within the pick
+  // radius. P3 opens the unified Subject-intersection page; P4 the single
+  // Subject basin page; a miss does nothing.
+  const dispatchCleanClick = useCallback(
+    (clientX: number, clientY: number): void => {
+      if (connectMode) return;
+      const scenePt = clientToScene(clientX, clientY);
+      if (!scenePt) return;
+      const result = hitTestCanvas(scene, scenePt, {
+        pickRadius: sceneClickRadius(),
+        basins: hitTestBasins,
+      });
+      switch (result.kind) {
+        case "node":
+          wb.openNodeWorkspace(result.pageId as PageId);
+          wb.setViewMode("files");
+          bump();
+          break;
+        case "hub":
+          openHubWorkspace(result.relationshipId);
+          break;
+        case "overlap":
+          void wb
+            .getOrCreateSubjectIntersectionPage(result.subjectIds as CategoryId[])
+            .then(bump);
+          break;
+        case "basin":
+          void wb
+            .getOrCreateSubjectBasinPage(result.subjectId as CategoryId)
+            .then(bump);
+          break;
+        case "none":
+          break;
+      }
+    },
+    [
+      connectMode,
+      clientToScene,
+      scene,
+      sceneClickRadius,
+      hitTestBasins,
+      wb,
+      bump,
+      openHubWorkspace,
+    ],
+  );
 
   // --- FEAT-003 (3.1) creation handlers ------------------------------------
   // "+ Subject": prompt a title and create a real subject Page directly in the
@@ -799,8 +952,8 @@ export function NodesCanvas({
         aria-label="Concept network"
         onPointerDown={onBackgroundPointerDown}
         onPointerMove={onPointerMove}
-        onPointerUp={endGesture}
-        onPointerCancel={endGesture}
+        onPointerUp={(e) => endGesture(e)}
+        onPointerCancel={() => endGesture()}
       >
       <defs>
         {/*
@@ -940,6 +1093,13 @@ export function NodesCanvas({
         })}
       </g>
 
+      {/*
+        M13 §2.1(4): continuous subtractive glazed basin washes (multiply) with
+        a distinct wet-edge perimeter ring per Subject — drawn for empty
+        Subjects too (their scene squircle is basin-driven).
+      */}
+      <BasinWashes squircles={scene.squircles} />
+
       {/* Where two category washes overlap their pigments mix like colours in water. */}
       <OverlapBleeds squircles={scene.squircles} motion={motion} />
 
@@ -989,7 +1149,7 @@ export function NodesCanvas({
               data-hub-cy={round(hub.center.y)}
               d={hub.d}
               fill={hub.blendColor}
-              onClick={() => onOpenConnectingPage(hub.relationshipId)}
+              onClick={() => openHubWorkspace(hub.relationshipId)}
             />
             {/*
               A13-M2: develop/open the hub's FULL Connecting Page in the
@@ -1088,6 +1248,16 @@ export function NodesCanvas({
 
 /** Vertical spacing between stacked N06 placeholders (presentation only). */
 const PLACEHOLDER_SPACING = 96;
+
+/**
+ * M13 (§2.2): a click counts as a CLEAN click (routed through the 4-tier
+ * hit-tester) only when the pointer travelled <= 5 CLIENT px between press and
+ * release — anything more is a pan/drag. The hit-tester's pick radius is 24
+ * CLIENT px (the generous node/hub click target), converted to scene units at
+ * the live zoom before it reaches the pure module.
+ */
+const CLEAN_CLICK_MAX_PX = 5;
+const CLEAN_CLICK_PICK_PX = 24;
 
 /** Zoom bounds + per-step multiplier for the §3.3 canvas zoom controls. */
 const MIN_ZOOM = 0.2;

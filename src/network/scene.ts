@@ -28,6 +28,7 @@ import {
   type SquircleBounds,
   type SquirclePoint,
 } from "./squircle";
+import { resolveBasin, type Basin } from "./basin";
 
 /** Minimal structural node (a subset of the Workbench ConceptNode). */
 export interface SceneNodeInput {
@@ -60,6 +61,16 @@ export interface SceneCategoryInput {
    * implicit member-bridging 'member' link.
    */
   readonly masterPageId?: string;
+  /**
+   * M13 (§2.1(2)) the Subject's explicit watercolour BASIN geometry, if set.
+   * When present the category's squircle/basin renders from THIS geometry even
+   * when it has zero member nodes. When absent the scene mapper derives a
+   * deterministic default basin from the category's index so an empty Subject
+   * still renders a visible wash. Non-empty categories keep their member-hull
+   * squircle unless an explicit basin is supplied, so existing layouts/offsets
+   * are never perturbed (additive).
+   */
+  readonly basin?: Basin;
 }
 
 /** The minimal graph the scene mapper consumes (matches ConceptGraph shape). */
@@ -133,6 +144,15 @@ export interface SceneSquircle {
   readonly colorCode: string;
   readonly d: string;
   readonly bounds: SquircleBounds;
+  /**
+   * M13 (§2.1(2)) true when this squircle was rendered from a Subject BASIN
+   * (an explicit `Category.basin` or the deterministic default for an EMPTY
+   * Subject) rather than from a hull around member node positions. Lets the
+   * canvas / tests tell a basin-driven wash from a member-hull wash. A non-empty
+   * Subject with no explicit basin keeps `basin: false` (member-hull), so
+   * existing scenes are byte-compatible.
+   */
+  readonly basin: boolean;
 }
 
 /** A rendered category-to-category boundary connection (A14-M2). */
@@ -444,17 +464,34 @@ export function buildScene(graph: SceneGraphInput, options: BuildSceneOptions = 
     });
   }
 
-  // Squircles: one per category over its visible member positions.
+  // Squircles: one per category. A category with visible member nodes keeps its
+  // member-hull squircle EXACTLY as before (so existing non-empty categories
+  // are never perturbed); an EMPTY category — or one carrying an explicit
+  // Subject basin — renders from its BASIN geometry so even a 0-node Subject
+  // shows a visible watercolour wash (M13 §2.1(2)). The default basin is
+  // deterministic in the category's index, so this stays side-effect-free on
+  // the seeded node layout.
   const squircles: SceneSquircle[] = [];
   const boundsByCategory = new Map<string, SquircleBounds>();
-  for (const cat of graph.categories) {
+  graph.categories.forEach((cat, index) => {
     const memberPts: SquirclePoint[] = [];
     for (const pid of cat.memberPageIds) {
       const p = posOf(pid);
       if (p) memberPts.push(p);
     }
-    if (memberPts.length === 0) continue;
-    const bounds = squircleBounds(memberPts, padding);
+    let bounds: SquircleBounds;
+    let fromBasin: boolean;
+    if (memberPts.length > 0 && cat.basin == null) {
+      // Unchanged legacy path: hull around member positions.
+      bounds = squircleBounds(memberPts, padding);
+      fromBasin = false;
+    } else {
+      // Empty Subject, or an explicit basin: render the Subject's basin
+      // territory (explicit geometry, else the deterministic default).
+      const basin: Basin = resolveBasin(cat.basin, index, graph.categories.length);
+      bounds = { cx: basin.x, cy: basin.y, rx: basin.rx, ry: basin.ry };
+      fromBasin = true;
+    }
     boundsByCategory.set(cat.categoryId, bounds);
     squircles.push({
       categoryId: cat.categoryId,
@@ -462,8 +499,9 @@ export function buildScene(graph: SceneGraphInput, options: BuildSceneOptions = 
       colorCode: cat.colorCode,
       d: squirclePath(bounds),
       bounds,
+      basin: fromBasin,
     });
-  }
+  });
 
   const categoryLinks = deriveCategoryLinks(graph, boundsByCategory);
 

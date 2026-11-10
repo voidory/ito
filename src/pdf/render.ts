@@ -12,8 +12,22 @@
 import * as pdfjs from "pdfjs-dist";
 // Vite resolves this to a hashed asset URL and copies the worker into the build.
 import PdfWorker from "pdfjs-dist/build/pdf.worker.mjs?url";
-import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
+import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from "pdfjs-dist";
 import type { PageBox } from "./anchor";
+
+/**
+ * M13 (§1.1) detect pdf.js's RenderingCancelledException WITHOUT importing a
+ * concrete class (the symbol is not in the public type surface). A cancelled
+ * RenderTask rejects its `.promise`; we identify that rejection by name so we
+ * can swallow it (an intentional cancellation is never an error).
+ */
+function isRenderingCancelled(err: unknown): boolean {
+  return (
+    err != null &&
+    typeof err === "object" &&
+    (err as { name?: string }).name === "RenderingCancelledException"
+  );
+}
 
 pdfjs.GlobalWorkerOptions.workerSrc = PdfWorker;
 
@@ -134,6 +148,16 @@ export async function renderPage(
 
   const textContent = await page.getTextContent();
 
+  // M13 (§1.1) the single in-flight pdf.js RenderTask for THIS canvas. The
+  // initial draw(scale) and any fit-width/zoom-triggered rerender(nextScale)
+  // both go through draw(); without tracking, an in-flight initial render and a
+  // rerender can call page.render() twice on the SAME canvas, which pdf.js
+  // rejects with "Cannot use the same canvas during multiple render()
+  // operations" and clears the canvas to blank white. Cancelling the previous
+  // task (and swallowing its RenderingCancelledException) guarantees the two
+  // renders are serialized on the canvas.
+  let activeRenderTask: RenderTask | null = null;
+
   async function draw(renderScale: number): Promise<void> {
     const viewport = page.getViewport({ scale: renderScale });
     const ratio = globalThis.devicePixelRatio || 1;
@@ -155,7 +179,37 @@ export async function renderPage(
 
     const ctx = canvas.getContext("2d")!;
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-    await page.render({ canvasContext: ctx, viewport }).promise;
+
+    // M13 (§1.1) cancel any still-in-flight render on this canvas BEFORE
+    // starting a new one so pdf.js never has two concurrent render() calls on
+    // the same canvas. The cancelled task's promise rejects with a
+    // RenderingCancelledException, which we swallow (it is an intentional
+    // supersede, not a failure).
+    const previous = activeRenderTask;
+    if (previous) {
+      previous.cancel();
+      try {
+        await previous.promise;
+      } catch (err) {
+        if (!isRenderingCancelled(err)) throw err;
+      }
+    }
+
+    const task = page.render({ canvasContext: ctx, viewport });
+    activeRenderTask = task;
+    try {
+      await task.promise;
+    } catch (err) {
+      // A newer draw() may have cancelled THIS task (intentional supersede);
+      // swallow that cancellation (and skip the text-layer rebuild so the newer
+      // draw owns the DOM). Any other render error is a real failure.
+      if (!isRenderingCancelled(err)) throw err;
+      return;
+    } finally {
+      // Only clear the slot if THIS task is still the active one (a newer
+      // draw() may already have replaced it).
+      if (activeRenderTask === task) activeRenderTask = null;
+    }
 
     // Rebuild the text layer for this scale.
     textLayer.replaceChildren();

@@ -28,7 +28,13 @@ import {
   compositionStatsFromJson,
   type DocumentJson,
 } from "../editor";
-import { buildScene, squircleContains, type SceneGraphInput } from "../network";
+import {
+  buildScene,
+  hitTestCanvas,
+  pointInSubjectBasin,
+  squircleContains,
+  type SceneGraphInput,
+} from "../network";
 import { KoofrStorageAdapter, type StagedImport } from "../storage";
 import { isWebGLAvailable } from "./ThreeScene";
 import { Workbench } from "./workbench";
@@ -92,6 +98,9 @@ function graphToSceneInput(wb: Workbench): SceneGraphInput {
       colorCode: c.colorCode,
       memberPageIds: c.memberPageIds,
       ...(c.masterPageId != null ? { masterPageId: c.masterPageId } : {}),
+      // M13 (§2.1(2)/2.2): thread explicit basin geometry so the scene-geometry
+      // + hit-test probes see the real basins, matching NodesCanvas.
+      ...(c.basin != null ? { basin: c.basin } : {}),
     })),
   };
 }
@@ -281,6 +290,126 @@ interface ItoTestApi {
   getOrCreateCategoryMasterPage(categoryId: string): Promise<string>;
   /** Connect two categories at their boundaries (A14-M2); returns the rel id. */
   connectCategoryBoundaries(fromCategoryId: string, toCategoryId: string): Promise<string>;
+  // -- M13 (§2.1) spatial Subject basins + promote-to-node ------------------
+  /**
+   * M13 (§2.1(1)) promote a Memory (reader Note/Highlight) into an Observation
+   * Node (a subject Page) that CITES the annotation. Returns the created
+   * node/page id and the evidence-instance id linking it to the annotation.
+   */
+  promoteAnnotationToNode(
+    annotationId: string,
+    opts?: { title?: string; includeComment?: boolean },
+  ): Promise<{ pageId: string; evidenceId: string }>;
+  /**
+   * M13 (§2.1(2)) get or create a Subject's overarching Subject Page (basin
+   * page). Idempotent — returns the existing page id when present. Writes
+   * `Category.subjectPageId` (distinct from the master page).
+   */
+  getOrCreateSubjectBasinPage(categoryId: string): Promise<string>;
+  /** M13 (§2.1(2)) the Subject Page id for a category, or null if none yet. */
+  subjectBasinPageId(categoryId: string): string | null;
+  /** M13 (§2.1(2)) whether a page is some Subject's overarching Subject Page. */
+  isSubjectBasinPage(pageId: string): boolean;
+  /**
+   * M13 (§2.1(2)) the EFFECTIVE basin geometry for a Subject (explicit basin
+   * else the deterministic default), or null if the category is unknown.
+   */
+  subjectBasin(
+    categoryId: string,
+  ): { x: number; y: number; rx: number; ry: number } | null;
+  /** M13 (§2.1(2)) set/move a Subject's explicit watercolour basin geometry. */
+  setSubjectBasin(
+    categoryId: string,
+    basin: { x: number; y: number; rx: number; ry: number },
+  ): Promise<void>;
+  /**
+   * M13 (§2.1(3)) pure ellipse containment: whether a node position lies inside
+   * a basin. DOM-free; mirrors the `pointInSubjectBasin` network helper.
+   */
+  pointInSubjectBasin(
+    pos: { x: number; y: number },
+    basin: { x: number; y: number; rx: number; ry: number },
+  ): boolean;
+  /**
+   * M13 (§2.1(3)) re-derive a node's Subject membership from its `[x, y]`:
+   * sets membership to EXACTLY the basins containing the point. Returns the
+   * category ids the node now belongs to (sorted).
+   */
+  syncNodeBasinMembership(
+    pageId: string,
+    pos: { x: number; y: number },
+  ): Promise<string[]>;
+  /**
+   * M13 (§2.1(3)) place a node inside the given Subject(s) programmatically
+   * (into a single basin, or the centroid of the A∩B overlap for 2+), then
+   * reconcile membership. Returns the placed position.
+   */
+  placeNodeInSubjects(
+    pageId: string,
+    categoryIds: string[],
+  ): Promise<{ x: number; y: number }>;
+  // -- M13 (§2.2, FEAT-003) 4-tier hit-testing + workspace routing ----------
+  /**
+   * M13 (§2.2) run the pure 4-tier canvas hit-tester against the LIVE scene
+   * (same graph + layout the canvas renders) at a scene-space point. `basins`
+   * default to the scene squircle bounds tagged with their category ids.
+   * Returns the discriminated result so a test can assert the routed priority.
+   */
+  hitTestCanvas(
+    point: { x: number; y: number },
+    opts?: { pickRadius?: number },
+  ):
+    | { kind: "node"; pageId: string; distance: number }
+    | { kind: "hub"; relationshipId: string; distance: number }
+    | { kind: "overlap"; subjectIds: string[] }
+    | { kind: "basin"; subjectId: string }
+    | { kind: "none" };
+  /** M13 (§2.2) cited sources for a Node's Page, ranked by count DESC. */
+  topCitedSourcesForNode(pageId: string): { sourceId: string; count: number }[];
+  /**
+   * M13 (§2.2) cited sources for a Node-Intersection (relationship), aggregated
+   * across the connected nodes and ranked by count DESC.
+   */
+  topCitedSourcesForRelationship(
+    relationshipId: string,
+  ): { sourceId: string; count: number }[];
+  /**
+   * M13 (§2.2, P1) open the Observation Node workspace (Node Page + top-2 cited
+   * PDFs). Returns the opened source ids (the top 2).
+   */
+  openNodeWorkspace(pageId: string): string[];
+  /**
+   * M13 (§2.2, P2) open the Node-Intersection workspace (Connecting Page +
+   * top-2 aggregated cited PDFs). Returns the opened/created page id.
+   */
+  openRelationshipWorkspace(relationshipId: string): Promise<string>;
+  /** M13 (§2.2, P2) get or create a relationship's Connecting Page; opens it. */
+  getOrCreateRelationshipPage(relationshipId: string): Promise<string>;
+  /**
+   * M13 (§2.2, P3) get or create the ONE unified Subject-intersection page for
+   * a sorted subject-id set; opens it and returns the page id. Idempotent.
+   */
+  getOrCreateSubjectIntersectionPage(sortedSubjectIds: string[]): Promise<string>;
+  /** M13 (§2.2) the kind of the OPEN subject page (or null when none open). */
+  openPageKind(): string | null;
+  /**
+   * M13 (§2.2) the Intersection Aspect Selector Bar data for the OPEN
+   * Subject-intersection page (or null): the core pill, pairwise pills, the
+   * relationship-kind value, and the LIVE Observation Nodes inside the overlap.
+   */
+  intersectionAspects(): {
+    subjects: { categoryId: string; name: string }[];
+    corePill: { subjectIds: string[]; label: string; kind: string };
+    pairwisePills: { subjectIds: string[]; label: string; kind: string }[];
+    relationshipKind: string;
+    nodesInside: { pageId: string; title: string }[];
+  } | null;
+  /** M13 (§2.2) the cited-source ranking (with titles) for the open workspace. */
+  citedSourceRankingForOpenWorkspace(): {
+    sourceId: string;
+    title: string;
+    count: number;
+  }[];
   /** Create a category with a watercolor color (test setup convenience). */
   createCategory(name: string, colorCode?: string): Promise<string>;
   /** Create a relationship across N>=2 endpoints; returns the relationship id. */
@@ -920,6 +1049,130 @@ export function installTestApi(wb: Workbench, bump: () => void): void {
       );
       bump();
       return id;
+    },
+    // -- M13 (§2.1) spatial Subject basins + promote-to-node ----------------
+    async promoteAnnotationToNode(annotationId, opts) {
+      const { page, evidence } = await wb.promoteAnnotationToNode(
+        annotationId as AnnotationId,
+        opts ?? {},
+      );
+      bump();
+      return { pageId: page.id, evidenceId: evidence.id };
+    },
+    async getOrCreateSubjectBasinPage(categoryId) {
+      const id = await wb.getOrCreateSubjectBasinPage(categoryId as CategoryId);
+      bump();
+      return id;
+    },
+    subjectBasinPageId(categoryId) {
+      return wb.subjectBasinPageId(categoryId as CategoryId);
+    },
+    isSubjectBasinPage(pageId) {
+      return wb.isSubjectBasinPage(pageId as PageId);
+    },
+    subjectBasin(categoryId) {
+      return wb.subjectBasin(categoryId as CategoryId);
+    },
+    async setSubjectBasin(categoryId, basin) {
+      await wb.setSubjectBasin(categoryId as CategoryId, basin);
+      bump();
+    },
+    pointInSubjectBasin(pos, basin) {
+      return pointInSubjectBasin(pos, basin);
+    },
+    async syncNodeBasinMembership(pageId, pos) {
+      await wb.syncNodeBasinMembership(pageId as PageId, pos);
+      bump();
+      return wb
+        .conceptGraph()
+        .categories.filter((c) => c.memberPageIds.includes(pageId as PageId))
+        .map((c) => c.categoryId as string)
+        .sort();
+    },
+    async placeNodeInSubjects(pageId, categoryIds) {
+      const placed = await wb.placeNodeInSubjects(
+        pageId as PageId,
+        categoryIds as CategoryId[],
+      );
+      bump();
+      return placed;
+    },
+    // -- M13 (§2.2) 4-tier hit-testing + workspace routing ------------------
+    hitTestCanvas(point, opts) {
+      const scene = buildScene(graphToSceneInput(wb));
+      const basins = scene.squircles.map((sq) => ({
+        categoryId: sq.categoryId,
+        basin: { x: sq.bounds.cx, y: sq.bounds.cy, rx: sq.bounds.rx, ry: sq.bounds.ry },
+      }));
+      const result = hitTestCanvas(scene, point, {
+        ...(opts?.pickRadius != null ? { pickRadius: opts.pickRadius } : {}),
+        basins,
+      });
+      // Copy the readonly subjectIds into a mutable array for the serializable
+      // probe shape the e2e globals declare.
+      if (result.kind === "overlap") {
+        return { kind: "overlap", subjectIds: [...result.subjectIds] };
+      }
+      return result;
+    },
+    topCitedSourcesForNode(pageId) {
+      return wb
+        .topCitedSourcesForNode(pageId as PageId)
+        .map((r) => ({ sourceId: r.sourceId as string, count: r.count }));
+    },
+    topCitedSourcesForRelationship(relationshipId) {
+      return wb
+        .topCitedSourcesForRelationship(relationshipId as RelationshipId)
+        .map((r) => ({ sourceId: r.sourceId as string, count: r.count }));
+    },
+    openNodeWorkspace(pageId) {
+      const ids = wb.openNodeWorkspace(pageId as PageId).map((id) => id as string);
+      bump();
+      return ids;
+    },
+    async openRelationshipWorkspace(relationshipId) {
+      const id = await wb.openRelationshipWorkspace(relationshipId as RelationshipId);
+      bump();
+      return id;
+    },
+    async getOrCreateRelationshipPage(relationshipId) {
+      const id = await wb.getOrCreateRelationshipPage(relationshipId as RelationshipId);
+      bump();
+      return id;
+    },
+    async getOrCreateSubjectIntersectionPage(sortedSubjectIds) {
+      const id = await wb.getOrCreateSubjectIntersectionPage(
+        sortedSubjectIds as CategoryId[],
+      );
+      bump();
+      return id;
+    },
+    openPageKind() {
+      return wb.openPageKind();
+    },
+    intersectionAspects() {
+      const a = wb.intersectionAspects();
+      if (!a) return null;
+      return {
+        subjects: a.subjects.map((s) => ({ categoryId: s.categoryId as string, name: s.name })),
+        corePill: {
+          subjectIds: a.corePill.subjectIds.map((id) => id as string),
+          label: a.corePill.label,
+          kind: a.corePill.kind,
+        },
+        pairwisePills: a.pairwisePills.map((p) => ({
+          subjectIds: p.subjectIds.map((id) => id as string),
+          label: p.label,
+          kind: p.kind,
+        })),
+        relationshipKind: a.relationshipKind,
+        nodesInside: a.nodesInside.map((n) => ({ pageId: n.pageId as string, title: n.title })),
+      };
+    },
+    citedSourceRankingForOpenWorkspace() {
+      return wb
+        .citedSourceRankingForOpenWorkspace()
+        .map((r) => ({ sourceId: r.sourceId as string, title: r.title, count: r.count }));
     },
     async createCategory(name, colorCode) {
       const category = await wb.createCategory(name, colorCode);

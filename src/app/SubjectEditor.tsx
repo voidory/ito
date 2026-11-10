@@ -12,7 +12,7 @@ import {
   type EvidenceAttrs,
 } from "../editor";
 import type { AnnotationId, PageId } from "../model";
-import type { AnnotationView, Workbench } from "./workbench";
+import { INTERSECTION_RELATIONSHIP_KINDS, type AnnotationView, type Workbench } from "./workbench";
 
 /**
  * The continuous subject editor (FEAT-004, spec sections 4.2, 9, 10).
@@ -50,6 +50,18 @@ export function SubjectEditor({
   const [savedTick, setSavedTick] = useState(0);
 
   const page = wb.rawData().pages.find((p) => p.id === pageId);
+  // M13 (§2.1(2/4)): whether the open page is a Subject's overarching Subject
+  // Page (a "basin page"), discriminated via workbench state (P4).
+  const isBasinPage = wb.isSubjectBasinPage(pageId);
+  // M13 (§2.2): the two intersection page kinds. A Subject-intersection page
+  // (P3) renders the aspect selector bar; a Node-Intersection / Connecting Page
+  // (P2) renders the intersection-page editor surface. Discriminated directly
+  // from the page id so the correct surface shows regardless of which open flow
+  // mounted this editor.
+  const isSubjectIntersectionPage = wb.isSubjectIntersectionPage(pageId);
+  const isNodeIntersectionPage = !isSubjectIntersectionPage && wb.isNodeIntersectionPage(pageId);
+  const intersectionAspects = isSubjectIntersectionPage ? wb.intersectionAspects(pageId) : null;
+  const intersectionRelationshipKind = wb.intersectionRelationshipKind(pageId);
   /**
    * The stored documentJson object this editor last loaded or wrote. When the
    * stored value differs, some OTHER path (e.g. "Insert into subject page..."
@@ -265,7 +277,96 @@ export function SubjectEditor({
   }
 
   return (
-    <section data-testid="subject-editor" data-page-id={pageId} style={styles.root}>
+    <section
+      data-testid="subject-editor"
+      data-page-id={pageId}
+      data-basin-page={isBasinPage ? "true" : undefined}
+      data-subject-intersection-page={isSubjectIntersectionPage ? "true" : undefined}
+      data-node-intersection-page={isNodeIntersectionPage ? "true" : undefined}
+      style={styles.root}
+    >
+      {isBasinPage && (
+        <div data-testid="subject-basin-page" data-page-id={pageId} hidden />
+      )}
+      {/* M13 (§2.2, P2): a Node-Intersection / Connecting Page editor surface. */}
+      {isNodeIntersectionPage && (
+        <div data-testid="intersection-page-editor" data-page-id={pageId} hidden />
+      )}
+      {/* M13 (§2.2, P3): the unified Subject-intersection page + its Intersection
+          Aspect Selector Bar (core overlap + pairwise sub-overlaps + a
+          relationship-kind selector + the LIVE list of Observation Nodes inside
+          the overlap). */}
+      {isSubjectIntersectionPage && intersectionAspects && (
+        <div data-testid="subject-intersection-page" data-page-id={pageId}>
+          <div
+            data-testid="subject-intersection-aspect-bar"
+            role="tablist"
+            aria-label="Intersection aspects"
+            style={styles.aspectBar}
+          >
+            <button
+              type="button"
+              data-testid="aspect-pill"
+              data-aspect-kind="core"
+              data-subject-ids={intersectionAspects.corePill.subjectIds.join("|")}
+              className="ito-aspect-pill ito-aspect-pill-core"
+            >
+              {intersectionAspects.corePill.label}
+            </button>
+            {intersectionAspects.pairwisePills.map((pill) => (
+              <button
+                key={pill.subjectIds.join("|")}
+                type="button"
+                data-testid="aspect-pill"
+                data-aspect-kind="pairwise"
+                data-subject-ids={pill.subjectIds.join("|")}
+                className="ito-aspect-pill ito-aspect-pill-pairwise"
+              >
+                {pill.label}
+              </button>
+            ))}
+            <label style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: "0.25rem" }}>
+              <span style={{ fontSize: "0.75rem", color: "#666" }}>Relationship</span>
+              <select
+                data-testid="aspect-relationship-kind"
+                value={intersectionRelationshipKind}
+                onChange={(e) => {
+                  wb.setIntersectionRelationshipKind(
+                    pageId,
+                    e.target.value as typeof intersectionRelationshipKind,
+                  );
+                  bump();
+                }}
+              >
+                {INTERSECTION_RELATIONSHIP_KINDS.map((k) => (
+                  <option key={k} value={k}>
+                    {k}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <ul
+            data-testid="intersection-nodes-inside"
+            style={{ listStyle: "none", margin: 0, padding: "0.25rem 0.75rem", fontSize: "0.8rem" }}
+          >
+            {intersectionAspects.nodesInside.length === 0 && (
+              <li data-testid="intersection-nodes-empty" style={{ color: "#888" }}>
+                No Observation Nodes inside this overlap yet
+              </li>
+            )}
+            {intersectionAspects.nodesInside.map((n) => (
+              <li
+                key={n.pageId}
+                data-testid="intersection-node-inside"
+                data-page-id={n.pageId}
+              >
+                {n.title}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <header className="ito-pane-header" style={styles.header}>
         <h2
           data-testid="subject-title"
@@ -514,5 +615,14 @@ const styles: Record<string, React.CSSProperties> = {
     margin: "0.5rem 0.9rem 0",
     background: "#fff",
     boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
+  },
+  aspectBar: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: "0.35rem",
+    padding: "0.4rem 0.75rem",
+    borderBottom: "1px solid #eee",
+    background: "#f7f5f0",
   },
 };

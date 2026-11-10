@@ -6,6 +6,7 @@ import {
   hitTestAnnotations,
   installPointerSelection,
   loadDocument,
+  recomputeRectsFromQuote,
   renderPage,
   resolveAnchor,
   type HitTestTarget,
@@ -179,18 +180,96 @@ export function SourcePane({
     }
   }, [wb, sourceId, suppressMotion]);
 
+  // M13 (§1.2) recompute the live selection preview pills + the selection
+  // toolbar anchor from the CURRENT browser selection, clipped to the
+  // originating .pdf-page-stage. `selectionchange` does NOT fire on scroll, so
+  // without this the preview pill + toolbar freeze at stale viewport coords and
+  // drift off the page onto the desk. When the selection's anchor scrolls
+  // entirely outside .pane-scroll's visible viewport we HIDE the preview + clip
+  // the toolbar; when it scrolls back in we restore it. Pure DOM reads +
+  // setState — never calls bump(). Routed through a ref so the (once-created)
+  // scroll coalescer always sees the latest state/setters.
+  const syncSelectionToScroll = useCallback((): void => {
+    const hasToolbar = toolbar != null;
+    const hasPreview = livePreview != null && livePreview.rects.length > 0;
+    if (!hasToolbar && !hasPreview) return;
+
+    const sel = typeof window !== "undefined" ? window.getSelection() : null;
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
+    const range = sel.getRangeAt(0);
+    const page = pagesRef.current.find((p) =>
+      p.textLayer.contains(range.commonAncestorContainer),
+    );
+    if (!page) return;
+
+    // The visible viewport of the scroll container; clip the selection to it so
+    // a selection scrolled off-screen hides rather than floats on the desk.
+    const scrollBox = scrollRef.current?.getBoundingClientRect() ?? null;
+    const stageBox = page.stage.getBoundingClientRect();
+    const anchorRect = range.getBoundingClientRect();
+    const outOfView =
+      scrollBox != null &&
+      (anchorRect.bottom <= scrollBox.top ||
+        anchorRect.top >= scrollBox.bottom ||
+        anchorRect.right <= scrollBox.left ||
+        anchorRect.left >= scrollBox.right);
+
+    // Hide the live preview when the selection anchor is scrolled out of the
+    // visible pane; otherwise mirror the CURRENT client rects (clipped to the
+    // page stage) as the preview pills.
+    if (hasPreview) {
+      if (outOfView) {
+        setLivePreview((prev) => (prev && prev.rects.length > 0 ? { ...prev, rects: [] } : prev));
+      } else {
+        const rects = Array.from(range.getClientRects())
+          .filter((r) => r.width > 0 && r.height > 0)
+          .map((r) => ({
+            left: Math.max(r.left, stageBox.left),
+            top: Math.max(r.top, stageBox.top),
+            right: Math.min(r.right, stageBox.right),
+            bottom: Math.min(r.bottom, stageBox.bottom),
+            width: Math.min(r.right, stageBox.right) - Math.max(r.left, stageBox.left),
+          }))
+          .filter((r) => r.width > 0 && r.bottom - r.top > 0);
+        setLivePreview((prev) =>
+          prev ? { color: prev.color, rects } : { color: swatch("yellow"), rects },
+        );
+      }
+    }
+
+    // Re-anchor the selection toolbar to the selection's current viewport rect
+    // (so it follows the text on scroll) and clip it when out of view.
+    if (hasToolbar) {
+      if (outOfView) {
+        setToolbar((prev) =>
+          prev && prev.rect.width !== -1
+            ? { ...prev, rect: { ...prev.rect, width: -1 } }
+            : prev,
+        );
+      } else {
+        const nextRect = anchorRectFrom(anchorRect, anchorRect.left, anchorRect.top);
+        setToolbar((prev) => (prev ? { ...prev, rect: nextRect } : prev));
+      }
+    }
+  }, [toolbar, livePreview]);
+  const syncSelectionToScrollRef = useRef(syncSelectionToScroll);
+  syncSelectionToScrollRef.current = syncSelectionToScroll;
+
   // FEAT-003 (3.3) rAF-coalesced LOCAL scroll handling. Scrolling re-paints the
   // per-page highlight overlays directly into the DOM (redrawOverlays) so they
   // stay pinned to their pages; it NEVER calls the root bump(), so scrolling a
   // reader pane no longer forces a whole-app re-render. The inter-pane evidence
   // lines are updated separately by PassageEvidenceLines' own scroll listener.
-  // A single frame is scheduled at a time and torn down on unmount.
+  // A single frame is scheduled at a time and torn down on unmount. M13 (§1.2):
+  // the same frame re-anchors the live selection preview + toolbar to the
+  // current selection rects so they follow the page on scroll.
   const redrawOverlaysRef = useRef(redrawOverlays);
   redrawOverlaysRef.current = redrawOverlays;
   const scrollCoalescerRef = useRef<ScrollCoalescer | null>(null);
   if (scrollCoalescerRef.current === null) {
     scrollCoalescerRef.current = createScrollCoalescer(() => {
       redrawOverlaysRef.current();
+      syncSelectionToScrollRef.current();
     });
   }
   const onPaneScroll = useCallback(() => {
@@ -292,6 +371,36 @@ export function SourcePane({
   useEffect(() => {
     if (ready) redrawOverlays();
   }, [ready, redrawOverlays]);
+
+  // M13 (§1.3) live quote-to-rect re-anchoring. When a revised PDF shifted a
+  // paragraph to a new vertical position/page, reanchorAnnotations moved the
+  // annotation's pageIndex and marked it `rectsStale`, but the stored
+  // normalized rects still hold the PREVIOUS draft's coordinates. On page
+  // render, for each stale text annotation, re-measure its quote against the
+  // live .textLayer (recomputeRectsFromQuote) and persist fresh rects via
+  // wb.updateAnnotationRects (which also clears the stale flag). An empty match
+  // keeps the existing rects (updateAnnotationRects is a no-op on []). Runs once
+  // per ready render; the persist triggers a redraw through the owning effects.
+  useEffect(() => {
+    if (!ready || isWebsite) return;
+    const views = wb.annotationsForSource(sourceId);
+    void (async () => {
+      for (const view of views) {
+        const ann = view.annotation;
+        if (ann.scope.kind !== "text") continue;
+        if (ann.rectsStale !== true) continue;
+        const anchor = ann.scope.anchor;
+        const page = pagesRef.current.find(
+          (p) => Number(p.container.dataset.pageIndex ?? "-1") === anchor.pageIndex,
+        );
+        if (!page) continue;
+        const rects = recomputeRectsFromQuote(page.stage, anchor.selectedText);
+        if (rects.length === 0) continue;
+        await wb.updateAnnotationRects(ann.id, rects);
+      }
+      redrawOverlays();
+    })().catch((err) => console.error("rect re-anchor failed", err));
+  }, [ready, wb, sourceId, isWebsite, redrawOverlays]);
 
   // FIX-PANE-CLIPPING (3.2): responsive fit-to-pane scaling. When the pane is
   // narrower than a rendered page, re-render each page at a scale that fits the
@@ -459,6 +568,8 @@ export function SourcePane({
           });
           window.getSelection()?.removeAllRanges();
           setToolbar(null);
+          // M13 (§1.2) clear the live preview on an immediate tool-first commit.
+          setLivePreview(null);
           redrawOverlays();
           bump();
           return;
@@ -488,6 +599,9 @@ export function SourcePane({
       await wb.commitTextAnnotation({ sourceId, anchor: toolbar.anchor, style });
       window.getSelection()?.removeAllRanges();
       setToolbar(null);
+      // M13 (§1.2) clear the live watercolor preview on commit so no stale pill
+      // lingers after the highlight is painted.
+      setLivePreview(null);
       redrawOverlays();
       bump();
     },
@@ -1224,11 +1338,15 @@ export function SourcePane({
           .pane-scroll (overflow:auto) subtree, so the selection toolbar and the
           highlight edit popover are never clipped. */}
       <ReaderFixedLayer>
-        {toolbar && (
+        {toolbar && toolbar.rect.width !== -1 && (
           <SelectionToolbar
             toolbar={toolbar}
             onCommit={commitHighlight}
-            onDismiss={() => setToolbar(null)}
+            onDismiss={() => {
+              setToolbar(null);
+              // M13 (§1.2) dismissing the toolbar also clears the live preview.
+              setLivePreview(null);
+            }}
           />
         )}
         {editPopover && (

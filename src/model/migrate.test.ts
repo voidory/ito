@@ -111,6 +111,8 @@ describe("migrateBrainData", () => {
     // the explicitly-present fields.
     expect(migrated.presentation.hiddenPageIds).toEqual([]);
     expect(migrated.presentation.annotationStyles).toEqual({});
+    // M13 (§2.2): the Subject-intersection page map backfills to {}.
+    expect(migrated.subjectIntersectionPages).toEqual({});
   });
 
   it("preserves all records across a migrate -> serialize -> migrate round-trip", () => {

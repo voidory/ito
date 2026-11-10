@@ -268,6 +268,16 @@ export interface Annotation {
    * this id so a re-import updates in place rather than duplicating. Optional.
    */
   readonly externalId?: string;
+  /**
+   * M13 (§1.3) set `true` when a content/version-hash change moved this text
+   * annotation's `pageIndex` (via {@link reanchorAnnotations}) so the stored
+   * `anchor.rects` still hold the PREVIOUS draft's coordinates. The Reader
+   * re-measures the quote against the live text layer on page render and calls
+   * `updateAnnotationRects`, which writes fresh rects AND clears this flag.
+   * Additive/optional so v1 brains without it read fine and SCHEMA_VERSION
+   * stays unchanged.
+   */
+  readonly rectsStale?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -373,6 +383,35 @@ export interface Category {
    * page yet" and the workbench creates one lazily on demand.
    */
   readonly masterPageId?: PageId;
+  /**
+   * M13 (§2.1(2)) the Subject's moveable WATERCOLOUR BASIN geometry: the centre
+   * `(x, y)` + semi-axes `(rx, ry)` of the organic territory the Subject's
+   * Observation Nodes rest inside on the Nodes canvas. The basin is a Subject's
+   * first-class spatial identity — NOT a point-node — so it can be dragged /
+   * resized to overlap another Subject's basin (A∩B). When ABSENT the canvas
+   * derives a DETERMINISTIC default basin from the category's position in the
+   * category list so even a 0-node Subject renders a visible wash. The nodes a
+   * basin geometrically contains define the Subject's membership (§2.1(3)).
+   * Optional/additive so v1 brains without it read fine and SCHEMA_VERSION
+   * stays unchanged.
+   */
+  readonly basin?: {
+    readonly x: number;
+    readonly y: number;
+    readonly rx: number;
+    readonly ry: number;
+  };
+  /**
+   * M13 (§2.1(2)) id of this Subject's overarching SUBJECT PAGE — the real
+   * `Page` record (kind "subject", editable in SubjectEditor) that holds the
+   * user's macro thoughts about the whole Subject. Created lazily on demand via
+   * `getOrCreateSubjectBasinPage(categoryId)`. This is DISTINCT from
+   * `masterPageId` (the §12.2 category-boundary master page): a Subject may have
+   * BOTH without either clobbering the other. Mirrors the `masterPageId`
+   * pattern — optional/additive, v1-safe, no default seeded in brain.ts because
+   * absence means "no Subject Page developed yet".
+   */
+  readonly subjectPageId?: PageId;
 }
 
 export type RelationshipKind = "relates" | "supports" | "contradicts" | "derives";
@@ -757,4 +796,15 @@ export interface BrainData {
    * it. Used to dedupe capture incorporation strictly by CaptureId.
    */
   readonly captureHandlings?: readonly CaptureHandling[];
+  /**
+   * M13 (§2.2, FEAT-003) the lazily-created SUBJECT-INTERSECTION Pages, keyed by
+   * a deterministic overlap key (`sortedSubjectIds.join("|")`). Clicking an
+   * overlapping Subject watercolour zone (A∩B∩…) opens ONE unified Subject
+   * Intersection Page; this map lets `getOrCreateSubjectIntersectionPage`
+   * dedupe by the sorted containing-subject set so the SAME overlap always
+   * reopens the SAME page. Optional/readonly and additive so a pre-M13 brain
+   * loads with no migration and SCHEMA_VERSION stays unchanged; brain.ts seeds
+   * it to `{}` and migrate.ts defaults it.
+   */
+  readonly subjectIntersectionPages?: Readonly<Record<string, PageId>>;
 }
