@@ -19,6 +19,7 @@
  */
 
 import type { ChemicalMechanismSpec, ElectronFlowArrow, NormalizedRect } from "../model";
+import { parseSmilesGraph } from "../science/recognition/chemGraph";
 
 // ---------------------------------------------------------------------------
 // §2.2(1) LaTeX extraction from a cropped region
@@ -418,6 +419,8 @@ interface LaidAtom {
   readonly x: number;
   readonly y: number;
   readonly isHetero: boolean;
+  /** True for aromatic atoms (preserved from the parsed graph). */
+  readonly aromatic: boolean;
 }
 
 /** A laid-out bond between two atoms (1=single, 2=double, 3=triple). */
@@ -425,6 +428,8 @@ interface LaidBond {
   readonly a: number;
   readonly b: number;
   readonly order: number;
+  /** True when this bond is aromatic (preserved from the parsed graph). */
+  readonly aromatic: boolean;
 }
 
 /** A laid-out molecule: atoms + bonds + its bounding box. */
@@ -490,7 +495,31 @@ export function renderMechanismSvg(spec: ChemicalMechanismSpec): string {
       const y1 = offsetY + a.y;
       const x2 = offsetX + b.x;
       const y2 = offsetY + b.y;
-      parts.push(...bondLines(x1, y1, x2, y2, bond.order));
+      parts.push(...bondLines(x1, y1, x2, y2, bond.order, bond.aromatic));
+    }
+    // FEAT-002 (spec Phase 2.2): aromatic rings get an inner circle so an
+    // aromatic SMILES (c1ccccc1) renders DIFFERENTLY from the saturated ring
+    // (C1CCCCC1) — aromaticity is no longer lost at render time. The circle is
+    // only emitted when the molecule actually contains aromatic atoms, so
+    // aliphatic output (and the pinned M17 Test 4 markup) is byte-unchanged.
+    const aromaticAtoms = mol.atoms.filter((a) => a.aromatic);
+    if (aromaticAtoms.length >= 3) {
+      let cx = 0;
+      let cy = 0;
+      for (const a of aromaticAtoms) {
+        cx += offsetX + a.x;
+        cy += offsetY + a.y;
+      }
+      cx /= aromaticAtoms.length;
+      cy /= aromaticAtoms.length;
+      let radius = 0;
+      for (const a of aromaticAtoms) {
+        radius = Math.max(radius, Math.hypot(offsetX + a.x - cx, offsetY + a.y - cy));
+      }
+      parts.push(
+        `<circle class="ito-aromatic-ring" cx="${fmt(cx)}" cy="${fmt(cy)}" ` +
+          `r="${fmt(radius * 0.6)}" fill="none" stroke="#1a3a5a" stroke-width="1.2"/>`,
+      );
     }
     for (const atom of mol.atoms) {
       if (atom.isHetero) {
@@ -591,15 +620,22 @@ function layoutMolecule(smiles: string, bondLen: number): LaidMolecule {
   const atoms: LaidAtom[] = [];
   const stepX = bondLen * 0.87;
   const amp = bondLen * 0.5;
-  parsed.atoms.forEach((el, index) => {
+  parsed.atoms.forEach((atom, index) => {
     const x = index * stepX;
     const y = index % 2 === 0 ? amp : 0;
-    atoms.push({ index, element: el, x, y, isHetero: HETERO.has(el) });
+    atoms.push({
+      index,
+      element: atom.element,
+      x,
+      y,
+      isHetero: HETERO.has(atom.element),
+      aromatic: atom.aromatic,
+    });
   });
   if (atoms.length === 0) {
     // An unparseable / empty fragment still gets one carbon vertex so the side
     // renders a dot rather than nothing.
-    atoms.push({ index: 0, element: "C", x: 0, y: amp, isHetero: false });
+    atoms.push({ index: 0, element: "C", x: 0, y: amp, isHetero: false, aromatic: false });
   }
   let maxX = 0;
   let maxY = 0;
@@ -615,102 +651,49 @@ function layoutMolecule(smiles: string, bondLen: number): LaidMolecule {
   };
 }
 
-/** A minimal SMILES parse: atom element list + bonds (order + ring closures). */
-function parseSmiles(smiles: string): { atoms: string[]; bonds: LaidBond[] } {
-  const atoms: string[] = [];
-  const bonds: LaidBond[] = [];
-  const ringOpen = new Map<string, number>();
-  const branchStack: number[] = [];
-  let prev = -1;
-  let pendingOrder = 1;
-  let i = 0;
-  const s = smiles ?? "";
-  const pushBond = (a: number, b: number, order: number): void => {
-    if (a >= 0 && b >= 0 && a !== b) bonds.push({ a, b, order });
-  };
-  while (i < s.length) {
-    const ch = s[i]!;
-    if (ch === "(") {
-      branchStack.push(prev);
-      i++;
-      continue;
-    }
-    if (ch === ")") {
-      prev = branchStack.pop() ?? prev;
-      i++;
-      continue;
-    }
-    if (ch === "-" || ch === "=" || ch === "#") {
-      pendingOrder = ch === "=" ? 2 : ch === "#" ? 3 : 1;
-      i++;
-      continue;
-    }
-    if (ch === "." ) {
-      prev = -1;
-      i++;
-      continue;
-    }
-    if (/[0-9]/.test(ch)) {
-      // Ring closure digit.
-      if (ringOpen.has(ch)) {
-        const other = ringOpen.get(ch)!;
-        pushBond(prev, other, pendingOrder);
-        ringOpen.delete(ch);
-      } else if (prev >= 0) {
-        ringOpen.set(ch, prev);
-      }
-      pendingOrder = 1;
-      i++;
-      continue;
-    }
-    if (ch === "[") {
-      // Bracket atom: read until ']'.
-      const close = s.indexOf("]", i);
-      const inner = close > i ? s.slice(i + 1, close) : s.slice(i + 1);
-      const el = parseBracketElement(inner);
-      const idx = atoms.length;
-      atoms.push(el);
-      if (prev >= 0) pushBond(prev, idx, pendingOrder);
-      prev = idx;
-      pendingOrder = 1;
-      i = close > i ? close + 1 : s.length;
-      continue;
-    }
-    const el = readOrganicElement(s, i);
-    if (el) {
-      const idx = atoms.length;
-      atoms.push(el.symbol);
-      if (prev >= 0) pushBond(prev, idx, pendingOrder);
-      prev = idx;
-      pendingOrder = 1;
-      i += el.length;
-      continue;
-    }
-    i++;
-  }
+/**
+ * Parse a single molecule SMILES into the element/aromatic list + bonds the
+ * skeletal renderer needs. This now delegates to the richer graph parser in
+ * `src/science/recognition/chemGraph.ts` (FEAT-002) so aromaticity is PRESERVED
+ * (aromatic atoms keep their `aromatic` flag instead of being silently
+ * uppercased into aliphatic carbons) while the renderer's existing deterministic
+ * geometry is unchanged for aliphatic input.
+ */
+function parseSmiles(smiles: string): {
+  atoms: { element: string; aromatic: boolean }[];
+  bonds: LaidBond[];
+} {
+  // The renderer lays out ONE molecule at a time (splitReactionSmiles already
+  // separated reactants/products and '.'-fragments), so take the first parsed
+  // component; empty input yields an empty graph.
+  const components = parseSmilesGraph(smiles);
+  const mol = components[0];
+  if (!mol) return { atoms: [], bonds: [] };
+  const atoms = mol.atoms.map((a) => ({ element: a.element, aromatic: a.aromatic }));
+  const bonds: LaidBond[] = mol.bonds.map((b) => ({
+    a: b.a,
+    b: b.b,
+    order: b.order,
+    aromatic: b.aromatic === true,
+  }));
   return { atoms, bonds };
 }
 
-/** Read an organic-subset element (Cl/Br are two-letter; aromatic lowercased). */
-function readOrganicElement(s: string, i: number): { symbol: string; length: number } | null {
-  const two = s.slice(i, i + 2);
-  if (two === "Cl" || two === "Br") return { symbol: two, length: 2 };
-  const ch = s[i]!;
-  if (/[A-Z]/.test(ch)) return { symbol: ch, length: 1 };
-  if (/[cnosp]/.test(ch)) return { symbol: ch.toUpperCase(), length: 1 };
-  return null;
-}
-
-/** Extract the element symbol from a bracket-atom body like "OH-" or "NH4+". */
-function parseBracketElement(inner: string): string {
-  const m = inner.match(/^([A-Z][a-z]?)/);
-  return m ? m[1]! : "C";
-}
-
 /** Render a bond as one (or two/three parallel) crisp skeletal line(s). */
-function bondLines(x1: number, y1: number, x2: number, y2: number, order: number): string[] {
+function bondLines(
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  order: number,
+  aromatic = false,
+): string[] {
+  // FEAT-002: aromatic bonds carry a data-aromatic marker so aromaticity is
+  // visible in the markup. Aliphatic bonds emit the exact same string as before
+  // (no extra attribute), keeping the pinned M17 Test 4 output byte-identical.
+  const aromaticAttr = aromatic ? ' data-aromatic="true"' : "";
   const line = (a: number, b: number, c: number, d: number): string =>
-    `<line class="ito-bond" x1="${fmt(a)}" y1="${fmt(b)}" x2="${fmt(c)}" y2="${fmt(d)}" ` +
+    `<line class="ito-bond"${aromaticAttr} x1="${fmt(a)}" y1="${fmt(b)}" x2="${fmt(c)}" y2="${fmt(d)}" ` +
     `stroke="#1a3a5a" stroke-width="1.6" stroke-linecap="round"/>`;
   if (order <= 1) return [line(x1, y1, x2, y2)];
   // Offset perpendicular to the bond for double/triple parallel lines.

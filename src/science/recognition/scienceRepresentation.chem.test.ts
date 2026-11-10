@@ -95,31 +95,32 @@ describe("M18 FEAT-001 — M17 chemistry representation (SMILES → skeletal SVG
     expect(countBondLines(svg)).toBe(5);
   });
 
-  it("DOCUMENTS known-lossy current behavior: aromatic SMILES are uppercased (FEAT-002 will fix)", () => {
-    // CURRENT M17 behavior (verified against readOrganicElement in
-    // src/pdf/scienceOcr.ts): aromatic lowercase atoms are UPPERCASED, so the
-    // benzene ring c1ccccc1 renders byte-identically to the saturated ring
-    // C1CCCCC1 — aromaticity is LOST. This is a representation limitation, not
-    // a feature. FEAT-002 (Phase 2.2 of `kiro science`) will preserve
-    // aromaticity so c1ccccc1 becomes distinguishable from C1CCCCC1. This test
-    // pins the present lossy behavior so that fix is a deliberate, visible
-    // change rather than an accidental one.
+  it("FEAT-002 preserves aromaticity: c1ccccc1 now renders DIFFERENTLY from C1CCCCC1", () => {
+    // FEAT-001 pinned the (then) lossy M17 behavior: aromatic lowercase atoms
+    // were uppercased, so benzene c1ccccc1 rendered byte-identically to the
+    // saturated ring C1CCCCC1. FEAT-002 (spec Phase 2.2) extended the internal
+    // representation (src/science/recognition/chemGraph.ts) to PRESERVE
+    // aromaticity, and the renderer now marks aromatic bonds and draws an inner
+    // aromatic ring — so the two SMILES are no longer byte-identical even after
+    // stripping the echoed data-smiles attribute. This assertion was updated
+    // (per the FEAT-001 pointer) to require that difference.
     const aromatic = renderMechanismSvg({ smiles: "c1ccccc1", arrows: [] });
     const saturated = renderMechanismSvg({ smiles: "C1CCCCC1", arrows: [] });
     expectValidSvg(aromatic);
     expectValidSvg(saturated);
-    // The ring closure bond is present on both (6 atoms → 6 ring bonds).
+    // Both still have the same number of skeletal bond lines (6 atoms → 6 bonds).
     expect(countBondLines(aromatic)).toBe(countBondLines(saturated));
-    // KNOWN LOSS: the only thing distinguishing the two outputs today is the
-    // raw `data-smiles` attribute (the input string is echoed verbatim). The
-    // actual RENDERED chemistry — every atom label and bond line — is byte
-    // identical, because the aromatic lowercase atoms were uppercased to C
-    // before layout. Aromaticity is therefore lost in the representation.
-    // FEAT-002 (Phase 2.2 of `kiro science`) must preserve aromaticity so the
-    // rendered geometry (not merely the echoed attribute) differs.
+    // Aromaticity is now VISIBLE in the markup: aromatic bonds carry
+    // data-aromatic and an inner aromatic ring circle is drawn.
+    expect(aromatic).toContain('data-aromatic="true"');
+    expect(aromatic).toContain('class="ito-aromatic-ring"');
+    expect(saturated).not.toContain('data-aromatic="true"');
+    expect(saturated).not.toContain('class="ito-aromatic-ring"');
+    // The rendered geometry (not merely the echoed data-smiles attribute) now
+    // differs between the aromatic and the saturated ring.
     const stripSmilesAttr = (svg: string): string =>
       svg.replace(/ data-smiles="[^"]*"/, "");
-    expect(stripSmilesAttr(aromatic)).toBe(stripSmilesAttr(saturated));
+    expect(stripSmilesAttr(aromatic)).not.toBe(stripSmilesAttr(saturated));
   });
 
   it("is deterministic: identical SMILES yields byte-identical SVG", () => {
