@@ -94,6 +94,8 @@ export function SourcePane({
   const scrollRef = useRef<HTMLElement | null>(null);
   const pagesRef = useRef<RenderedPage[]>([]);
   const docRef = useRef<PDFDocumentProxy | null>(null);
+  // M14–M16 (FEAT-001) the live windowed-virtualization observer (large PDFs).
+  const virtualizationObserverRef = useRef<IntersectionObserver | null>(null);
   const [ready, setReady] = useState(false);
   const [toolbar, setToolbar] = useState<ToolbarState | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
@@ -314,15 +316,36 @@ export function SourcePane({
       }
       docRef.current = doc;
       mount.replaceChildren();
+      // M14–M16 (FEAT-001) windowed virtualization. For a LARGE document
+      // (> 8 pages) in a browser that supports IntersectionObserver, render
+      // pages LAZILY: each page's exact-size placeholder shell is created
+      // immediately (so scroll height + PassageEvidenceLines coordinates never
+      // jump) and the heavy canvas raster + text layer are built on demand as
+      // the page enters the 150% rootMargin window. jsdom (unit/render tests)
+      // has no IntersectionObserver, so there we render EAGERLY — every
+      // existing small-fixture test (1–12 pages) stays 100% compatible.
+      const supportsIO = typeof IntersectionObserver !== "undefined";
+      const virtualize = doc.numPages > 8 && supportsIO;
       const pages: RenderedPage[] = [];
       for (let p = 1; p <= doc.numPages; p++) {
-        const rp = await renderPage(doc, p, mount, 1.3);
+        const rp = await renderPage(doc, p, mount, 1.3, { lazy: virtualize });
         rp.container.dataset.pageIndex = String(p - 1);
         rp.stage.dataset.pageIndex = String(p - 1);
         pages.push(rp);
       }
       if (cancelled) return;
       pagesRef.current = pages;
+      // Install the virtualization observer once the shells are mounted. The
+      // observer root is the `.pane-scroll` container (the mount's parent) and
+      // its 150% vertical rootMargin pre-renders a page ~1.5 viewports before it
+      // scrolls in, so scrolling stays 0-latency and constant-memory.
+      if (virtualize) {
+        virtualizationObserverRef.current = installVirtualizationObserver(
+          mount,
+          pages,
+          () => redrawOverlaysRef.current(),
+        );
+      }
       setRangeEnd(doc.numPages - 1);
       // M6 (D01): a page with 0 selectable text items is a scanned/image PDF.
       if (pages.length > 0 && pages.every((p) => p.textItemCount === 0)) {
@@ -364,6 +387,10 @@ export function SourcePane({
     })().catch((err) => console.error("render failed", err));
     return () => {
       cancelled = true;
+      // M14–M16 (FEAT-001): tear down the virtualization observer so a
+      // re-render / unmount never leaks observers across source swaps.
+      virtualizationObserverRef.current?.disconnect();
+      virtualizationObserverRef.current = null;
     };
   }, [wb, sourceId]);
 
@@ -371,6 +398,54 @@ export function SourcePane({
   useEffect(() => {
     if (ready) redrawOverlays();
   }, [ready, redrawOverlays]);
+
+  // M14–M16 (FEAT-001): DIRECT highlight-to-highlight DRAG linking. Delegated
+  // native drag listeners on the mount make each drawn highlight fragment
+  // draggable; dropping one fragment onto ANOTHER highlight's fragment calls
+  // wb.linkHighlightsToObservation(fromId, toId), synthesising an Observation
+  // Node that cites both with a bridging note. Pure DOM wiring (no React re-
+  // render until the link commits); a drop onto the same highlight is ignored.
+  useEffect(() => {
+    const mount = mountRef.current;
+    if (!mount) return;
+    const annotationIdOf = (el: EventTarget | null): AnnotationId | null => {
+      const frag = (el as HTMLElement | null)?.closest?.(".ito-highlight[data-annotation-id]");
+      const id = frag?.getAttribute("data-annotation-id");
+      return id ? (id as AnnotationId) : null;
+    };
+    const onDragStart = (e: DragEvent): void => {
+      const id = annotationIdOf(e.target);
+      if (!id || !e.dataTransfer) return;
+      e.dataTransfer.setData("application/x-ito-annotation", id as string);
+      e.dataTransfer.effectAllowed = "link";
+    };
+    const onDragOver = (e: DragEvent): void => {
+      if (e.dataTransfer?.types.includes("application/x-ito-annotation")) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "link";
+      }
+    };
+    const onDrop = (e: DragEvent): void => {
+      const fromId = e.dataTransfer?.getData("application/x-ito-annotation") as
+        | AnnotationId
+        | undefined;
+      const toId = annotationIdOf(e.target);
+      if (!fromId || !toId || fromId === toId) return;
+      e.preventDefault();
+      void wb
+        .linkHighlightsToObservation(fromId, toId)
+        .then(() => bump())
+        .catch((err) => console.error("highlight link failed", err));
+    };
+    mount.addEventListener("dragstart", onDragStart);
+    mount.addEventListener("dragover", onDragOver);
+    mount.addEventListener("drop", onDrop);
+    return () => {
+      mount.removeEventListener("dragstart", onDragStart);
+      mount.removeEventListener("dragover", onDragOver);
+      mount.removeEventListener("drop", onDrop);
+    };
+  }, [wb, bump]);
 
   // M13 (§1.3) live quote-to-rect re-anchoring. When a revised PDF shifted a
   // paragraph to a new vertical position/page, reanchorAnnotations moved the
@@ -1412,6 +1487,58 @@ export function SourcePane({
       )}
     </div>
   );
+}
+
+/**
+ * M14–M16 (FEAT-001) install the windowed-virtualization IntersectionObserver
+ * for a large PDF. The observer root is the `.pane-scroll` container (the
+ * mount's parent) with a generous 150% vertical rootMargin, so a page is
+ * rasterized ~1.5 viewports before it scrolls into view and unloaded once it
+ * drifts ~1.5 viewports past — constant memory, 0-latency scrolling. Each page
+ * inside the active window carries `data-virtualized-window="true"` on its
+ * `.pdf-page-stage`; the exact-size placeholder shell of every offscreen page
+ * is kept so scroll height + overlay coordinates never jump. Returns the
+ * observer (the caller may disconnect it) or null when IntersectionObserver is
+ * unavailable (jsdom, where pages were already rendered eagerly).
+ *
+ * `onPageRendered` is invoked after a page lazily rasterizes so the pane can
+ * repaint that page's highlight overlays onto the freshly built layers.
+ */
+function installVirtualizationObserver(
+  mount: HTMLElement,
+  pages: readonly RenderedPage[],
+  onPageRendered: () => void,
+): IntersectionObserver | null {
+  if (typeof IntersectionObserver === "undefined") return null;
+  const scroll = mount.parentElement ?? mount;
+  const byStage = new Map<Element, RenderedPage>();
+  for (const page of pages) byStage.set(page.stage, page);
+
+  const observer = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        const page = byStage.get(entry.target);
+        if (!page) continue;
+        if (entry.isIntersecting) {
+          page.stage.setAttribute("data-virtualized-window", "true");
+          if (!page.isRendered()) {
+            void page
+              .ensureRendered()
+              .then(() => onPageRendered())
+              .catch((err) => console.error("lazy page render failed", err));
+          }
+        } else {
+          page.stage.removeAttribute("data-virtualized-window");
+          // Unload the raster + text layer once the page leaves the 150%
+          // window; the exact-size shell remains so geometry is preserved.
+          page.unload();
+        }
+      }
+    },
+    { root: scroll, rootMargin: "150% 0px", threshold: 0 },
+  );
+  for (const page of pages) observer.observe(page.stage);
+  return observer;
 }
 
 /**

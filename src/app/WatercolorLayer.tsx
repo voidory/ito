@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { SceneSquircle } from "../network";
 import { categoryPigment } from "../network";
+import type { RelationshipKind } from "../model";
 
 /**
  * The watercolour look of the concept map, kept separate from the interaction
@@ -66,6 +67,171 @@ export function overlapPairs(
 const safeId = (s: string): string => s.replace(/[^a-zA-Z0-9_-]/g, "_");
 
 /* ----------------------------------------------------------------------- */
+/* M14–M16 (FEAT-002) Unstirred watercolour curls / marbling ribbons        */
+/* ----------------------------------------------------------------------- */
+
+/** A point in scene space. */
+interface CurlPoint {
+  readonly x: number;
+  readonly y: number;
+}
+
+/** Round a number to 2dp so generated path strings stay compact + stable. */
+function r2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+/**
+ * M14–M16 (FEAT-002) build 2–3 interlocking, counter-curling cubic-Bézier
+ * ribbon path strings for the zone where two pigments MEET — a Subject-basin
+ * overlap (OverlapBleeds) or a node-to-node intersection Hub. The ribbons are
+ * generated PURELY from the two endpoints `a` and `b` (scene coordinates) and
+ * the relationship `kind`, so the same geometry is exercised by Vitest and the
+ * live SVG with no DOM. Ribbon[0] carries Pigment A, ribbon[1] carries Pigment
+ * B, and (for the harmonious kinds) ribbon[2] is a thin interleaving filament —
+ * so the two colours visibly CURL into each other like unstirred ink in water
+ * rather than averaging into one flat wash.
+ *
+ * The curl geometry is differentiated by `RelationshipKind`:
+ *   - `relates` / `supports`: harmonious intertwined S-curve double-helix
+ *     ribbons (mirror-image sine-like curls that weave over/under each other).
+ *   - `contradicts`: opposing counter-vortex hooks that recoil away from a
+ *     sharp tension cleft at the hub centre.
+ *   - `derives`: a single directional tapered plume streaming from the source
+ *     node (a) into the target node (b).
+ *
+ * Deterministic: identical inputs always yield identical path strings.
+ */
+export function buildWatercolorCurlRibbons(
+  a: CurlPoint,
+  b: CurlPoint,
+  kind: RelationshipKind = "relates",
+): string[] {
+  const mx = (a.x + b.x) / 2;
+  const my = (a.y + b.y) / 2;
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy) || 1;
+  // Unit direction (a -> b) and its perpendicular (the curl amplitude axis).
+  const ux = dx / len;
+  const uy = dy / len;
+  const px = -uy;
+  const py = ux;
+  // Curl amplitude scales with the span but is clamped so a tiny hub still
+  // shows a visible curl and a huge basin overlap never balloons.
+  const amp = Math.max(14, Math.min(len * 0.32, 90));
+  const p = (sx: number, sy: number): string => `${r2(sx)} ${r2(sy)}`;
+
+  if (kind === "derives") {
+    // A single directional tapered plume: it leaves the source (a), swells and
+    // swings to one side through the midpoint, then narrows into the target
+    // (b). Two edges of the plume plus a centre streak = a tapered stream.
+    const swell = amp * 0.9;
+    const c1x = a.x + ux * len * 0.3 + px * swell;
+    const c1y = a.y + uy * len * 0.3 + py * swell;
+    const c2x = b.x - ux * len * 0.3 + px * swell * 0.25;
+    const c2y = b.y - uy * len * 0.3 + py * swell * 0.25;
+    const edgeHi = `M ${p(a.x, a.y)} C ${p(c1x, c1y)} ${p(c2x, c2y)} ${p(b.x, b.y)}`;
+    const c1xLo = a.x + ux * len * 0.3 - px * swell * 0.4;
+    const c1yLo = a.y + uy * len * 0.3 - py * swell * 0.4;
+    const c2xLo = b.x - ux * len * 0.3 - px * swell * 0.1;
+    const c2yLo = b.y - uy * len * 0.3 - py * swell * 0.1;
+    const edgeLo = `M ${p(a.x, a.y)} C ${p(c1xLo, c1yLo)} ${p(c2xLo, c2yLo)} ${p(b.x, b.y)}`;
+    return [edgeHi, edgeLo];
+  }
+
+  if (kind === "contradicts") {
+    // Opposing counter-vortex hooks: each ribbon curls hard toward the centre
+    // then RECOILS away on the opposite side, leaving a sharp tension cleft at
+    // the hub centre where the two colours refuse to merge.
+    const cleft = amp * 0.18; // the small gap the two hooks leave at centre.
+    const hookA =
+      `M ${p(a.x, a.y)} ` +
+      `C ${p(a.x + ux * len * 0.35 + px * amp, a.y + uy * len * 0.35 + py * amp)} ` +
+      `${p(mx - ux * cleft + px * amp * 0.4, my - uy * cleft + py * amp * 0.4)} ` +
+      `${p(mx - ux * cleft, my - uy * cleft)}`;
+    const hookB =
+      `M ${p(b.x, b.y)} ` +
+      `C ${p(b.x - ux * len * 0.35 - px * amp, b.y - uy * len * 0.35 - py * amp)} ` +
+      `${p(mx + ux * cleft - px * amp * 0.4, my + uy * cleft - py * amp * 0.4)} ` +
+      `${p(mx + ux * cleft, my + uy * cleft)}`;
+    return [hookA, hookB];
+  }
+
+  // Harmonious kinds (`relates` / `supports`): an intertwined S-curve
+  // double-helix. Ribbon A bows to +perp through the midpoint; ribbon B mirrors
+  // it to -perp; a thin filament laces between them so the two colours read as
+  // woven, not stacked.
+  const q1x = a.x + dx * 0.33;
+  const q1y = a.y + dy * 0.33;
+  const q2x = a.x + dx * 0.66;
+  const q2y = a.y + dy * 0.66;
+  const helixA =
+    `M ${p(a.x, a.y)} ` +
+    `C ${p(q1x + px * amp, q1y + py * amp)} ${p(q2x - px * amp, q2y - py * amp)} ${p(b.x, b.y)}`;
+  const helixB =
+    `M ${p(a.x, a.y)} ` +
+    `C ${p(q1x - px * amp, q1y - py * amp)} ${p(q2x + px * amp, q2y + py * amp)} ${p(b.x, b.y)}`;
+  const filament =
+    `M ${p(a.x, a.y)} ` +
+    `C ${p(q1x + px * amp * 0.35, q1y + py * amp * 0.35)} ` +
+    `${p(q2x - px * amp * 0.35, q2y - py * amp * 0.35)} ${p(b.x, b.y)}`;
+  return [helixA, helixB, filament];
+}
+
+/**
+ * M14–M16 (FEAT-002) render the unstirred-watercolour curl ribbons for ONE
+ * meeting zone (a basin overlap or a node-to-node intersection hub). Two/three
+ * interlocking ribbons from {@link buildWatercolorCurlRibbons} are painted with
+ * `mix-blend-mode: multiply` and pushed through the directional marbling filter
+ * `#watercolor-curl-marbling` so the colours curl into each other like
+ * unstirred ink in water. `data-testid="watercolor-curl-ribbons"` wraps the
+ * group; `data-curl-kind` carries the differentiating RelationshipKind.
+ */
+export function WatercolorCurlRibbons({
+  a,
+  b,
+  colorA,
+  colorB,
+  kind = "relates",
+}: {
+  a: CurlPoint;
+  b: CurlPoint;
+  colorA: string;
+  colorB: string;
+  kind?: RelationshipKind;
+}): JSX.Element {
+  const ribbons = useMemo(() => buildWatercolorCurlRibbons(a, b, kind), [a, b, kind]);
+  const fills = [colorA, colorB, mixHex(colorA, colorB, 0.5)];
+  return (
+    <g
+      data-testid="watercolor-curl-ribbons"
+      data-curl-kind={kind}
+      data-ribbon-count={ribbons.length}
+      className="ito-curl-ribbons"
+      aria-hidden="true"
+      pointerEvents="none"
+      filter="url(#watercolor-curl-marbling)"
+    >
+      {ribbons.map((d, i) => (
+        <path
+          key={i}
+          className="ito-curl-ribbon"
+          data-ribbon-index={i}
+          d={d}
+          fill="none"
+          stroke={fills[i] ?? fills[0]}
+          strokeOpacity={i === 2 ? 0.5 : 0.78}
+          strokeWidth={i === 2 ? 3 : 7}
+          strokeLinecap="round"
+          style={{ mixBlendMode: "multiply" }}
+        />
+      ))}
+    </g>
+  );
+}
+
+/* ----------------------------------------------------------------------- */
 /* Defs: gradients, clip paths, filters                                     */
 /* ----------------------------------------------------------------------- */
 
@@ -84,6 +250,31 @@ export function WatercolorDefs({
         <feTurbulence type="fractalNoise" baseFrequency="0.018 0.024" numOctaves={3} seed={11} result="n" />
         <feDisplacementMap in="SourceGraphic" in2="n" scale={34} xChannelSelector="R" yChannelSelector="B" result="d" />
         <feGaussianBlur in="d" stdDeviation={3.2} />
+      </filter>
+      {/*
+        M14–M16 (FEAT-002) directional marbling filter for the unstirred curl
+        ribbons. A DIRECTIONAL (anisotropic) turbulence streaks the noise along
+        one axis, then a displacement map warps the ribbon strokes so the two
+        pigment ribbons curl + marble into one another like unstirred ink,
+        instead of reading as two clean vector strokes.
+      */}
+      <filter id="watercolor-curl-marbling" x="-40%" y="-40%" width="180%" height="180%">
+        <feTurbulence
+          type="turbulence"
+          baseFrequency="0.006 0.028"
+          numOctaves={2}
+          seed={23}
+          result="curlNoise"
+        />
+        <feDisplacementMap
+          in="SourceGraphic"
+          in2="curlNoise"
+          scale={22}
+          xChannelSelector="R"
+          yChannelSelector="G"
+          result="curlWarp"
+        />
+        <feGaussianBlur in="curlWarp" stdDeviation={1.1} />
       </filter>
       {/*
         Blooms and the water backdrop are soft because they are RADIAL GRADIENTS
@@ -331,6 +522,20 @@ export function OverlapBleeds({
               fill={mixHex(ca, cb, 0.5)}
               fillOpacity={0.3}
               style={{ mixBlendMode: "multiply" }}
+            />
+            {/*
+              M14–M16 (FEAT-002): unstirred watercolour CURLS. Where the two
+              Subject basins meet, the pigments curl into each other as
+              interlocking marbling ribbons rather than averaging into a flat
+              wash. A basin overlap has no RelationshipKind, so the harmonious
+              `relates` double-helix is used.
+            */}
+            <WatercolorCurlRibbons
+              a={{ x: a.bounds.cx, y: a.bounds.cy }}
+              b={{ x: b.bounds.cx, y: b.bounds.cy }}
+              colorA={ca}
+              colorB={cb}
+              kind="relates"
             />
           </g>
         );

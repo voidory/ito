@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { EditorState, TextSelection } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
+import { toggleMark, setBlockType } from "prosemirror-commands";
 import { subjectKeymapPlugins } from "./subjectEditorKeymap";
 import {
   compositionStats,
   hydrateState,
+  insertBridgingNoteAt,
   serializeState,
   subjectSchema,
   type CompositionStats,
@@ -266,6 +268,63 @@ export function SubjectEditor({
     [wb, pageId, bump, storedDoc],
   );
 
+  // M14–M16 (FEAT-003) formatting-toolbar command runner. Dispatches a
+  // ProseMirror command against the live view (keeping focus), then refreshes
+  // the structural stats + schedules the debounced save so the toolbar edit is
+  // persisted exactly like a keystroke.
+  const runEditorCommand = useCallback(
+    (command: (state: EditorState, dispatch?: EditorView["dispatch"]) => boolean): void => {
+      const view = viewRef.current;
+      if (!view) return;
+      command(view.state, view.dispatch);
+      view.focus();
+      refreshStats();
+      scheduleSave();
+    },
+    [refreshStats, scheduleSave],
+  );
+
+  const toggleBold = useCallback(
+    () => runEditorCommand(toggleMark(subjectSchema.marks.strong!)),
+    [runEditorCommand],
+  );
+  const toggleItalic = useCallback(
+    () => runEditorCommand(toggleMark(subjectSchema.marks.em!)),
+    [runEditorCommand],
+  );
+  const toggleHeading = useCallback(
+    () => runEditorCommand(setBlockType(subjectSchema.nodes.heading!, { level: 2 })),
+    [runEditorCommand],
+  );
+
+  // Insert a Synthesis / Observation Callout block at the cursor's block.
+  const insertCallout = useCallback(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    const pos = view.state.selection.from;
+    const callout = subjectSchema.nodes.paragraph!.create({ callout: true });
+    const $pos = view.state.doc.resolve(Math.min(pos, view.state.doc.content.size));
+    const insertAt = $pos.depth > 0 ? $pos.after($pos.depth) : view.state.doc.content.size;
+    const tr = view.state.tr.insert(Math.min(insertAt, view.state.doc.content.size), callout);
+    view.dispatch(tr);
+    view.focus();
+    refreshStats();
+    scheduleSave();
+  }, [refreshStats, scheduleSave]);
+
+  // Insert an informal "+ Bridging Note" commentary paragraph at the cursor so
+  // the user can annotate the connection between cited quotes on the page.
+  const insertBridgingNote = useCallback(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    const pos = view.state.selection.from;
+    const next = insertBridgingNoteAt(view.state, pos, "");
+    view.updateState(next);
+    view.focus();
+    refreshStats();
+    scheduleSave();
+  }, [refreshStats, scheduleSave]);
+
   // Recomputed every render: annotations made in the reader after this editor
   // opened must appear in the picker (a memo keyed on editor state missed them).
   void savedTick;
@@ -404,6 +463,62 @@ export function SubjectEditor({
           </button>
         </div>
       </header>
+
+      {/* M14–M16 (FEAT-003) compact formatting + bridging-note toolbar. */}
+      <div
+        data-testid="subject-editor-toolbar"
+        role="toolbar"
+        aria-label="Formatting"
+        style={styles.toolbar}
+      >
+        <button
+          type="button"
+          data-testid="fmt-h2-btn"
+          title="Heading"
+          className="ito-fmt-btn"
+          onClick={toggleHeading}
+        >
+          H2
+        </button>
+        <button
+          type="button"
+          data-testid="fmt-bold-btn"
+          title="Bold"
+          className="ito-fmt-btn"
+          style={{ fontWeight: 700 }}
+          onClick={toggleBold}
+        >
+          B
+        </button>
+        <button
+          type="button"
+          data-testid="fmt-italic-btn"
+          title="Italic"
+          className="ito-fmt-btn"
+          style={{ fontStyle: "italic" }}
+          onClick={toggleItalic}
+        >
+          I
+        </button>
+        <button
+          type="button"
+          data-testid="fmt-callout-btn"
+          title="Synthesis / Observation callout"
+          className="ito-fmt-btn"
+          onClick={insertCallout}
+        >
+          ❝ Callout
+        </button>
+        <button
+          type="button"
+          data-testid="insert-bridging-note-btn"
+          title="Insert a bridging note between cited quotes"
+          className="ito-fmt-btn"
+          onClick={insertBridgingNote}
+        >
+          + Bridging Note
+        </button>
+      </div>
 
       {picking && (
         <AnnotationPicker
@@ -624,5 +739,14 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "0.4rem 0.75rem",
     borderBottom: "1px solid #eee",
     background: "#f7f5f0",
+  },
+  toolbar: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: "0.3rem",
+    padding: "0.35rem 0.75rem",
+    borderBottom: "1px solid #eee",
+    background: "#fbfaf7",
   },
 };

@@ -103,8 +103,29 @@ const nodes: Record<string, NodeSpec> = {
     // comment at insertion time (spec section 4.3). It is CLEARLY distinguished
     // from ordinary page writing and never silently merged into it. The flag
     // lives in the JSON (source of truth), not only in the rendered DOM.
-    attrs: { copiedComment: { default: false } },
+    //
+    // M14–M16 (FEAT-001/003) `bridgingNote` marks an INFORMAL commentary
+    // paragraph the user inserts BETWEEN two cited evidence quote atoms (via
+    // highlight-to-highlight linking or the "+ Bridging Note" toolbar button) to
+    // annotate the connection between quotes. Like `copiedComment` the flag is
+    // part of the durable JSON, not just the rendered DOM.
+    //
+    // M14–M16 (FEAT-003) `callout` marks a Synthesis / Observation Callout
+    // block inserted from the SubjectEditor formatting toolbar — a visually
+    // emphasised paragraph for the author's own synthesis. Like the other
+    // flags it lives in the durable JSON, not just the rendered DOM.
+    attrs: {
+      copiedComment: { default: false },
+      bridgingNote: { default: false },
+      callout: { default: false },
+    },
     toDOM(node) {
+      if (node.attrs.callout) {
+        return ["p", { class: "synthesis-callout", "data-callout": "true" }, 0];
+      }
+      if (node.attrs.bridgingNote) {
+        return ["p", { class: "bridging-note", "data-bridging-note": "true" }, 0];
+      }
       return node.attrs.copiedComment
         ? ["p", { class: "copied-comment", "data-copied-comment": "true" }, 0]
         : ["p", 0];
@@ -114,7 +135,11 @@ const nodes: Record<string, NodeSpec> = {
         tag: "p",
         getAttrs(dom) {
           const el = dom as HTMLElement;
-          return { copiedComment: el.getAttribute("data-copied-comment") === "true" };
+          return {
+            copiedComment: el.getAttribute("data-copied-comment") === "true",
+            bridgingNote: el.getAttribute("data-bridging-note") === "true",
+            callout: el.getAttribute("data-callout") === "true",
+          };
         },
       },
     ],

@@ -54,6 +54,16 @@ export {
 } from "./reader/paneTypes";
 
 /**
+ * M14–M16 (FEAT-001) the minimum viewport width (px) at which the integrated
+ * workspace renders the full 3-pane center-editor layout (Paper A | Editor |
+ * Paper B) when two sources are open together with a subject page. BELOW this
+ * width the workspace adapts to a compact 2-pane layout (Paper A | Editor) with
+ * the 2nd PDF surfaced as a 1-click quick-swap tab. Exported so the test asserts
+ * the exact boundary.
+ */
+export const WORKSPACE_3PANE_MIN_WIDTH = 1360;
+
+/**
  * The reading workbench (spec section 6). Renders one or more open documents
  * with real selectable pdf.js text. When the highlights tab is closed the
  * reader is centred + expanded and the sidebar reserves ZERO width (R18).
@@ -277,8 +287,16 @@ export function Reader({
   const [narrow, setNarrow] = useState<boolean>(() =>
     typeof window !== "undefined" ? window.innerWidth < 760 : false,
   );
+  // M14–M16 (FEAT-001): the live viewport width driving the adaptive <1360px
+  // multi-pane breakpoint. Tracked alongside the phone `narrow` flag.
+  const [viewportWidth, setViewportWidth] = useState<number>(() =>
+    typeof window !== "undefined" ? window.innerWidth : WORKSPACE_3PANE_MIN_WIDTH,
+  );
   useEffect(() => {
-    const onResize = (): void => setNarrow(window.innerWidth < 760);
+    const onResize = (): void => {
+      setNarrow(window.innerWidth < 760);
+      setViewportWidth(window.innerWidth);
+    };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
@@ -287,6 +305,18 @@ export function Reader({
   // page is the middle composition pane. The approved arrangement interleaves
   // the subject between sources (Paper A | subject | Paper B) when two sources
   // are open together; otherwise it trails the single source.
+  // M14–M16 (FEAT-001): below WORKSPACE_3PANE_MIN_WIDTH a 2-sources+subject
+  // workspace is TOO narrow for the full Paper A | Editor | Paper B layout, so
+  // it collapses to a compact Paper A | Editor and surfaces Paper B as a
+  // 1-click quick-swap tab. `compactTwoPane` gates that layout; `secondSourceId`
+  // is the hidden Paper B offered for the swap.
+  const compactTwoPane =
+    !narrow &&
+    subjectOpen &&
+    openSourceIds.length >= 2 &&
+    viewportWidth < WORKSPACE_3PANE_MIN_WIDTH;
+  const secondSourceId: SourceId | null = compactTwoPane ? openSourceIds[1]! : null;
+
   const paneSlots: { slotId: string; kind: "source" | "subject"; sourceId?: SourceId }[] =
     (() => {
       const sources = openSourceIds.map((id) => ({
@@ -296,6 +326,11 @@ export function Reader({
       }));
       if (!subjectOpen) return sources;
       const subjectPane = { slotId: "subject", kind: "subject" as const };
+      // Compact 2-pane: render ONLY the first PDF pane beside the Editor; the
+      // 2nd PDF (Paper B) is reachable via the quick-swap tab.
+      if (compactTwoPane) {
+        return [sources[0]!, subjectPane];
+      }
       if (sources.length >= 2) {
         return [sources[0]!, subjectPane, ...sources.slice(1)];
       }
@@ -381,6 +416,31 @@ export function Reader({
         }
         onImportPdf={() => readerPdfInputRef.current?.click()}
       />
+      {/* M14–M16 (FEAT-002): "← Return to Map" — switch back to the Nodes view
+          and smoothly pull the camera back out from the last dive target. Only
+          shown once a dive into this workspace was recorded. */}
+      {wb.lastDiveTarget() != null && (
+        <button
+          data-testid="return-to-map-dive-btn"
+          className="ito-return-to-map"
+          onClick={() => {
+            wb.returnToMap();
+            bump();
+          }}
+          style={{
+            alignSelf: "flex-start",
+            margin: "0.35rem 0.75rem",
+            padding: "0.3rem 0.7rem",
+            fontSize: "0.82rem",
+            border: "1px solid #d9d4c7",
+            borderRadius: "6px",
+            background: "#f4f1ea",
+            cursor: "pointer",
+          }}
+        >
+          ← Return to Map
+        </button>
+      )}
       <input
         ref={readerPdfInputRef}
         data-testid="import-pdf-input"
@@ -402,8 +462,12 @@ export function Reader({
       {/* M13 (§2.2): Source Switcher Pill — lists cited sources with counts and
           offers to "Swap to:" any cited source not currently in a pane (e.g.
           "Paper A (5) · Paper B (3) · Swap to: Paper C (1)"). Toggling swaps a
-          3rd+ PDF into a pane via switchReaderPane/ensureSourceOpen. */}
-      {sourceRanking.length > 0 && (
+          3rd+ PDF into a pane via switchReaderPane/ensureSourceOpen.
+          M14–M16 (FEAT-001): in the compact <1360px 2-pane layout the switcher
+          also renders even with no cited sources, carrying the prominent
+          `compact-second-source-tab` at its FRONT for 1-click swapping to the
+          hidden Paper B. */}
+      {(sourceRanking.length > 0 || compactTwoPane) && (
         <div
           data-testid="workspace-source-switcher"
           className="ito-source-switcher"
@@ -420,6 +484,32 @@ export function Reader({
             borderBottom: "1px solid #e5e2dc",
           }}
         >
+          {/* M14–M16 (FEAT-001): prominent 1-click quick-swap tab for the hidden
+              Paper B in the compact 2-pane layout. Clicking promotes Paper B
+              into the single visible PDF pane (swapping it with Paper A) so the
+              user can flip between the two papers without the full 3-pane width. */}
+          {compactTwoPane && secondSourceId != null && (
+            <button
+              data-testid="compact-second-source-tab"
+              data-source-id={secondSourceId}
+              className="ito-compact-source-tab"
+              onClick={() => {
+                wb.promoteOpenSource(secondSourceId);
+                bump();
+              }}
+              style={{
+                fontWeight: 600,
+                padding: "0.2rem 0.6rem",
+                marginRight: "0.4rem",
+                border: "1px solid #c9b98a",
+                borderRadius: "6px",
+                background: "#fbf3dd",
+                cursor: "pointer",
+              }}
+            >
+              {wb.rawData().sources.find((s) => s.id === secondSourceId)?.title ?? "Paper B"} →
+            </button>
+          )}
           <span style={{ fontWeight: 600, marginRight: "0.25rem" }}>Sources:</span>
           {sourceRanking.map((r, i) => (
             <span
@@ -488,6 +578,7 @@ export function Reader({
         data-subject-open={subjectOpen ? "true" : "false"}
         data-narrow={narrow ? "true" : "false"}
         data-pane-count={String(paneSlots.length)}
+        data-workspace-density={compactTwoPane ? "compact-2pane" : undefined}
         style={styles.body}
         ref={bodyRef}
       >

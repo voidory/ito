@@ -76,6 +76,18 @@ export interface RenderedPage {
   selectRange(start: number, end: number): Range;
   /** Re-render at a new scale (zoom). Updates geometry in place. */
   rerender(scale: number): Promise<void>;
+  /**
+   * M14–M16 (FEAT-001) windowed virtualization. `ensureRendered()` rasterizes
+   * the canvas + builds the text layer on demand (idempotent — a no-op once the
+   * page is already rendered) so a lazily-mounted offscreen page's heavy work
+   * is deferred until it enters the IntersectionObserver window. `unload()`
+   * releases the canvas raster + text layer when the page scrolls far out of
+   * the window (keeping the exact-size placeholder shell so scroll height and
+   * overlay coordinates never jump). `isRendered()` reports the current state.
+   */
+  ensureRendered(): Promise<void>;
+  unload(): void;
+  isRendered(): boolean;
 }
 
 interface GlyphMap {
@@ -98,6 +110,7 @@ export async function renderPage(
   pageNumber: number,
   mount: HTMLElement,
   scale = 1.5,
+  options: { lazy?: boolean } = {},
 ): Promise<RenderedPage> {
   const page: PDFPageProxy = await doc.getPage(pageNumber);
 
@@ -157,6 +170,25 @@ export async function renderPage(
   // task (and swallowing its RenderingCancelledException) guarantees the two
   // renders are serialized on the canvas.
   let activeRenderTask: RenderTask | null = null;
+  // M14–M16 (FEAT-001) windowed virtualization state. `isDrawn` tracks whether
+  // the canvas raster + text layer are currently built; `currentScale` is the
+  // last applied scale so ensureRendered() / rerender() stay consistent.
+  let isDrawn = false;
+  let currentScale = scale;
+
+  /**
+   * M14–M16 (FEAT-001) size the STAGE to the page's exact viewport box WITHOUT
+   * rasterizing. This keeps an unrendered (virtualized offscreen) page's
+   * placeholder shell at the exact width/height it will occupy once drawn, so
+   * scroll height and normalized-rect overlay coordinates never jump when the
+   * page lazily rasterizes. Idempotent + cheap.
+   */
+  function sizeStage(renderScale: number): void {
+    const viewport = page.getViewport({ scale: renderScale, rotation: page.rotate });
+    stage.style.width = `${Math.floor(viewport.width)}px`;
+    stage.style.height = `${Math.floor(viewport.height)}px`;
+    stage.style.setProperty("--scale-factor", String(renderScale));
+  }
 
   async function draw(renderScale: number): Promise<void> {
     // M13 FEAT-001 — honour the page's intrinsic `/Rotate` entry. `getViewport`
@@ -252,9 +284,22 @@ export async function renderPage(
     } else {
       textLayer.style.transform = "";
     }
+
+    // M14–M16 (FEAT-001): the raster + text layer are now built at this scale.
+    isDrawn = true;
+    currentScale = renderScale;
   }
 
-  await draw(scale);
+  // M14–M16 (FEAT-001): size the stage to the exact viewport box up front so a
+  // virtualized placeholder shell occupies the correct space immediately.
+  sizeStage(scale);
+  // Lazy pages defer the heavy rasterize + text-layer build until they enter
+  // the IntersectionObserver window (the SourcePane calls ensureRendered()). In
+  // every eager path (small docs, and jsdom where IntersectionObserver never
+  // fires) we draw now so existing unit/render tests pass unchanged.
+  if (!options.lazy) {
+    await draw(scale);
+  }
 
   function buildGlyphMap(): GlyphMap {
     // Walk the text-layer DOM in document order, concatenating text nodes and
@@ -314,7 +359,40 @@ export async function renderPage(
       return rangeFor(start, end);
     },
     async rerender(nextScale: number): Promise<void> {
-      await draw(nextScale);
+      // M14–M16 (FEAT-001): a currently-drawn page re-rasterizes at the new
+      // scale; an UNLOADED (virtualized) page only resizes its placeholder
+      // shell so scroll height + overlay coordinates track the zoom without
+      // paying the raster cost until it re-enters the window.
+      if (isDrawn) {
+        await draw(nextScale);
+      } else {
+        currentScale = nextScale;
+        sizeStage(nextScale);
+      }
+    },
+    async ensureRendered(): Promise<void> {
+      if (isDrawn) return;
+      await draw(currentScale);
+    },
+    unload(): void {
+      if (!isDrawn) return;
+      // Cancel any in-flight render, then drop the heavy raster + glyph spans
+      // but KEEP the exact-size stage shell so scroll geometry never jumps.
+      if (activeRenderTask) {
+        activeRenderTask.cancel();
+        activeRenderTask = null;
+      }
+      const ctx = canvas.getContext("2d");
+      ctx?.clearRect(0, 0, canvas.width, canvas.height);
+      canvas.width = 0;
+      canvas.height = 0;
+      textLayer.replaceChildren();
+      textLayer.style.transform = "";
+      isDrawn = false;
+      sizeStage(currentScale);
+    },
+    isRendered(): boolean {
+      return isDrawn;
     },
   };
 

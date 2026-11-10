@@ -279,11 +279,56 @@ export function Library({
   const [importZoteroOpen, setImportZoteroOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
   const pdfInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
   const importFiles = async (files: FileList | null): Promise<void> => {
     if (!files || files.length === 0) return;
     const count = await importPdfFiles(wb, Array.from(files));
     if (count > 0) onImported?.();
+  };
+
+  // M14–M16 (FEAT-003) Local Folder Inbox. In a browser that supports
+  // showDirectoryPicker, iterate the chosen directory's `.pdf` files; otherwise
+  // fall back to the hidden <input webkitdirectory>. Either way the brand-new
+  // PDFs are imported under category "Inbox" (already-imported ones are skipped
+  // via the identity engine), so re-scanning the folder creates 0 duplicates.
+  const linkFolderInbox = async (): Promise<void> => {
+    const picker = (window as unknown as {
+      showDirectoryPicker?: () => Promise<{
+        name: string;
+        values: () => AsyncIterable<{
+          kind: string;
+          name: string;
+          getFile: () => Promise<File>;
+        }>;
+      }>;
+    }).showDirectoryPicker;
+    if (typeof picker === "function") {
+      try {
+        const dir = await picker.call(window);
+        const files: File[] = [];
+        for await (const entry of dir.values()) {
+          if (entry.kind === "file" && /\.pdf$/i.test(entry.name)) {
+            files.push(await entry.getFile());
+          }
+        }
+        if (files.length > 0) {
+          await wb.ingestFolderPdfEntries(files, dir.name || "Inbox");
+          onImported?.();
+        }
+      } catch {
+        // User cancelled the picker, or it is unavailable: no-op.
+      }
+      return;
+    }
+    // Fallback (test + unsupported browsers): the hidden directory input.
+    folderInputRef.current?.click();
+  };
+
+  const ingestFolderInputFiles = async (files: FileList | null): Promise<void> => {
+    if (!files || files.length === 0) return;
+    const ids = await wb.ingestFolderPdfEntries(Array.from(files));
+    if (ids.length > 0) onImported?.();
   };
   // One flat list: a document is a document, whatever it was imported as.
   const allSources = wb.rawData().sources;
@@ -411,6 +456,31 @@ export function Library({
             style={{ display: "none" }}
             onChange={(e) => {
               void importFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
+          {/* M14–M16 (FEAT-003) Local Folder Inbox: link a local directory and
+              auto-import its new PDFs (dedup via the identity engine). */}
+          <button
+            data-testid="link-local-folder-btn"
+            style={{ marginLeft: "0.75rem" }}
+            onClick={() => void linkFolderInbox()}
+          >
+            Link Folder Inbox
+          </button>
+          <input
+            ref={folderInputRef}
+            data-testid="folder-inbox-input"
+            type="file"
+            accept=".pdf,application/pdf"
+            multiple
+            /* webkitdirectory lets the user pick a whole folder in browsers
+               without showDirectoryPicker. React does not type this attribute,
+               so it is spread via a plain object. */
+            {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
+            style={{ display: "none" }}
+            onChange={(e) => {
+              void ingestFolderInputFiles(e.target.files);
               e.target.value = "";
             }}
           />

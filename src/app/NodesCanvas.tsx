@@ -12,7 +12,15 @@ import {
 import type { CategoryId, PageId, RelationshipId, RelationshipKind, SourceId } from "../model";
 import type { ConceptGraph, Workbench } from "./workbench";
 import { Button, IconButton } from "./ui/primitives";
-import { BasinWashes, OverlapBleeds, SheenOverlay, WatercolorDefs, WaterBackdrop } from "./WatercolorLayer";
+import {
+  BasinWashes,
+  mixHex,
+  OverlapBleeds,
+  SheenOverlay,
+  WatercolorCurlRibbons,
+  WatercolorDefs,
+  WaterBackdrop,
+} from "./WatercolorLayer";
 import "./network.css";
 
 /** The relationship kinds a user can pick when creating a hub (§3.1). */
@@ -652,6 +660,48 @@ export function NodesCanvas({
     [pan],
   );
 
+  // M14–M16 (FEAT-002): the 220ms camera-dive transition flag. Set true on a
+  // clean click that navigates into a Node/Hub/Overlap/Basin workspace (so the
+  // shell carries `data-camera-diving="true"`, respected only when motion is
+  // on), then cleared after the dive window so a later idle render is static.
+  const [diving, setDiving] = useState(false);
+  const diveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (diveTimer.current) clearTimeout(diveTimer.current);
+    },
+    [],
+  );
+
+  /**
+   * M14–M16 (FEAT-002): record the pre-dive camera + target id, then trigger
+   * the 220ms dive transition. The target scene point is zoomed toward so the
+   * dive visibly plunges into the clicked entity before the workspace opens.
+   */
+  const recordDive = useCallback(
+    (targetId: string, scenePt: { x: number; y: number } | null): void => {
+      const pt = scenePt ?? { x: pan.x, y: pan.y };
+      void wb.recordCameraDive({ x: pan.x, y: pan.y, zoom, targetId });
+      if (motion) {
+        setDiving(true);
+        // Nudge the camera toward the target so the dive reads as a plunge.
+        setPan({ x: pt.x - (baseViewBoxCenterRef.current?.x ?? 0), y: pt.y - (baseViewBoxCenterRef.current?.y ?? 0) });
+        setZoom((z) => Math.min(MAX_ZOOM, z * 1.6));
+        if (diveTimer.current) clearTimeout(diveTimer.current);
+        diveTimer.current = setTimeout(() => setDiving(false), 220);
+      }
+    },
+    [wb, pan, zoom, motion],
+  );
+
+  // The centre of the base (unzoomed) view box, so recordDive can position the
+  // pan so the target scene point ends up centred as the camera dives in.
+  const baseViewBoxCenterRef = useRef<{ x: number; y: number } | null>(null);
+  useEffect(() => {
+    const bv = parseViewBox(baseViewBox);
+    baseViewBoxCenterRef.current = { x: bv.x + bv.w / 2, y: bv.y + bv.h / 2 };
+  }, [baseViewBox]);
+
   const onHubClick = (relationshipId: string): void => {
     const current =
       graph.links.find((l) => l.relationshipId === relationshipId)?.label ?? "";
@@ -671,7 +721,8 @@ export function NodesCanvas({
   // its top-2 aggregated cited PDFs with EvidenceLines active. Switches to the
   // Files/Reader workspace so the panes + aspect surface are visible.
   const openHubWorkspace = useCallback(
-    (relationshipId: string): void => {
+    (relationshipId: string, scenePt?: { x: number; y: number } | null): void => {
+      recordDive(relationshipId, scenePt ?? null);
       void wb
         .openRelationshipWorkspace(relationshipId as RelationshipId)
         .then(() => {
@@ -679,7 +730,7 @@ export function NodesCanvas({
           bump();
         });
     },
-    [wb, bump],
+    [wb, bump, recordDive],
   );
 
   const onNodeClick = (pageId: string): void => {
@@ -709,6 +760,8 @@ export function NodesCanvas({
     // Switcher Pill lists the rest). Switch to the Files/Reader workspace so the
     // panes render; when the node cites no sources this degrades to opening the
     // page alone (openNodeWorkspace handles the empty top-2).
+    const pos = scene.positions[pageId as PageId] ?? null;
+    recordDive(pageId, pos);
     wb.openNodeWorkspace(pageId as PageId);
     wb.setViewMode("files");
     bump();
@@ -742,19 +795,22 @@ export function NodesCanvas({
       });
       switch (result.kind) {
         case "node":
+          recordDive(result.pageId, scene.positions[result.pageId as PageId] ?? scenePt);
           wb.openNodeWorkspace(result.pageId as PageId);
           wb.setViewMode("files");
           bump();
           break;
         case "hub":
-          openHubWorkspace(result.relationshipId);
+          openHubWorkspace(result.relationshipId, scenePt);
           break;
         case "overlap":
+          recordDive(result.subjectIds.join("|"), scenePt);
           void wb
             .getOrCreateSubjectIntersectionPage(result.subjectIds as CategoryId[])
             .then(bump);
           break;
         case "basin":
+          recordDive(String(result.subjectId), scenePt);
           void wb
             .getOrCreateSubjectBasinPage(result.subjectId as CategoryId)
             .then(bump);
@@ -772,6 +828,7 @@ export function NodesCanvas({
       wb,
       bump,
       openHubWorkspace,
+      recordDive,
     ],
   );
 
@@ -849,6 +906,7 @@ export function NodesCanvas({
       data-testid="nodes-canvas-shell"
       className="nodes-canvas-shell"
       data-suppress-motion={suppressMotion ? "true" : "false"}
+      data-camera-diving={diving && motion ? "true" : "false"}
       style={{ position: "relative", width: "100%", height: "100%" }}
     >
       {/* FEAT-003 (3.1) floating creation bar: build the whole concept network
@@ -1166,6 +1224,38 @@ export function NodesCanvas({
             y2={cl.to.y}
           />
         ))}
+      </g>
+
+      {/*
+        M14–M16 (FEAT-002): unstirred watercolour CURL ribbons at every
+        node-to-node intersection hub. The two pigments curl into each other as
+        interlocking marbling ribbons differentiated by the relationship kind
+        (relates/supports: harmonious helix; contradicts: counter-vortex hooks;
+        derives: directional plume). Drawn under the hub bump so the hub's own
+        geometry + action pills stay crisp on top.
+      */}
+      <g data-testid="hub-curl-layer">
+        {scene.hubs.map((hub) => {
+          if (hub.endpoints.length < 2) return null;
+          const link = graph.links.find((l) => l.relationshipId === hub.relationshipId);
+          const kind: RelationshipKind = link?.kind ?? "relates";
+          const a = hub.endpoints[0]!;
+          const b = hub.endpoints[1]!;
+          // Two distinct pigments either side of the hub's blend so the ribbons
+          // read as two colours curling, not one. Deterministic per hub.
+          const colorA = mixHex(hub.blendColor, "#ffffff", 0.22);
+          const colorB = mixHex(hub.blendColor, "#1b1b1b", 0.28);
+          return (
+            <WatercolorCurlRibbons
+              key={hub.relationshipId}
+              a={{ x: a.x, y: a.y }}
+              b={{ x: b.x, y: b.y }}
+              colorA={colorA}
+              colorB={colorB}
+              kind={kind}
+            />
+          );
+        })}
       </g>
 
       {/* Relationship hubs ("The Bump"). */}

@@ -262,6 +262,8 @@ export function renderHighlightOverlay(
     const r = opts.rects[0];
     const box = document.createElement("div");
     box.className = "ito-highlight-area";
+    // M14–M16 (FEAT-001): area highlights are also drag-linkable.
+    box.draggable = true;
     Object.assign(box.style, {
       position: "absolute",
       left: `${r.x * 100}%`,
@@ -308,6 +310,10 @@ export function renderHighlightOverlay(
     opts.rects.forEach((r, i) => {
       const box = document.createElement("div");
       box.className = "ito-highlight-fragment";
+      // M14–M16 (FEAT-001): fragments are draggable so one highlight can be
+      // dropped onto another to link them into an Observation Node (the drop
+      // handler lives on the SourcePane mount).
+      box.draggable = true;
       const isUnderline = opts.kind === "underline";
       Object.assign(box.style, {
         position: "absolute",

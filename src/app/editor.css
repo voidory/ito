@@ -109,6 +109,62 @@ p.copied-comment::before {
 }
 
 /*
+ * M14–M16 (FEAT-001/003) an informal BRIDGING NOTE: the user's own commentary
+ * paragraph inserted between two cited quotes to annotate their connection.
+ * Visually distinct from both ordinary writing and copied comments.
+ */
+p.bridging-note {
+  border-left: 3px dashed #b45309;
+  padding-left: 0.5rem;
+  color: #3a2f1e;
+  background: #fdf6ec;
+  font-style: italic;
+}
+
+p.bridging-note::before {
+  content: "bridging note · ";
+  font-size: 0.7rem;
+  font-style: normal;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #b45309;
+}
+
+/*
+ * M14–M16 (FEAT-003) a Synthesis / Observation Callout block inserted from the
+ * formatting toolbar: an emphasised band for the author's own synthesis.
+ */
+p.synthesis-callout {
+  border-left: 4px solid #0f766e;
+  padding: 0.4rem 0.6rem;
+  color: #134e4a;
+  background: #ecfdf5;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+p.synthesis-callout::before {
+  content: "synthesis · ";
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #0f766e;
+}
+
+/* M14–M16 (FEAT-002) the unstirred watercolour curl ribbons honour motion
+   suppression: when the canvas shell suppresses motion the marbling warp stays
+   static (the filter is still applied, only any future animation is paused). */
+[data-suppress-motion="true"] .ito-curl-ribbons {
+  animation: none;
+}
+
+/* M14–M16 (FEAT-002) 220ms camera-dive transition on the Nodes canvas shell. */
+.nodes-canvas-shell[data-camera-diving="true"] .nodes-canvas {
+  transition: transform 220ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/*
  * FIX-HIGHLIGHT-OFFSET (spec 3.1): the essential pdfjs-dist v4 .textLayer CSS
  * rules. Without these the text spans do NOT align 1:1 with the canvas glyphs
  * (they drift on multi-column + rotated pages and float near the top), which

@@ -227,7 +227,7 @@ export function HighlightEditPopover({
     view && view.annotation.scope.kind === "area"
       ? view.annotation.scope.anchor.imageDataUrl
       : undefined;
-  const [menuMode, setMenuMode] = useState<null | "associate" | "insert">(null);
+  const [menuMode, setMenuMode] = useState<null | "associate" | "insert" | "link">(null);
 
   const setColor = async (color: HighlightColor): Promise<void> => {
     const kind = view?.style.kind ?? "highlight";
@@ -326,10 +326,23 @@ export function HighlightEditPopover({
             </span>
             <span className="ito-ctx-item-label">Promote to Observation Node</span>
           </button>
+          {/* M14–M16 (FEAT-001): DIRECT highlight-to-highlight linking — pick a
+              second highlight and synthesise an Observation Node citing both
+              with a bridging note between them. */}
+          <button
+            data-testid="link-highlights-btn"
+            className="ito-ctx-item"
+            onClick={() => setMenuMode("link")}
+          >
+            <span className="ito-ctx-item-icon" aria-hidden="true">
+              {Icons.link}
+            </span>
+            <span className="ito-ctx-item-label">Link with another highlight…</span>
+          </button>
           <ShowInNodes wb={wb} annotationId={popover.annotationId} bump={bump} asMenuRow />
         </div>
       )}
-      {menuMode && (
+      {(menuMode === "associate" || menuMode === "insert") && (
         <AssociationMenu
           wb={wb}
           menu={{ annotationId: popover.annotationId, sourceId: popover.sourceId, x: 0, y: 0 }}
@@ -339,6 +352,17 @@ export function HighlightEditPopover({
             onClose();
           }}
           bump={bump}
+        />
+      )}
+      {menuMode === "link" && (
+        <LinkHighlightPicker
+          wb={wb}
+          fromAnnotationId={popover.annotationId}
+          onClose={() => setMenuMode(null)}
+          onLinked={() => {
+            bump();
+            onClose();
+          }}
         />
       )}
       <div className="ito-annot-popover-foot">
@@ -371,3 +395,64 @@ export function HighlightEditPopover({
 
 /** M9 name for the annotation edit popover. */
 export const AnnotationPopover = HighlightEditPopover;
+
+/**
+ * M14–M16 (FEAT-001) a compact picker that lists every OTHER highlight so the
+ * user can directly link two highlights into a single Observation Node (via
+ * {@link Workbench.linkHighlightsToObservation}). It is the click-driven
+ * equivalent of dragging one highlight fragment onto another.
+ */
+function LinkHighlightPicker({
+  wb,
+  fromAnnotationId,
+  onClose,
+  onLinked,
+}: {
+  wb: Workbench;
+  fromAnnotationId: AnnotationId;
+  onClose: () => void;
+  onLinked: () => void;
+}): JSX.Element {
+  const others = wb.rawData().annotations.filter((a) => a.id !== fromAnnotationId);
+  const labelFor = (id: AnnotationId): string => {
+    const scope = wb.rawData().annotations.find((a) => a.id === id)?.scope;
+    if (scope?.kind === "text") return scope.anchor.selectedText.slice(0, 48);
+    if (scope?.kind === "pages")
+      return `pp. ${scope.anchor.startPageIndex + 1}-${scope.anchor.endPageIndex + 1}`;
+    return "Area highlight";
+  };
+  return (
+    <div data-testid="link-highlight-picker" className="ito-annot-popover-actions">
+      <div style={{ fontSize: "0.78rem", color: "#666", padding: "0.2rem 0.4rem" }}>
+        Link this highlight with…
+      </div>
+      <ul style={{ listStyle: "none", margin: 0, padding: 0, maxHeight: "11rem", overflow: "auto" }}>
+        {others.map((a) => (
+          <li key={a.id}>
+            <button
+              data-testid="link-highlight-option"
+              data-annotation-id={a.id}
+              className="ito-ctx-item"
+              style={{ width: "100%", textAlign: "left" }}
+              onClick={() => {
+                void wb
+                  .linkHighlightsToObservation(fromAnnotationId, a.id)
+                  .then(() => onLinked());
+              }}
+            >
+              <span className="ito-ctx-item-label">{labelFor(a.id)}</span>
+            </button>
+          </li>
+        ))}
+        {others.length === 0 && (
+          <li data-testid="link-highlight-empty" style={{ color: "#888", padding: "0.3rem 0.4rem" }}>
+            No other highlights to link yet
+          </li>
+        )}
+      </ul>
+      <button data-testid="link-highlight-cancel" className="ito-ctx-item" onClick={onClose}>
+        <span className="ito-ctx-item-label">Cancel</span>
+      </button>
+    </div>
+  );
+}

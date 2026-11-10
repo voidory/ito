@@ -713,6 +713,20 @@ export interface PresentationState {
    * reads fine; SCHEMA_VERSION stays 1.
    */
   readonly annotationStyles?: Readonly<Record<string, AnnotationStyleRecord>>;
+  /**
+   * M14–M16 (FEAT-002) the last Nodes-canvas "camera dive" target recorded when
+   * a clean click opened a Node / Hub / Overlap / Basin workspace. It captures
+   * the pre-dive camera state + the dived-to coordinates so the "← Return to
+   * Map" control can smoothly pull the camera back out from where it dived in.
+   * Optional/additive and v1-safe (absent on every pre-M14 brain); it is
+   * presentation-only session context and never alters durable records.
+   */
+  readonly lastDiveTarget?: {
+    readonly x: number;
+    readonly y: number;
+    readonly zoom: number;
+    readonly targetId: string;
+  };
 }
 
 // ---------------------------------------------------------------------------

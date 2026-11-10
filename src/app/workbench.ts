@@ -92,6 +92,7 @@ import {
   compositionStats,
   findEvidencePos,
   hydrateState,
+  insertBridgingNoteAt,
   insertEvidenceAt,
   moveBlock,
   plainText,
@@ -973,6 +974,47 @@ export class Workbench {
     };
     await this.persist();
     return source;
+  }
+
+  /**
+   * M14–M16 (FEAT-003) Local Folder Inbox auto-import. Given the `.pdf` File
+   * entries of a chosen local folder (via `showDirectoryPicker`, a
+   * `<input webkitdirectory>`, or a direct File[]), import only the BRAND-NEW
+   * PDFs under category `defaultCategory` (default "Inbox") and SKIP any that
+   * are already in the library. Deduplication goes through M12's universal
+   * identity engine (`computeByteHash` + `matchExistingSource` inside
+   * `reconcileOrAttachSource`), so re-scanning the same folder imports ZERO
+   * duplicates — a repeat scan re-hydrates the existing slot in place and never
+   * appends. Non-`.pdf` entries are ignored. Returns the ids of the sources
+   * that are present after the scan, in folder order (new + re-hydrated alike),
+   * so a caller can reveal them.
+   */
+  async ingestFolderPdfEntries(
+    files: readonly File[],
+    defaultCategory = "Inbox",
+  ): Promise<SourceId[]> {
+    const out: SourceId[] = [];
+    for (const file of files) {
+      const isPdf =
+        file.type === "application/pdf" || /\.pdf$/i.test(file.name ?? "");
+      if (!isPdf) continue;
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const versionHash = await sha256Hex(bytes);
+      const title = (file.name ?? "Document").replace(/\.pdf$/i, "").trim() || "Document";
+      // reconcile:true routes every entry through the identity engine so an
+      // already-imported PDF in the folder re-hydrates its slot (0 duplicates)
+      // while a genuinely new PDF is appended under the Inbox category.
+      const source = await this.importSource({
+        title,
+        bytes,
+        versionHash,
+        pageCount: 1,
+        category: defaultCategory,
+        reconcile: true,
+      });
+      out.push(source.id);
+    }
+    return out;
   }
 
   /**
@@ -2288,6 +2330,23 @@ export class Workbench {
     if (prevWeight != null) this.setPaneWidth(toSourceId, prevWeight);
   }
 
+  /**
+   * M14–M16 (FEAT-001) move an already-open source to the FRONT of the open
+   * set so it becomes the single visible PDF pane in the compact <1360px
+   * 2-pane layout (Paper B's 1-click quick-swap tab). Both sources remain open
+   * — unlike {@link switchReaderPane} it never drops a source — so the swap is
+   * fully reversible by tapping the (now re-labelled) tab again. No-op when the
+   * source is not open or is already at the front. View state only.
+   */
+  promoteOpenSource(sourceId: SourceId): void {
+    const idx = this.openSourceIds.indexOf(sourceId);
+    if (idx <= 0) return;
+    const next = this.openSourceIds.slice();
+    const [moved] = next.splice(idx, 1);
+    next.unshift(moved!);
+    this.openSourceIds = next;
+  }
+
   // -- library category scope ----------------------------------------------
 
   /**
@@ -2747,6 +2806,76 @@ export class Workbench {
       includeComment: opts.includeComment ?? false,
     });
     return { page, evidence };
+  }
+
+  /**
+   * M14–M16 (FEAT-001) DIRECT highlight-to-highlight linking. Dragging one
+   * highlight fragment onto another (or the "Link with another highlight…"
+   * action) synthesises an OBSERVATION NODE — an ordinary subject `Page` — that
+   * cites BOTH highlights as provenance-bearing EvidenceInstances, with a
+   * bridging-note commentary paragraph inserted BETWEEN the two cited quotes so
+   * the user can annotate the connection. Because the new node cites two
+   * evidence instances it derives straight to the "observation" tier (filled
+   * dot), never a hollow memory. Both source annotations are left untouched.
+   *
+   * The page is opened + selected so the user lands in the editor ready to
+   * write the bridge. Modelled on {@link promoteAnnotationToNode}; one logical
+   * creation + two citations, each persisting through the adapter. Returns the
+   * new page id.
+   */
+  async linkHighlightsToObservation(
+    fromAnnotationId: AnnotationId,
+    toAnnotationId: AnnotationId,
+    opts: { title?: string } = {},
+  ): Promise<PageId> {
+    const from = this.data.annotations.find((a) => a.id === fromAnnotationId);
+    const to = this.data.annotations.find((a) => a.id === toAnnotationId);
+    if (!from) throw new Error("linkHighlightsToObservation: unknown from-annotation");
+    if (!to) throw new Error("linkHighlightsToObservation: unknown to-annotation");
+
+    const fromSnippet = quotedTextForScope(from).trim().slice(0, 32);
+    const toSnippet = quotedTextForScope(to).trim().slice(0, 32);
+    const title =
+      opts.title ??
+      (fromSnippet.length > 0 && toSnippet.length > 0
+        ? `${fromSnippet} ↔ ${toSnippet}`
+        : "Linked observation");
+
+    const now = new Date().toISOString();
+    const page: Page = {
+      id: newPageId(),
+      kind: "subject",
+      title,
+      documentJson: emptyDocJson(),
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.data = { ...this.data, pages: [...this.data.pages, page] };
+    await this.persist();
+    await this.logChange(
+      "other",
+      "page-created",
+      `Linked two highlights into observation “${title}”`,
+      [page.id, fromAnnotationId, toAnnotationId],
+    );
+
+    // Cite the first highlight (appended at the end of the empty doc).
+    await this.insertEvidenceIntoPage(fromAnnotationId, page.id, { pos: null });
+
+    // Insert a bridging-note commentary paragraph BETWEEN the quotes, then cite
+    // the second highlight AFTER it. Re-hydrate the live doc each step so the
+    // positions reflect the growing document.
+    const bridgeState = hydrateState(this.subjectDocJson(page.id));
+    const afterFirst = bridgeState.doc.content.size;
+    const bridged = insertBridgingNoteAt(bridgeState, afterFirst, "");
+    await this.saveSubjectDoc(page.id, serializeState(bridged));
+
+    // Cite the second highlight at the end (after the bridging note).
+    await this.insertEvidenceIntoPage(toAnnotationId, page.id, { pos: null });
+
+    // Open + select the new Observation Node so the user can write the bridge.
+    this.openSubjectPage(page.id);
+    return page.id;
   }
 
   /** The stored ProseMirror document JSON for a subject page (source of truth). */
@@ -4223,6 +4352,53 @@ export class Workbench {
   /** Current canvas zoom scale (defaults to 1). */
   zoom(): number {
     return this.data.presentation.zoom ?? 1;
+  }
+
+  /**
+   * M14–M16 (FEAT-002) record a Nodes-canvas "camera dive" target: the
+   * pre-dive camera (`x`/`y`/`zoom`) and the id of the entity the click dived
+   * into. Presentation-only — it writes NO durable Page/Relationship record and
+   * is persisted alongside the other presentation session context so the "←
+   * Return to Map" control can pull the camera back out from exactly where it
+   * dived in. Idempotent for the same target.
+   */
+  async recordCameraDive(target: {
+    x: number;
+    y: number;
+    zoom: number;
+    targetId: string;
+  }): Promise<void> {
+    this.data = {
+      ...this.data,
+      presentation: {
+        ...this.data.presentation,
+        lastDiveTarget: {
+          x: target.x,
+          y: target.y,
+          zoom: target.zoom,
+          targetId: target.targetId,
+        },
+      },
+    };
+    await this.persist();
+  }
+
+  /** M14–M16 (FEAT-002) the last recorded camera-dive target, or null. */
+  lastDiveTarget(): { x: number; y: number; zoom: number; targetId: string } | null {
+    const t = this.data.presentation.lastDiveTarget;
+    return t ? { x: t.x, y: t.y, zoom: t.zoom, targetId: t.targetId } : null;
+  }
+
+  /**
+   * M14–M16 (FEAT-002) "← Return to Map": switch back to the Nodes view so the
+   * camera can smoothly pull back out from the last dive target. View state
+   * only — never alters durable records. Returns the dive target it will pull
+   * back from (null when no dive was recorded).
+   */
+  returnToMap(): { x: number; y: number; zoom: number; targetId: string } | null {
+    const target = this.lastDiveTarget();
+    this.setViewMode("nodes");
+    return target;
   }
 
   /**

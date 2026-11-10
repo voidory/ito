@@ -70,6 +70,36 @@ export function insertEvidenceAt(
   return state.apply(tr);
 }
 
+/**
+ * M14–M16 (FEAT-001/003) insert an informal BRIDGING-NOTE commentary paragraph
+ * at the given document position (typically between two cited evidence quote
+ * atoms). The paragraph carries `bridgingNote: true` so it renders as a
+ * distinguishable commentary block and survives a full round-trip. `text` may
+ * be empty (an empty bridge the user then types into) or seeded with a prompt.
+ * Returns the next EditorState. DOM-free + deterministic.
+ */
+export function insertBridgingNoteAt(
+  state: EditorState,
+  pos: number,
+  text = "",
+): EditorState {
+  const trimmed = text.trim();
+  const para =
+    trimmed.length > 0
+      ? subjectSchema.nodes.paragraph!.create(
+          { bridgingNote: true },
+          subjectSchema.text(trimmed),
+        )
+      : subjectSchema.nodes.paragraph!.create({ bridgingNote: true });
+  const clamped = Math.max(0, Math.min(pos, state.doc.content.size));
+  // Insert at the nearest block boundary at/after the requested position so the
+  // bridging note lands as its own block (never inside an inline run).
+  const $pos = state.doc.resolve(clamped);
+  const insertAt = $pos.depth > 0 ? $pos.after($pos.depth) : clamped;
+  const tr = state.tr.insert(Math.min(insertAt, state.doc.content.size), para);
+  return state.apply(tr);
+}
+
 /** Insert evidence at the END of the document (used when no cursor is given). */
 export function appendEvidence(
   state: EditorState,
