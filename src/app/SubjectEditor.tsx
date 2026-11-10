@@ -167,6 +167,12 @@ export function SubjectEditor({
                 ? ann.scope.anchor.imageDataUrl ?? null
                 : null;
             },
+            // M17: when the cited figure has been read as a mechanism, the chip
+            // shows the redrawn vector mechanism instead of the bitmap crop.
+            (annotationId) => {
+              const ann = wb.rawData().annotations.find((a) => a.id === annotationId);
+              return ann && ann.scope.kind === "area" ? ann.scope.anchor.mechanism ?? null : null;
+            },
           ),
         // M17 (§3.2): a paragraph carrying latexFormula / chemMechanismJson
         // renders as a live, non-editable science block (formatted math /
@@ -647,6 +653,7 @@ class EvidenceNodeView {
     attrs: EvidenceAttrs,
     private readonly onFollow: (evidenceId: string) => void,
     resolveFigure?: (annotationId: string) => string | null,
+    resolveMechanism?: (annotationId: string) => ChemicalMechanismSpec | null,
   ) {
     const chip = document.createElement("span");
     chip.className = "evidence-chip";
@@ -660,7 +667,29 @@ class EvidenceNodeView {
     // FEAT-002 (2.4c): when the cited annotation is an area/figure annotation
     // with a captured crop, show its thumbnail inside the chip.
     const figureUrl = resolveFigure?.(attrs.annotationId) ?? null;
-    if (figureUrl) {
+    const mechanism = resolveMechanism?.(attrs.annotationId) ?? null;
+    if (mechanism) {
+      const host = document.createElement("span");
+      host.className = "ito-chem-preview";
+      host.setAttribute("data-testid", "evidence-mechanism");
+      host.style.display = "block";
+      host.innerHTML = renderMechanismSvg(mechanism);
+      const svg = host.querySelector("svg");
+      if (svg) {
+        svg.setAttribute("style", "max-width:100%;height:auto");
+      }
+      chip.appendChild(host);
+      const copy = document.createElement("button");
+      copy.type = "button";
+      copy.setAttribute("data-testid", "copy-chem-word-btn");
+      copy.textContent = "Copy mechanism for Word";
+      copy.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        void copyScienceToWordClipboard({ kind: "chem", spec: mechanism });
+      });
+      chip.appendChild(copy);
+    } else if (figureUrl) {
       const img = document.createElement("img");
       img.setAttribute("data-testid", "area-figure-preview");
       img.src = figureUrl;
