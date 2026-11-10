@@ -44,7 +44,10 @@ import {
 import {
   convertLatexToMathML,
   copyScienceToWordClipboard,
+  extractMechanismFromRegion,
+  figureCharsFromSpans,
   renderMechanismSvg,
+  snapArrowEndpointsToMolGraph,
 } from "../pdf/scienceOcr";
 import { hydrateState } from "../editor";
 import type { DocumentJson } from "../editor";
@@ -390,5 +393,193 @@ describe("M17 Test 6 — SubjectEditor live equation + mechanism blocks", () => 
     });
     expect(mathBlocks).toBeGreaterThanOrEqual(1);
     expect(chemBlocks).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 7 — Nearest-atom/bond curly-arrow snapper + spatially-preserved render
+// ---------------------------------------------------------------------------
+
+describe("M17 Test 7 — nearest-atom/bond curly-arrow snapper", () => {
+  const atoms2D = [
+    { id: "C1", element: "C", x: 0.2, y: 0.6 },
+    { id: "C2", element: "C", x: 0.4, y: 0.4 },
+    { id: "O3", element: "O", x: 0.2, y: 0.2 },
+    { id: "Br4", element: "Br", x: 0.7, y: 0.4 },
+  ] as const;
+  const bonds2D = [
+    { id: "C1=C2", fromAtomId: "C1", toAtomId: "C2", order: 2 },
+    { id: "C2-Br4", fromAtomId: "C2", toAtomId: "Br4", order: 1 },
+  ] as const;
+
+  it("snaps tail to the nearest bond midpoint and head to the nearest atom", () => {
+    const raw = { id: "a1", tailX: 0.31, tailY: 0.47, headX: 0.68, headY: 0.36, ctrlX: 0.5, ctrlY: 0.15 };
+    const arrow = snapArrowEndpointsToMolGraph(raw, atoms2D, bonds2D);
+    expect(arrow.fromAtomOrBond).toBe("C1=C2");
+    expect(arrow.toAtomOrBond).toBe("Br4");
+    expect(arrow.barb).toBe("full");
+    expect(Math.abs(arrow.curvature ?? 0)).toBeGreaterThan(0.1);
+
+    // Head and tail never collapse onto the same anchor.
+    const same = snapArrowEndpointsToMolGraph(
+      { tailX: 0.7, tailY: 0.4, headX: 0.71, headY: 0.41 },
+      atoms2D,
+      bonds2D,
+    );
+    expect(same.fromAtomOrBond).toBe("Br4");
+    expect(same.toAtomOrBond).not.toBe("Br4");
+
+    const spec = extractMechanismFromRegion({ atoms2D, bonds2D, rawArrows: [raw] });
+    const svg = renderMechanismSvg(spec);
+    expect(svg).toMatch(/<path class="ito-curly-arrow"[^>]*data-from="C1=C2"[^>]*data-to="Br4"/);
+    // Spatial preservation: Br is drawn where the spec says (0.7 × 420 = 294).
+    expect(svg).toMatch(/data-atom-id="Br4" x="294"/);
+    expect(spec.smiles).toContain("Br");
+  });
+
+  it("lays a bare SMILES out once and stores the layout on the spec", () => {
+    const spec = extractMechanismFromRegion({ smiles: "C=C.BrBr>>BrCCBr" });
+    expect(spec.atoms2D?.length).toBe(8);
+    expect(spec.bonds2D?.some((b) => b.order === 2)).toBe(true);
+    expect(spec.reactionArrow).toBeDefined();
+    expect(renderMechanismSvg(spec)).toContain('data-spatial="true"');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 8 — figure pixels → bonds, labels and curly arrows
+// ---------------------------------------------------------------------------
+
+/** A tiny software rasteriser so the vectoriser is tested on real pixels. */
+function makeFigure(width: number, height: number) {
+  const data = new Uint8ClampedArray(width * height * 4).fill(255);
+  const put = (x: number, y: number, rgb: readonly [number, number, number]): void => {
+    const xi = Math.round(x);
+    const yi = Math.round(y);
+    if (xi < 0 || yi < 0 || xi >= width || yi >= height) return;
+    const i = (yi * width + xi) * 4;
+    data[i] = rgb[0];
+    data[i + 1] = rgb[1];
+    data[i + 2] = rgb[2];
+  };
+  const disc = (cx: number, cy: number, r: number, rgb: readonly [number, number, number]): void => {
+    for (let y = Math.floor(cy - r); y <= Math.ceil(cy + r); y++) {
+      for (let x = Math.floor(cx - r); x <= Math.ceil(cx + r); x++) {
+        if (Math.hypot(x - cx, y - cy) <= r) put(x, y, rgb);
+      }
+    }
+  };
+  const BLACK = [0, 0, 0] as const;
+  const api = {
+    width,
+    height,
+    data,
+    line(x1: number, y1: number, x2: number, y2: number, rgb: readonly [number, number, number] = BLACK): void {
+      const n = Math.ceil(Math.hypot(x2 - x1, y2 - y1) * 2);
+      for (let i = 0; i <= n; i++) disc(x1 + ((x2 - x1) * i) / n, y1 + ((y2 - y1) * i) / n, 1, rgb);
+    },
+    ring(cx: number, cy: number, r: number): void {
+      for (let a = 0; a < 360; a += 1) disc(cx + r * Math.cos((a * Math.PI) / 180), cy + r * Math.sin((a * Math.PI) / 180), 1, BLACK);
+    },
+    /** A quadratic curly arrow with a filled (full) or half (fishhook) head. */
+    arrow(
+      x1: number, y1: number, cx: number, cy: number, x2: number, y2: number,
+      rgb: readonly [number, number, number] = BLACK, fishhook = false,
+    ): void {
+      for (let i = 0; i <= 400; i++) {
+        const t = i / 400;
+        const u = 1 - t;
+        disc(u * u * x1 + 2 * u * t * cx + t * t * x2, u * u * y1 + 2 * u * t * cy + t * t * y2, 0.9, rgb);
+      }
+      const ang = Math.atan2(y2 - cy, x2 - cx);
+      const hl = 14;
+      const hw = 6;
+      for (let d = 0; d <= hl; d += 0.4) {
+        const half = (hw * d) / hl;
+        for (let w = fishhook ? 0 : -half; w <= half; w += 0.4) {
+          put(x2 - Math.cos(ang) * d - Math.sin(ang) * w, y2 - Math.sin(ang) * d + Math.cos(ang) * w, rgb);
+        }
+      }
+    },
+  };
+  return api;
+}
+
+describe("M17 Test 8 — mechanism vectorised from figure pixels", () => {
+  // CH2=CH–CH2–O… drawn as a zig-zag: C1(80,130)=C2(132,100)–C3(184,130)–"O"(236,100),
+  // with a curly arrow from the C=C bond over to the O label.
+  const draw = (arrowRgb: readonly [number, number, number], fishhook = false) => {
+    const f = makeFigure(400, 200);
+    f.line(80, 130, 132, 100);
+    f.line(88, 118, 126, 96); // second line of the double bond
+    f.line(132, 100, 184, 130);
+    f.line(184, 130, 222, 108);
+    f.ring(236, 100, 9); // the "O" glyph
+    f.arrow(102, 92, 160, 20, 226, 80, arrowRgb, fishhook);
+    return f;
+  };
+
+  it("recovers the bond graph in place, merges the double bond, and snaps the arrow", () => {
+    const f = draw([0, 0, 0]);
+    const spec = extractMechanismFromRegion({ image: f });
+
+    expect(spec.atoms2D?.length).toBe(4);
+    expect(spec.bonds2D?.length).toBe(3);
+    expect(spec.bonds2D?.filter((b) => b.order === 2).length).toBe(1);
+    expect(spec.aspect).toBe(2);
+
+    // Spatial preservation: every carbon sits within 4px of where it was drawn.
+    const drawn = [[80, 130], [132, 100], [184, 130]] as const;
+    for (const [x, y] of drawn) {
+      const hit = spec.atoms2D!.some((a) => Math.hypot(a.x * 400 - x, a.y * 200 - y) < 4);
+      expect(hit).toBe(true);
+    }
+
+    // One curly arrow: from the double bond to the (unread) label atom.
+    expect(spec.arrows.length).toBe(1);
+    const arrow = spec.arrows[0]!;
+    const dbl = spec.bonds2D!.find((b) => b.order === 2)!;
+    const label = spec.atoms2D!.find((a) => a.labelBox)!;
+    expect(arrow.fromAtomOrBond).toBe(dbl.id);
+    expect(arrow.toAtomOrBond).toBe(label.id);
+    expect(arrow.barb).toBe("full");
+    // The arc is kept as drawn: tail and head within a few px of the source.
+    const g = arrow.geometry!;
+    expect(Math.hypot(g[0] * 400 - 102, g[1] * 200 - 92)).toBeLessThan(5);
+    expect(Math.hypot(g[6] * 400 - 226, g[7] * 200 - 80)).toBeLessThan(5);
+
+    // The unread label is carried as traced ink (nothing in the figure is lost).
+    expect(label.element).toBe("?");
+    expect(spec.ink?.length).toBe(1);
+
+    const svg = renderMechanismSvg(spec);
+    expect(svg).toContain('viewBox="0 0 420 210"');
+    expect(svg).toContain(`data-from="${dbl.id}"`);
+    expect(svg).toContain('class="ito-traced-ink"');
+    expect(renderMechanismSvg(spec)).toBe(svg);
+  });
+
+  it("names labels from the PDF's own text and writes the SMILES", () => {
+    const f = draw([200, 30, 30]); // a red arrow, as many textbooks print them
+    const cachedSpans = [
+      { str: "O", normRect: [0.1 + 0.8 * (227 / 400), 0.2 + 0.4 * (91 / 200), 0.8 * (18 / 400), 0.4 * (18 / 200)] as const },
+      { str: "A long caption line that spans the figure width", normRect: [0.1, 0.55, 0.8, 0.03] as const },
+    ];
+    const ocrChars = figureCharsFromSpans(cachedSpans, { x: 0.1, y: 0.2, width: 0.8, height: 0.4 });
+    expect(ocrChars.length).toBe(1);
+
+    const spec = extractMechanismFromRegion({ image: f, ocrChars });
+    const o = spec.atoms2D!.find((a) => a.element === "O");
+    expect(o).toBeDefined();
+    expect(spec.ink ?? []).toHaveLength(0);
+    expect(spec.smiles).toBe("C(=C)CO");
+    expect(spec.arrows[0]?.toAtomOrBond).toBe(o!.id);
+    expect(renderMechanismSvg(spec)).toMatch(/<text class="ito-atom-label" data-atom-id="O\d"/);
+  });
+
+  it("tells a fishhook (1e⁻) head from a full (2e⁻) head", () => {
+    const spec = extractMechanismFromRegion({ image: draw([0, 0, 0], true) });
+    expect(spec.arrows.length).toBe(1);
+    expect(spec.arrows[0]!.barb).toBe("fishhook");
   });
 });

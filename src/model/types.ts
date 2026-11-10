@@ -294,34 +294,85 @@ export interface AreaAnchor {
 }
 
 /**
+ * M17 (§2.1) one atom (or atom-label such as "OH", "Br⁻") of a mechanism with
+ * its textbook 2D position preserved. Coordinates are normalized 0..1 within
+ * the mechanism box (x across the width, y down the height).
+ */
+export interface SpatialAtom2D {
+  readonly id: string;
+  /** Element symbol or label text; "?" when the label glyphs were not read. */
+  readonly element: string;
+  readonly x: number;
+  readonly y: number;
+  /**
+   * Normalized [x, y, w, h] box of the printed label (heteroatoms / groups).
+   * Bond lines are clipped against it and known label text is fitted into it.
+   */
+  readonly labelBox?: readonly [number, number, number, number];
+}
+
+/** M17 (§2.1) a bond between two {@link SpatialAtom2D}s. */
+export interface SpatialBond2D {
+  readonly id: string;
+  readonly fromAtomId: string;
+  readonly toAtomId: string;
+  readonly order: 1 | 2 | 3;
+}
+
+/**
  * M17 (§2.1) a single curly electron-pushing arrow in a reaction mechanism. A
  * `"full"` double-barbed arrow pushes an electron PAIR (2e⁻); a `"fishhook"`
- * single-barbed arrow pushes a single electron (1e⁻ radical). The source/sink
- * reference an atom label/index or a bond (`"[atomIdxA, atomIdxB]"`).
+ * single-barbed arrow pushes a single electron (1e⁻ radical). The tail/head are
+ * snapped to the nearest atom id or bond id of the molecule graph.
  */
 export interface ElectronFlowArrow {
   readonly id: string;
-  /** Source of electrons: atom label/index or bond [atomIdxA, atomIdxB]. */
+  /** Source of electrons: snapped atom id (e.g. "O3") or bond id ("C1=C2"). */
   readonly fromAtomOrBond: string;
-  /** Sink of electrons: target atom label/index or bond. */
+  /** Sink of electrons: snapped atom id or bond id. */
   readonly toAtomOrBond: string;
   /** "full" = 2e- double-barbed curly arrow; "fishhook" = 1e- radical arrow. */
   readonly barb: "full" | "fishhook";
+  /** Signed bulge of the arc perpendicular to tail→head, as a fraction of the chord. */
   readonly curvature?: number;
+  /**
+   * The arrow exactly as drawn in the source figure: a cubic Bézier
+   * [tailX, tailY, c1X, c1Y, c2X, c2Y, headX, headY] in normalized 0..1 box
+   * coordinates. When present the renderer redraws this curve verbatim (the
+   * snapped ids above carry the chemistry; this carries the picture).
+   */
+  readonly geometry?: readonly [number, number, number, number, number, number, number, number];
 }
 
 /**
  * M17 (§2.1) a chemical reaction mechanism: a (reaction) SMILES scheme plus the
  * curly electron-pushing arrows overlaid on it, with optional reagent/condition
- * captions above and below the reaction arrow.
+ * captions above and below the reaction arrow. When `atoms2D`/`bonds2D` are
+ * present they are the layout of record (extracted from a figure or laid out
+ * once) and the renderer never re-derives positions from `smiles`.
  */
 export interface ChemicalMechanismSpec {
   /** Standard SMILES or Reaction SMILES (e.g. "C=C.BrBr>>BrCCBr"). */
   readonly smiles: string;
+  readonly atoms2D?: readonly SpatialAtom2D[];
+  readonly bonds2D?: readonly SpatialBond2D[];
   /** Curly electron-pushing arrows overlaid on the reaction scheme. */
   readonly arrows: readonly ElectronFlowArrow[];
   readonly conditionsAbove?: string;
   readonly conditionsBelow?: string;
+  /** Width / height of the mechanism box (so normalized coords keep their shape). */
+  readonly aspect?: number;
+  /** Straight reaction arrow [x1, y1, x2, y2], normalized, when laid out from SMILES. */
+  readonly reactionArrow?: readonly [number, number, number, number];
+  /**
+   * Ink from the source figure that was NOT interpreted as a bond, a read
+   * label or a curly arrow (unread labels, lone-pair dots, charges, wedges,
+   * straight reaction arrows, brackets…), traced to SVG path data in source
+   * pixel units so nothing in the picture is ever dropped.
+   */
+  readonly ink?: readonly string[];
+  /** Pixel [width, height] of the figure the `ink` paths are expressed in. */
+  readonly inkSize?: readonly [number, number];
 }
 
 /**

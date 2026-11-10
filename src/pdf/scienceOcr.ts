@@ -18,7 +18,20 @@
  *    it to the clipboard (with graceful fallbacks for unit tests).
  */
 
-import type { ChemicalMechanismSpec, ElectronFlowArrow, NormalizedRect } from "../model";
+import type {
+  ChemicalMechanismSpec,
+  ElectronFlowArrow,
+  NormalizedRect,
+  SpatialAtom2D,
+  SpatialBond2D,
+} from "../model";
+import {
+  smilesFromGraph,
+  vectorizeMechanismImage,
+  type FigureChar,
+  type RasterImage,
+  type RawCurlyArrow,
+} from "./mechanismVision";
 import { parseSmilesGraph } from "../science/recognition/chemGraph";
 
 // ---------------------------------------------------------------------------
@@ -453,6 +466,7 @@ interface LaidMolecule {
  * deterministic: identical input always yields byte-identical markup.
  */
 export function renderMechanismSvg(spec: ChemicalMechanismSpec): string {
+  if (spec.atoms2D && spec.atoms2D.length > 0) return renderSpatialMechanismSvg(spec);
   const bondLen = 34;
   const padding = 28;
   const groupGap = 70;
@@ -691,21 +705,24 @@ function bondLines(
   y2: number,
   order: number,
   aromatic = false,
+  strokeWidth = 1.6,
+  offset = 2.6,
+  bondId?: string,
 ): string[] {
   // FEAT-002: aromatic bonds carry a data-aromatic marker so aromaticity is
-  // visible in the markup. Aliphatic bonds emit the exact same string as before
-  // (no extra attribute), keeping the pinned M17 Test 4 output byte-identical.
+  // visible in the markup. Aliphatic bonds emit no extra attribute.
   const aromaticAttr = aromatic ? ' data-aromatic="true"' : "";
+  const idAttr = bondId ? ` data-bond-id="${escapeXml(bondId)}"` : "";
   const line = (a: number, b: number, c: number, d: number): string =>
-    `<line class="ito-bond"${aromaticAttr} x1="${fmt(a)}" y1="${fmt(b)}" x2="${fmt(c)}" y2="${fmt(d)}" ` +
-    `stroke="#1a3a5a" stroke-width="1.6" stroke-linecap="round"/>`;
+    `<line class="ito-bond"${aromaticAttr}${idAttr} x1="${fmt(a)}" y1="${fmt(b)}" x2="${fmt(c)}" y2="${fmt(d)}" ` +
+    `stroke="#1a3a5a" stroke-width="${fmt(strokeWidth)}" stroke-linecap="round"/>`;
   if (order <= 1) return [line(x1, y1, x2, y2)];
   // Offset perpendicular to the bond for double/triple parallel lines.
   const dx = x2 - x1;
   const dy = y2 - y1;
   const len = Math.hypot(dx, dy) || 1;
-  const ox = (-dy / len) * 2.6;
-  const oy = (dx / len) * 2.6;
+  const ox = (-dy / len) * offset;
+  const oy = (dx / len) * offset;
   if (order === 2) {
     return [line(x1 + ox, y1 + oy, x2 + ox, y2 + oy), line(x1 - ox, y1 - oy, x2 - ox, y2 - oy)];
   }
@@ -747,6 +764,7 @@ function curlyArrowPath(
   const stroke = arrow.barb === "fishhook" ? "#2e6fb2" : "#b2402e";
   return (
     `<path class="ito-curly-arrow" data-arrow-id="${escapeXml(arrow.id)}" ` +
+    `data-from="${escapeXml(arrow.fromAtomOrBond)}" data-to="${escapeXml(arrow.toAtomOrBond)}" ` +
     `data-barb="${arrow.barb}" d="${d}" fill="none" stroke="${stroke}" ` +
     `stroke-width="1.5" marker-end="${marker}"/>`
   );
@@ -787,6 +805,556 @@ function resolveArrowAnchor(
   const frac = placed.length > 0 ? (index + (isSource ? 0.3 : 0.7)) / (placed.length + 1) : 0.4;
   const x = totalWidth * (0.25 + 0.4 * ((index % 3) / 3)) + (isSource ? -14 : 14);
   return { x: Math.max(20, Math.min(totalWidth - 20, x)), y: centerY + (isSource ? -4 : 4) + frac * 2 };
+}
+
+// ---------------------------------------------------------------------------
+// §2.2 spatially-preserved mechanisms: snap, extract, render
+// ---------------------------------------------------------------------------
+
+/** Resolve an atom id or bond id to its anchor point (atom centre / bond midpoint). */
+function anchorPoint(
+  token: string,
+  atoms: readonly SpatialAtom2D[],
+  bonds: readonly SpatialBond2D[],
+): { x: number; y: number } | null {
+  const atom = atoms.find((a) => a.id === token);
+  if (atom) return { x: atom.x, y: atom.y };
+  const bond = bonds.find((b) => b.id === token);
+  if (bond) {
+    const a = atoms.find((x) => x.id === bond.fromAtomId);
+    const b = atoms.find((x) => x.id === bond.toAtomId);
+    if (a && b) return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  }
+  return null;
+}
+
+/**
+ * M17 (§2.2(1)) nearest-atom-or-bond snap. Candidates are every atom centre
+ * and every bond midpoint; the tail takes the nearest candidate and the head
+ * the nearest DISTINCT one. The signed curvature is the bulge of the arc
+ * (through `ctrl`) perpendicular to tail→head, as a fraction of the chord.
+ * `aspect` (box width / height) makes distances isotropic for non-square boxes.
+ */
+export function snapArrowEndpointsToMolGraph(
+  rawArrow: RawCurlyArrow,
+  atoms2D: readonly SpatialAtom2D[],
+  bonds2D: readonly SpatialBond2D[],
+  aspect = 1,
+): ElectronFlowArrow {
+  const cands: { id: string; x: number; y: number }[] = atoms2D.map((a) => ({ id: a.id, x: a.x, y: a.y }));
+  for (const b of bonds2D) {
+    const p = anchorPoint(b.id, atoms2D, bonds2D);
+    if (p) cands.push({ id: b.id, x: p.x, y: p.y });
+  }
+  const nearest = (x: number, y: number, exclude?: string): string => {
+    let best = "";
+    let bestD = Infinity;
+    for (const c of cands) {
+      if (c.id === exclude) continue;
+      const d = Math.hypot((c.x - x) * aspect, c.y - y);
+      if (d < bestD) {
+        bestD = d;
+        best = c.id;
+      }
+    }
+    return best;
+  };
+  const from = nearest(rawArrow.tailX, rawArrow.tailY);
+  const to = nearest(rawArrow.headX, rawArrow.headY, from);
+
+  const dx = (rawArrow.headX - rawArrow.tailX) * aspect;
+  const dy = rawArrow.headY - rawArrow.tailY;
+  const chord = Math.hypot(dx, dy);
+  let curvature: number | undefined;
+  if (rawArrow.ctrlX != null && rawArrow.ctrlY != null && chord > 1e-9) {
+    const mx = (rawArrow.ctrlX - (rawArrow.tailX + rawArrow.headX) / 2) * aspect;
+    const my = rawArrow.ctrlY - (rawArrow.tailY + rawArrow.headY) / 2;
+    curvature = (mx * dy - my * dx) / (chord * chord);
+  }
+  const hasCubic =
+    rawArrow.c1X != null && rawArrow.c1Y != null && rawArrow.c2X != null && rawArrow.c2Y != null;
+  return {
+    id: rawArrow.id ?? `a-${from}-${to}`,
+    fromAtomOrBond: from,
+    toAtomOrBond: to,
+    barb: rawArrow.barb ?? "full",
+    ...(curvature !== undefined ? { curvature } : {}),
+    ...(hasCubic
+      ? {
+          geometry: [
+            rawArrow.tailX, rawArrow.tailY, rawArrow.c1X!, rawArrow.c1Y!,
+            rawArrow.c2X!, rawArrow.c2Y!, rawArrow.headX, rawArrow.headY,
+          ] as const,
+        }
+      : {}),
+  };
+}
+
+/** Input of {@link extractMechanismFromRegion}. */
+export interface MechanismRegionInput {
+  /** Pixels of the cropped figure: when given, the structure, labels and arrows are read from it. */
+  readonly image?: RasterImage;
+  readonly smiles?: string;
+  readonly atoms2D?: readonly SpatialAtom2D[];
+  readonly bonds2D?: readonly SpatialBond2D[];
+  readonly rawArrows?: readonly RawCurlyArrow[];
+  /** Text known to sit in the figure (PDF text layer / OCR), normalized to the box. */
+  readonly ocrChars?: readonly FigureChar[];
+  readonly conditionsAbove?: string;
+  readonly conditionsBelow?: string;
+}
+
+/**
+ * M17 (§2.2(2)) build a complete, spatially-preserved {@link ChemicalMechanismSpec}.
+ *
+ *  - With `image`: vectorise the figure (see `mechanismVision.ts`) — bonds and
+ *    atoms keep their printed positions, curly arrows are detected and snapped,
+ *    and all remaining ink is carried along.
+ *  - With explicit `atoms2D`/`bonds2D`: use them as-is.
+ *  - With only `smiles`: lay the scheme out once, deterministically.
+ *
+ * Every arrow (detected or passed in `rawArrows`) goes through
+ * {@link snapArrowEndpointsToMolGraph}.
+ */
+export function extractMechanismFromRegion(input: MechanismRegionInput): ChemicalMechanismSpec {
+  let atoms: readonly SpatialAtom2D[] = input.atoms2D ?? [];
+  let bonds: readonly SpatialBond2D[] = input.bonds2D ?? [];
+  let raw: readonly RawCurlyArrow[] = input.rawArrows ?? [];
+  let smiles = input.smiles ?? "";
+  let aspect: number | undefined;
+  let reactionArrow: readonly [number, number, number, number] | undefined;
+  let ink: readonly string[] | undefined;
+  let inkSize: readonly [number, number] | undefined;
+
+  if (input.image && !input.atoms2D) {
+    const v = vectorizeMechanismImage(input.image, input.ocrChars ? { ocrChars: input.ocrChars } : {});
+    atoms = v.atoms2D;
+    bonds = v.bonds2D;
+    raw = [...v.rawArrows, ...raw];
+    aspect = v.aspect;
+    ink = v.ink;
+    inkSize = v.inkSize;
+    if (smiles.length === 0) smiles = v.smiles;
+  } else if (atoms.length === 0 && smiles.length > 0) {
+    const laid = layoutSmilesGraph(smiles, input.ocrChars);
+    atoms = laid.atoms2D;
+    bonds = laid.bonds2D;
+    aspect = laid.aspect;
+    reactionArrow = laid.reactionArrow;
+  } else if (smiles.length === 0 && atoms.length > 0) {
+    smiles = smilesFromGraph(atoms, bonds);
+  }
+
+  const arrows = raw.map((r, i) =>
+    snapArrowEndpointsToMolGraph(r.id != null ? r : { ...r, id: `a${i + 1}` }, atoms, bonds, aspect ?? 1),
+  );
+  return {
+    smiles,
+    atoms2D: atoms,
+    bonds2D: bonds,
+    arrows,
+    ...(input.conditionsAbove != null ? { conditionsAbove: input.conditionsAbove } : {}),
+    ...(input.conditionsBelow != null ? { conditionsBelow: input.conditionsBelow } : {}),
+    ...(aspect !== undefined ? { aspect } : {}),
+    ...(reactionArrow ? { reactionArrow } : {}),
+    ...(ink && ink.length > 0 && inkSize ? { ink, inkSize } : {}),
+  };
+}
+
+const LAYOUT_W = 420;
+const LAYOUT_H = 180;
+
+/**
+ * Lay a (reaction) SMILES out ONCE into normalized 2D atoms/bonds so the layout
+ * becomes data on the spec instead of being re-derived at every render. Any
+ * `ocrChars` heteroatom positions override the generated position of the
+ * matching element (first unused atom of that element, in order).
+ */
+function layoutSmilesGraph(
+  smiles: string,
+  ocrChars?: readonly FigureChar[],
+): {
+  atoms2D: SpatialAtom2D[];
+  bonds2D: SpatialBond2D[];
+  aspect: number;
+  reactionArrow?: readonly [number, number, number, number];
+} {
+  const { reactants, products } = splitReactionSmiles(smiles);
+  const bondLen = 34;
+  const mols = [...reactants, ...products].map((s) => layoutMolecule(s, bondLen));
+  const gap = 46;
+  const arrowLen = products.length > 0 ? 70 : 0;
+  const natural =
+    mols.reduce((a, m) => a + m.width, 0) + gap * Math.max(0, mols.length - 1) + arrowLen + 56;
+  const scale = Math.min(1, LAYOUT_W / natural);
+  let cursor = 28;
+  const atoms2D: SpatialAtom2D[] = [];
+  const bonds2D: SpatialBond2D[] = [];
+  let reactionArrow: readonly [number, number, number, number] | undefined;
+  mols.forEach((mol, mi) => {
+    if (products.length > 0 && mi === reactants.length) {
+      const x1 = cursor - gap + 12;
+      reactionArrow = [(x1 * scale) / LAYOUT_W, 0.5, ((x1 + arrowLen + gap - 24) * scale) / LAYOUT_W, 0.5];
+      cursor += arrowLen;
+    }
+    const ids: string[] = [];
+    mol.atoms.forEach((a) => {
+      const id = `${a.element}${atoms2D.length + 1}`;
+      ids.push(id);
+      atoms2D.push({
+        id,
+        element: a.element,
+        x: ((cursor + a.x) * scale) / LAYOUT_W,
+        y: (LAYOUT_H / 2 - mol.height / 2 + a.y) / LAYOUT_H,
+      });
+    });
+    for (const b of mol.bonds) {
+      const order = (b.order >= 3 ? 3 : b.order === 2 ? 2 : 1) as 1 | 2 | 3;
+      const sym = order === 2 ? "=" : order === 3 ? "#" : "-";
+      bonds2D.push({ id: `${ids[b.a]}${sym}${ids[b.b]}`, fromAtomId: ids[b.a]!, toAtomId: ids[b.b]!, order });
+    }
+    cursor += mol.width + gap;
+  });
+  if (ocrChars && ocrChars.length > 0) {
+    const used = new Set<number>();
+    for (const ch of ocrChars) {
+      const idx = atoms2D.findIndex((a, i) => !used.has(i) && a.element === ch.text);
+      if (idx < 0) continue;
+      used.add(idx);
+      atoms2D[idx] = { ...atoms2D[idx]!, x: ch.x, y: ch.y };
+    }
+  }
+  return { atoms2D, bonds2D, aspect: LAYOUT_W / LAYOUT_H, ...(reactionArrow ? { reactionArrow } : {}) };
+}
+
+/** Render label text with chemistry-style subscripts (digits) and superscript charges. */
+function labelTspans(text: string, fontSize: number): string {
+  const small = fmt(fontSize * 0.68);
+  let out = "";
+  let shift = 0;
+  const parts = text.match(/[0-9]+|[+\-−–⁺⁻]+|[^0-9+\-−–⁺⁻]+/g) ?? [text];
+  parts.forEach((part, i) => {
+    const isDigit = /^[0-9]+$/.test(part) && i > 0;
+    const isCharge = /^[+\-−–⁺⁻]+$/.test(part) && i > 0;
+    const want = isDigit ? fontSize * 0.22 : isCharge ? -fontSize * 0.38 : 0;
+    const dy = want - shift;
+    shift = want;
+    const size = isDigit || isCharge ? ` font-size="${small}"` : "";
+    out += `<tspan dy="${fmt(dy)}"${size}>${escapeXml(part)}</tspan>`;
+  });
+  return out;
+}
+
+/**
+ * Render a spec that carries its own 2D layout. Atom and arrow coordinates are
+ * used exactly as stored (never re-laid-out), the box keeps the source aspect
+ * ratio, and traced ink is replayed underneath.
+ */
+function renderSpatialMechanismSvg(spec: ChemicalMechanismSpec): string {
+  const atoms = spec.atoms2D ?? [];
+  const bonds = spec.bonds2D ?? [];
+  const VW = LAYOUT_W;
+  const VH = Math.max(40, Math.round(spec.aspect && spec.aspect > 0 ? VW / spec.aspect : LAYOUT_H));
+  const X = (x: number): number => x * VW;
+  const Y = (y: number): number => y * VH;
+  const byId = new Map(atoms.map((a) => [a.id, a]));
+  const parts: string[] = [];
+
+  // Scale strokes / fonts to the drawing: a 30-atom scheme squeezed into the
+  // same box must not get the line weight of a single molecule.
+  const lens: number[] = [];
+  for (const b of bonds) {
+    const a = byId.get(b.fromAtomId);
+    const c = byId.get(b.toAtomId);
+    if (a && c) lens.push(Math.hypot(X(a.x) - X(c.x), Y(a.y) - Y(c.y)));
+  }
+  lens.sort((p, q) => p - q);
+  const bondLen = lens.length > 0 ? lens[Math.floor(lens.length / 2)]! : 34;
+  const sw = Math.max(0.5, Math.min(1.8, bondLen / 20));
+  const ink = "#1a3a5a";
+
+  if (spec.ink && spec.ink.length > 0 && spec.inkSize) {
+    const sx = VW / spec.inkSize[0];
+    const sy = VH / spec.inkSize[1];
+    parts.push(
+      `<g class="ito-traced-ink" transform="scale(${sx.toFixed(5)} ${sy.toFixed(5)})" fill="${ink}">` +
+        spec.ink.map((d) => `<path d="${d}"/>`).join("") +
+        `</g>`,
+    );
+  }
+
+  /** Pull a bond end out of an atom's label box so lines never run through text. */
+  const clip = (ax: number, ay: number, bx: number, by: number, atom: SpatialAtom2D): { x: number; y: number } => {
+    const isLabelled = atom.labelBox != null || (atom.element !== "C" && atom.element !== "");
+    if (!isLabelled) return { x: ax, y: ay };
+    const pad = Math.max(1.5, bondLen * 0.1);
+    const box = atom.labelBox
+      ? { x0: X(atom.labelBox[0]) - pad, y0: Y(atom.labelBox[1]) - pad, x1: X(atom.labelBox[0] + atom.labelBox[2]) + pad, y1: Y(atom.labelBox[1] + atom.labelBox[3]) + pad }
+      : { x0: ax - 5 * atom.element.length - 2, y0: ay - 8, x1: ax + 5 * atom.element.length + 2, y1: ay + 8 };
+    const L = Math.hypot(bx - ax, by - ay) || 1;
+    for (let t = 0; t <= 0.6 * L; t += 0.5) {
+      const x = ax + ((bx - ax) * t) / L;
+      const y = ay + ((by - ay) * t) / L;
+      if (x < box.x0 || x > box.x1 || y < box.y0 || y > box.y1) return { x, y };
+    }
+    return { x: ax + (bx - ax) * 0.6, y: ay + (by - ay) * 0.6 };
+  };
+
+  for (const b of bonds) {
+    const a = byId.get(b.fromAtomId);
+    const c = byId.get(b.toAtomId);
+    if (!a || !c) continue;
+    const p = clip(X(a.x), Y(a.y), X(c.x), Y(c.y), a);
+    const q = clip(X(c.x), Y(c.y), X(a.x), Y(a.y), c);
+    const offset = Math.max(1.6, bondLen * 0.075);
+    if (b.order === 2) {
+      // Skeletal convention: when the neighbouring atoms lie mostly on one side
+      // (a ring, a branch), the second line goes on that side, shortened; a
+      // free-standing double bond is drawn symmetric.
+      const dx = q.x - p.x;
+      const dy = q.y - p.y;
+      let side = 0;
+      for (const o of bonds) {
+        if (o === b) continue;
+        for (const [end, other] of [[o.fromAtomId, o.toAtomId], [o.toAtomId, o.fromAtomId]] as const) {
+          if (end !== a.id && end !== c.id) continue;
+          const n = byId.get(other);
+          if (!n) continue;
+          side += Math.sign(dx * (Y(n.y) - p.y) - dy * (X(n.x) - p.x));
+        }
+      }
+      if (side !== 0) {
+        const L = Math.hypot(dx, dy) || 1;
+        const k = Math.sign(side) * offset * 2;
+        const nx = (-dy / L) * k;
+        const ny = (dx / L) * k;
+        const sh = 0.12;
+        parts.push(...bondLines(p.x, p.y, q.x, q.y, 1, false, sw, offset, b.id));
+        parts.push(
+          ...bondLines(p.x + nx + dx * sh, p.y + ny + dy * sh, q.x + nx - dx * sh, q.y + ny - dy * sh, 1, false, sw, offset, b.id),
+        );
+        continue;
+      }
+    }
+    parts.push(...bondLines(p.x, p.y, q.x, q.y, b.order, false, sw, offset, b.id));
+  }
+
+  for (const a of atoms) {
+    if (a.element === "?" || a.element === "") continue;
+    if (a.labelBox) {
+      const [bx, by, bw, bh] = a.labelBox;
+      const hasSub = /[0-9]/.test(a.element.slice(1));
+      const capH = Y(bh) / (hasSub ? 1.22 : 1);
+      const fontSize = Math.max(4, capH / 0.72);
+      const baseline = Y(by) + capH;
+      parts.push(
+        `<text class="ito-atom-label" data-atom-id="${escapeXml(a.id)}" x="${fmt(X(bx))}" y="${fmt(baseline)}" ` +
+          `font-size="${fmt(fontSize)}" font-family="Helvetica, Arial, sans-serif" textLength="${fmt(X(bw))}" ` +
+          `lengthAdjust="spacingAndGlyphs" fill="${ink}">${labelTspans(a.element, fontSize)}</text>`,
+      );
+    } else if (a.element !== "C") {
+      const fontSize = Math.max(6, Math.min(14, bondLen * 0.42));
+      parts.push(
+        `<text class="ito-atom-label" data-atom-id="${escapeXml(a.id)}" x="${fmt(X(a.x))}" y="${fmt(Y(a.y))}" ` +
+          `font-size="${fmt(fontSize)}" font-family="Helvetica, Arial, sans-serif" text-anchor="middle" ` +
+          `dominant-baseline="central" fill="${ink}">${labelTspans(a.element, fontSize)}</text>`,
+      );
+    }
+  }
+
+  if (spec.reactionArrow) {
+    const [x1, y1, x2, y2] = spec.reactionArrow;
+    parts.push(
+      `<line class="ito-reaction-arrow" x1="${fmt(X(x1))}" y1="${fmt(Y(y1))}" x2="${fmt(X(x2))}" y2="${fmt(Y(y2))}" ` +
+        `stroke="${ink}" stroke-width="1.6" marker-end="url(#ito-reaction-head)"/>`,
+    );
+  }
+  const capX = spec.reactionArrow ? X((spec.reactionArrow[0] + spec.reactionArrow[2]) / 2) : VW / 2;
+  const capY = spec.reactionArrow ? Y(spec.reactionArrow[1]) : VH / 2;
+  if (spec.conditionsAbove) {
+    parts.push(
+      `<text class="ito-conditions-above" x="${fmt(capX)}" y="${fmt(capY - 8)}" font-size="11" ` +
+        `text-anchor="middle" fill="${ink}">${escapeXml(spec.conditionsAbove)}</text>`,
+    );
+  }
+  if (spec.conditionsBelow) {
+    parts.push(
+      `<text class="ito-conditions-below" x="${fmt(capX)}" y="${fmt(capY + 18)}" font-size="11" ` +
+        `text-anchor="middle" fill="${ink}">${escapeXml(spec.conditionsBelow)}</text>`,
+    );
+  }
+
+  for (const arrow of spec.arrows) {
+    let d: string | null = null;
+    if (arrow.geometry) {
+      const [tx, ty, c1x, c1y, c2x, c2y, hx, hy] = arrow.geometry;
+      d = `M ${fmt(X(tx))} ${fmt(Y(ty))} C ${fmt(X(c1x))} ${fmt(Y(c1y))} ${fmt(X(c2x))} ${fmt(Y(c2y))} ${fmt(X(hx))} ${fmt(Y(hy))}`;
+    } else {
+      const from = anchorPoint(arrow.fromAtomOrBond, atoms, bonds);
+      const to = anchorPoint(arrow.toAtomOrBond, atoms, bonds);
+      if (from && to) {
+        const fx = X(from.x), fy = Y(from.y), tx = X(to.x), ty = Y(to.y);
+        const chord = Math.hypot(tx - fx, ty - fy) || 1;
+        // Both control points sit h off the chord; the arc's bulge is 0.75·h.
+        const h = ((arrow.curvature ?? 0.3) * chord) / 0.75;
+        const nx = (ty - fy) / chord;
+        const ny = -(tx - fx) / chord;
+        const c1x = fx + (tx - fx) / 3 + nx * h, c1y = fy + (ty - fy) / 3 + ny * h;
+        const c2x = fx + ((tx - fx) * 2) / 3 + nx * h, c2y = fy + ((ty - fy) * 2) / 3 + ny * h;
+        // Stand the ends off the atoms so the arrow does not bury the label.
+        const off = Math.min(6, chord * 0.12);
+        const l1 = Math.hypot(c1x - fx, c1y - fy) || 1;
+        const l2 = Math.hypot(c2x - tx, c2y - ty) || 1;
+        const sx = fx + ((c1x - fx) / l1) * off, sy = fy + ((c1y - fy) / l1) * off;
+        const ex = tx + ((c2x - tx) / l2) * off, ey = ty + ((c2y - ty) / l2) * off;
+        d = `M ${fmt(sx)} ${fmt(sy)} C ${fmt(c1x)} ${fmt(c1y)} ${fmt(c2x)} ${fmt(c2y)} ${fmt(ex)} ${fmt(ey)}`;
+      }
+    }
+    if (!d) continue;
+    const fish = arrow.barb === "fishhook";
+    parts.push(
+      `<path class="ito-curly-arrow" data-arrow-id="${escapeXml(arrow.id)}" ` +
+        `data-from="${escapeXml(arrow.fromAtomOrBond)}" data-to="${escapeXml(arrow.toAtomOrBond)}" ` +
+        `data-barb="${arrow.barb}" d="${d}" fill="none" stroke="${fish ? "#2e6fb2" : "#b2402e"}" ` +
+        `stroke-width="${fmt(Math.max(0.8, sw))}" stroke-linecap="round" ` +
+        `marker-end="${fish ? "url(#ito-fishhook-barb)" : "url(#ito-full-barb)"}"/>`,
+    );
+  }
+
+  // Heads are sized against the drawing (not the stroke) so they stay in
+  // proportion to the bonds, as in print.
+  const hs = fmt(Math.max(3, Math.min(9, bondLen * 0.24)));
+  const mk = `markerUnits="userSpaceOnUse" markerWidth="${hs}" markerHeight="${hs}" orient="auto-start-reverse"`;
+  const defs =
+    `<defs>` +
+    `<marker id="ito-full-barb" viewBox="0 0 10 10" refX="9" refY="5" ${mk}>` +
+    `<path d="M 0 1 L 10 5 L 0 9 L 2.5 5 z" fill="#b2402e"/></marker>` +
+    `<marker id="ito-fishhook-barb" viewBox="0 0 10 10" refX="9" refY="5" ${mk}>` +
+    `<path d="M 0 1 L 10 5 L 2.5 5 z" fill="#2e6fb2"/></marker>` +
+    `<marker id="ito-reaction-head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">` +
+    `<path d="M 0 1 L 9 5 L 0 9" fill="none" stroke="${ink}" stroke-width="1.4"/></marker>` +
+    `</defs>`;
+
+  return (
+    `<svg xmlns="${SVG_NS}" data-testid="chem-mechanism-svg" width="${VW}" height="${VH}" ` +
+    `viewBox="0 0 ${VW} ${VH}" class="ito-chem-mechanism" data-spatial="true" ` +
+    `data-smiles="${escapeXml(spec.smiles)}">` +
+    defs +
+    parts.join("") +
+    `</svg>`
+  );
+}
+
+/**
+ * Text the PDF itself carries inside a figure crop (labels such as "OH", "Br"),
+ * taken from a page's cached spans and re-expressed in the crop's own 0..1
+ * coordinates, ready to pass as `ocrChars`. Spans wider than half the crop are
+ * body text / captions, not atom labels, and are skipped.
+ */
+export function figureCharsFromSpans(
+  spans: readonly { readonly str: string; readonly normRect: readonly [number, number, number, number] }[],
+  rect: NormalizedRect,
+): FigureChar[] {
+  const out: FigureChar[] = [];
+  if (rect.width <= 0 || rect.height <= 0) return out;
+  for (const span of spans) {
+    const text = span.str.trim();
+    if (text.length === 0) continue;
+    const [sx, sy, sw, sh] = span.normRect;
+    const cx = sx + sw / 2;
+    const cy = sy + sh / 2;
+    if (cx < rect.x || cx > rect.x + rect.width || cy < rect.y || cy > rect.y + rect.height) continue;
+    if (sw > 0.5 * rect.width) continue;
+    out.push({
+      text,
+      x: (cx - rect.x) / rect.width,
+      y: (cy - rect.y) / rect.height,
+      w: sw / rect.width,
+      h: sh / rect.height,
+    });
+  }
+  return out;
+}
+
+/** Decode an image URL in the browser; resolves null where that is impossible (jsdom). */
+function loadImageElement(url: string, timeoutMs = 4000): Promise<HTMLImageElement | null> {
+  return new Promise((resolve) => {
+    if (typeof Image === "undefined") {
+      resolve(null);
+      return;
+    }
+    const img = new Image();
+    const timer = setTimeout(() => resolve(null), timeoutMs);
+    img.onload = () => {
+      clearTimeout(timer);
+      resolve(img);
+    };
+    img.onerror = () => {
+      clearTimeout(timer);
+      resolve(null);
+    };
+    img.src = url;
+  });
+}
+
+/** A 2d canvas context, or null where there is no canvas backend (jsdom). */
+function canvas2d(width: number, height: number): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } | null {
+  if (typeof document === "undefined") return null;
+  if (typeof navigator !== "undefined" && /jsdom/i.test(navigator.userAgent ?? "")) return null;
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    return ctx ? { canvas, ctx } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Decode a figure crop (the area annotation's PNG data URL) to pixels for
+ * {@link extractMechanismFromRegion}. Small crops are upsampled so hairline
+ * strokes are a few pixels wide before thinning. Browser-only; null in jsdom.
+ */
+export async function loadRasterFromDataUrl(url: string): Promise<RasterImage | null> {
+  if (!url.startsWith("data:image/png") && !url.startsWith("data:image/jpeg")) return null;
+  const img = await loadImageElement(url);
+  if (!img || img.naturalWidth <= 0 || img.naturalHeight <= 0) return null;
+  const longest = Math.max(img.naturalWidth, img.naturalHeight);
+  const scale = Math.max(1, Math.min(3, 1200 / longest));
+  const w = Math.round(img.naturalWidth * scale);
+  const h = Math.round(img.naturalHeight * scale);
+  const c = canvas2d(w, h);
+  if (!c) return null;
+  c.ctx.fillStyle = "#fff";
+  c.ctx.fillRect(0, 0, w, h);
+  c.ctx.imageSmoothingEnabled = true;
+  c.ctx.imageSmoothingQuality = "high";
+  c.ctx.drawImage(img, 0, 0, w, h);
+  const data = c.ctx.getImageData(0, 0, w, h);
+  return { data: data.data, width: w, height: h };
+}
+
+/**
+ * Rasterise mechanism SVG markup to a PNG. Word does not render inline `<svg>`
+ * from pasted HTML, so the Word-facing clipboard flavours are a PNG (bitmap +
+ * an `<img>` in the HTML). Browser-only; null in jsdom.
+ */
+async function rasterizeSvgToPng(svg: string, scale = 3): Promise<{ blob: Blob; dataUrl: string; width: number; height: number } | null> {
+  const m = svg.match(/viewBox="0 0 ([0-9.]+) ([0-9.]+)"/);
+  const vw = m ? parseFloat(m[1]!) : 420;
+  const vh = m ? parseFloat(m[2]!) : 180;
+  const c = canvas2d(Math.round(vw * scale), Math.round(vh * scale));
+  if (!c) return null;
+  const img = await loadImageElement(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`);
+  if (!img) return null;
+  c.ctx.fillStyle = "#fff";
+  c.ctx.fillRect(0, 0, c.canvas.width, c.canvas.height);
+  c.ctx.drawImage(img, 0, 0, c.canvas.width, c.canvas.height);
+  const blob = await new Promise<Blob | null>((resolve) => c.canvas.toBlob((b) => resolve(b), "image/png"));
+  if (!blob) return null;
+  return { blob, dataUrl: c.canvas.toDataURL("image/png"), width: vw, height: vh };
 }
 
 // ---------------------------------------------------------------------------
@@ -840,10 +1408,20 @@ async function writeToClipboard(payload: ScienceClipboardPayload): Promise<void>
     const ClipboardItemCtor =
       typeof ClipboardItem !== "undefined" ? ClipboardItem : undefined;
     if (clip.write && ClipboardItemCtor && typeof Blob !== "undefined") {
+      let html = payload.htmlText;
       const items: Record<string, Blob> = {
         "text/plain": new Blob([payload.plainText], { type: "text/plain" }),
-        "text/html": new Blob([payload.htmlText], { type: "text/html" }),
       };
+      if (payload.svgText) {
+        const png = await rasterizeSvgToPng(payload.svgText);
+        if (png) {
+          items["image/png"] = png.blob;
+          html =
+            `<img src="${png.dataUrl}" width="${Math.round(png.width)}" height="${Math.round(png.height)}" ` +
+            `alt="${escapeXml(payload.plainText)}"/>`;
+        }
+      }
+      items["text/html"] = new Blob([html], { type: "text/html" });
       await clip.write([new ClipboardItemCtor(items)]);
       return;
     }

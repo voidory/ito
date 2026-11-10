@@ -1,10 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { Icons } from "../ui/icons";
 import { Popover } from "../ui/primitives";
-import type { AnnotationId, ChemicalMechanismSpec, ElectronFlowArrow, NormalizedRect } from "../../model";
+import type {
+  AnnotationId,
+  AreaAnchor,
+  ChemicalMechanismSpec,
+  ElectronFlowArrow,
+  NormalizedRect,
+} from "../../model";
 import {
   convertLatexToMathML,
   copyScienceToWordClipboard,
+  extractMechanismFromRegion,
+  figureCharsFromSpans,
+  loadRasterFromDataUrl,
   renderMechanismSvg,
 } from "../../pdf/scienceOcr";
 import {
@@ -355,6 +364,7 @@ export function HighlightEditPopover({
             mechanism={areaAnchor.mechanism}
             imageDataUrl={areaAnchor.imageDataUrl}
             rect={areaAnchor.rect}
+            anchor={areaAnchor}
             bump={bump}
             {...(recognitionService ? { recognitionService } : {})}
           />
@@ -513,6 +523,7 @@ function SciencePanel({
   mechanism,
   imageDataUrl,
   rect,
+  anchor,
   bump,
   recognitionService,
 }: {
@@ -523,10 +534,45 @@ function SciencePanel({
   mechanism?: ChemicalMechanismSpec | undefined;
   imageDataUrl?: string | undefined;
   rect?: NormalizedRect | undefined;
+  anchor?: AreaAnchor | undefined;
   bump: () => void;
   recognitionService?: RecognitionService;
 }): JSX.Element {
   const [editing, setEditing] = useState<null | "latex" | "chem">(null);
+  const [extractStatus, setExtractStatus] = useState<string | null>(null);
+
+  // Read the mechanism out of the captured figure itself: bonds/atoms keep
+  // their printed positions, curly arrows are detected and snapped, and any
+  // label text the PDF carries inside the crop names the heteroatoms.
+  const autoExtract = async (): Promise<void> => {
+    const url = anchor?.imageDataUrl;
+    if (!anchor || !url) return;
+    setExtractStatus("Reading figure…");
+    const image = await loadRasterFromDataUrl(url);
+    if (!image) {
+      setExtractStatus("This figure has no pixel capture to read — re-crop it from the page.");
+      return;
+    }
+    const page = wb
+      .rawData()
+      .sources.find((s) => s.id === anchor.docId)
+      ?.cachedPages?.find((p) => p.pageIndex === anchor.pageIndex);
+    const ocrChars = page ? figureCharsFromSpans(page.spans, anchor.rect) : [];
+    const spec = extractMechanismFromRegion({ image, ...(ocrChars.length > 0 ? { ocrChars } : {}) });
+    const bondCount = spec.bonds2D?.length ?? 0;
+    if (bondCount === 0 && spec.arrows.length === 0) {
+      setExtractStatus("No bonds or curly arrows found in this figure.");
+      return;
+    }
+    await wb.setAnnotationScienceData(annotationId, { smiles: spec.smiles, mechanism: spec });
+    setSmilesDraft(spec.smiles);
+    setExtractStatus(
+      `Found ${bondCount} bond${bondCount === 1 ? "" : "s"} and ${spec.arrows.length} curly arrow${
+        spec.arrows.length === 1 ? "" : "s"
+      }.`,
+    );
+    bump();
+  };
   const [latexDraft, setLatexDraft] = useState(latex ?? "");
   const [smilesDraft, setSmilesDraft] = useState(smiles ?? mechanism?.smiles ?? "");
 
@@ -551,7 +597,11 @@ function SciencePanel({
     bump();
   };
   const saveChem = async (value: string): Promise<void> => {
-    const spec: ChemicalMechanismSpec = { smiles: value, arrows: mechanism?.arrows ?? [] };
+    // Keep an extracted 2D layout when only the SMILES text is being corrected;
+    // without one, lay the scheme out once so the layout is stored, not re-derived.
+    const spec: ChemicalMechanismSpec = mechanism?.atoms2D
+      ? { ...mechanism, smiles: value }
+      : { ...extractMechanismFromRegion({ smiles: value }), arrows: mechanism?.arrows ?? [] };
     await wb.setAnnotationScienceData(annotationId, { smiles: value, mechanism: spec });
     setEditing(null);
     bump();
@@ -670,10 +720,11 @@ function SciencePanel({
 
   const addCurlyArrow = async (barb: "full" | "fishhook"): Promise<void> => {
     const base = mechSpec ?? { smiles: smilesDraft || "C=C", arrows: [] };
+    const ids = base.atoms2D?.map((a) => a.id) ?? [];
     const nextArrow: ElectronFlowArrow = {
       id: `a${base.arrows.length + 1}`,
-      fromAtomOrBond: "C1",
-      toAtomOrBond: "C2",
+      fromAtomOrBond: ids[0] ?? "C1",
+      toAtomOrBond: ids[1] ?? "C2",
       barb,
     };
     const spec: ChemicalMechanismSpec = {
@@ -887,7 +938,23 @@ function SciencePanel({
         >
           <span className="ito-ctx-item-label">Extract / Edit SMILES &amp; Mechanism</span>
         </button>
+        {anchor?.imageDataUrl && (
+          <button
+            type="button"
+            data-testid="auto-extract-mechanism-btn"
+            className="ito-ctx-item"
+            title="Redraw this figure as a vector mechanism: bonds, labels and curly arrows are read from the picture"
+            onClick={() => void autoExtract()}
+          >
+            <span className="ito-ctx-item-label">Read mechanism from figure</span>
+          </button>
+        )}
       </div>
+      {extractStatus && (
+        <div data-testid="extract-mechanism-status" style={{ fontSize: "0.78rem", color: "#666", padding: "0.2rem 0.4rem" }}>
+          {extractStatus}
+        </div>
+      )}
 
       {editing === "latex" && (
         <div className="ito-science-editor">
