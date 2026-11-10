@@ -1,0 +1,824 @@
+M17 Scientific Recognition: Implementation Sequence
+
+Objective
+
+Extend the current M17 scientific system so Ito can automatically recognize equations, molecules, and eventually reactions from selected PDF regions.
+
+Do this incrementally. Do not replace the existing scientific representation/rendering layer. The existing system already has:
+
+* PDF area cropping
+* PDF text-layer math extraction
+* LaTeX normalization
+* LaTeX → MathML conversion
+* SMILES / Reaction SMILES representation
+* chemical mechanism representation
+* deterministic chemical SVG rendering
+* Word clipboard export
+
+The new work should add a visual recognition layer that feeds these existing representations.
+
+⸻
+
+Phase 0 — Establish a clean baseline
+
+Step 0.1 — Work from the latest M17 branch
+
+Use:
+
+m17-scientific-reflow-and-cache
+
+Create a new feature branch:
+
+m18-scientific-recognition
+
+Do not modify M17 directly.
+
+Step 0.2 — Run the existing project checks
+
+Before changing functionality, run:
+
+npm ci
+npm test -- --run
+npm run typecheck
+npm run build
+
+Record the result of each command.
+
+If any existing test/build/typecheck fails, stop and fix the failure before implementing recognition.
+
+Do not classify an existing failure as caused by the new feature.
+
+⸻
+
+Phase 1 — Test the existing scientific representation layer
+
+Step 1.1 — Add dedicated M17 science tests
+
+Create tests around:
+
+src/pdf/scienceOcr.ts
+
+Test at minimum:
+
+Math
+
+α
+β
+√x
+x²
+x₂
+a/b
+\frac{a}{b}
+\sqrt{x}
+\alpha
+
+Verify:
+
+input
+→ normalized LaTeX
+→ MathML
+
+and verify that the generated MathML is structurally valid.
+
+Chemistry
+
+Test:
+
+C
+CC
+C=C
+CCO
+c1ccccc1
+CC(=O)O
+
+and reaction SMILES such as:
+
+CCO>>CC=O
+
+Verify that parsing does not silently lose atoms or bonds.
+
+Mechanisms
+
+Test:
+
+ChemicalMechanismSpec
+→ SVG
+
+with:
+
+* atom-to-atom arrows
+* bond-to-atom arrows
+* full arrows
+* fishhook arrows
+* reaction conditions
+* malformed/unresolved anchors
+
+The renderer must fail gracefully rather than generating broken SVG.
+
+⸻
+
+Step 1.2 — Test the existing Area crop pipeline
+
+Test:
+
+PDF page
+→ Area drag
+→ normalized rectangle
+→ imageDataUrl
+→ annotation
+
+Verify that:
+
+1. The crop corresponds exactly to the selected visual region.
+2. Normalized coordinates remain correct at different zoom levels.
+3. Rotation does not shift the crop.
+4. Scanned/image-only pages still produce a crop.
+5. Existing text-layer pages still produce a crop.
+
+Do not proceed until this is reliable.
+
+⸻
+
+Phase 2 — Repair the representation layer before adding AI
+
+Step 2.1 — Audit the chemistry parser
+
+Inspect the SMILES parser in:
+
+src/pdf/scienceOcr.ts
+
+Document exactly which SMILES features are supported.
+
+At minimum, verify handling of:
+
+* aliphatic atoms
+* aromatic atoms
+* bond orders
+* ring closures
+* branches
+* charges
+* bracket atoms
+* stereochemistry
+* explicit hydrogens
+* disconnected components
+
+Do not pretend unsupported SMILES are supported.
+
+⸻
+
+Step 2.2 — Improve chemistry representation if necessary
+
+The renderer should preserve the chemical information that an OCSR model may produce.
+
+Do not uppercase aromatic atoms.
+
+For example:
+
+c1ccccc1
+
+must remain distinguishable from:
+
+C1CCCCC1
+
+Preserve:
+
+* aromaticity
+* formal charge
+* atom identity
+* bond order
+* stereochemistry where practical
+
+If the current renderer cannot represent a feature, extend the internal representation before connecting OCSR.
+
+⸻
+
+Step 2.3 — Add chemistry validation
+
+Introduce a validation layer:
+
+SMILES
+ ↓
+chemical parser
+ ↓
+validation result
+
+Use a chemistry toolkit where practical, preferably RDKit if the chosen runtime architecture supports it.
+
+The API should conceptually be:
+
+interface ChemistryValidationResult {
+  valid: boolean;
+  normalizedSmiles?: string;
+  errors: string[];
+  warnings: string[];
+}
+
+Never silently accept an invalid recognition result.
+
+⸻
+
+Phase 3 — Create the recognition abstraction
+
+Do not directly couple UI code to a particular AI model.
+
+Create:
+
+src/science/recognition/
+    types.ts
+    mathRecognizer.ts
+    moleculeRecognizer.ts
+    reactionRecognizer.ts
+    recognitionService.ts
+
+Define a common abstraction.
+
+For example:
+
+type ScienceRecognitionKind =
+  | "equation"
+  | "molecule"
+  | "reaction";
+interface RecognitionInput {
+  imageDataUrl: string;
+  width: number;
+  height: number;
+}
+interface RecognitionResult {
+  kind: ScienceRecognitionKind;
+  confidence?: number;
+  rawOutput?: unknown;
+}
+
+Then make each recognizer responsible only for visual → structured conversion.
+
+The existing rendering code remains responsible for structured → visual conversion.
+
+Architecture:
+
+image
+ ↓
+recognizer
+ ↓
+standard representation
+ ↓
+validator
+ ↓
+existing Ito representation
+ ↓
+existing renderer
+
+Do not implement:
+
+image → AI → ChemicalMechanismSpec
+
+as one monolithic operation.
+
+⸻
+
+Phase 4 — Implement equation recognition
+
+Step 4.1 — Select the initial math model
+
+Use an existing image-to-LaTeX model rather than training one.
+
+Preferred initial candidate:
+
+pix2text-mfr
+
+Use an inference implementation compatible with the browser/runtime architecture.
+
+The first prototype may use a remote inference endpoint if local inference is impractical, but isolate that behind MathRecognizer.
+
+Do not make the rest of Ito depend on the remote API.
+
+⸻
+
+Step 4.2 — Implement MathRecognizer
+
+Create:
+
+interface MathRecognitionResult {
+  latex: string;
+  confidence?: number;
+}
+
+Implement:
+
+recognize(image: Blob): Promise<MathRecognitionResult>
+
+Pipeline:
+
+PNG crop
+ ↓
+math model
+ ↓
+LaTeX
+ ↓
+normalizeToLatex()
+ ↓
+validate/parse
+ ↓
+MathRecognitionResult
+
+If the model returns invalid LaTeX, return an explicit error rather than silently storing it.
+
+⸻
+
+Step 4.3 — Connect equation recognition to the Area tool
+
+Add an action to the existing Area annotation workflow:
+
+Area selected
+    ↓
+Identify
+    ↓
+Equation
+
+The selected imageDataUrl should be sent directly to the recognizer.
+
+Do not re-render or re-crop the PDF unnecessarily.
+
+⸻
+
+Step 4.4 — Display the result for verification
+
+Do not immediately overwrite the source crop.
+
+Show:
+
+Original crop
+Recognized equation:
+[editable LaTeX / rendered equation]
+[Accept] [Edit] [Cancel]
+
+On Accept:
+
+AreaAnchor.latex = recognizedLaTeX
+
+The existing MathML and Word clipboard functionality should then work without modification.
+
+⸻
+
+Step 4.5 — Add equation regression tests
+
+Test several classes:
+
+simple text
+fractions
+roots
+superscripts
+subscripts
+Greek letters
+integrals
+summations
+matrices
+multi-line equations
+
+The recognition model itself does not need to be perfectly tested in unit tests.
+
+Test the deterministic boundary:
+
+model output
+→ normalization
+→ validation
+→ MathML
+
+⸻
+
+Phase 5 — Implement molecule recognition
+
+Step 5.1 — Add OCSR
+
+Use an existing optical chemical structure recognition system.
+
+Initial candidates:
+
+* DECIMER
+* MolScribe
+
+Prefer DECIMER if its deployment/runtime constraints fit the project.
+
+The first implementation can use an external service if necessary.
+
+Again, isolate it:
+
+interface MoleculeRecognizer {
+  recognize(image: Blob): Promise<MoleculeRecognitionResult>;
+}
+
+⸻
+
+Step 5.2 — Define the result
+
+interface MoleculeRecognitionResult {
+  smiles: string;
+  confidence?: number;
+  warnings?: string[];
+}
+
+Pipeline:
+
+image
+ ↓
+OCSR
+ ↓
+SMILES
+ ↓
+chemical validation
+ ↓
+normalized SMILES
+
+⸻
+
+Step 5.3 — Connect to Ito’s existing molecule renderer
+
+After validation:
+
+SMILES
+ ↓
+existing molecule parser
+ ↓
+existing SVG renderer
+
+Show:
+
+Original molecule
+Recognized structure
+SMILES:
+[editable]
+[Accept] [Edit] [Cancel]
+
+On Accept:
+
+AreaAnchor.smiles = normalizedSmiles
+
+Do not alter the original image.
+
+The recognized structure is an editable interpretation of the source image.
+
+⸻
+
+Phase 6 — Build reaction recognition
+
+Do NOT attempt mechanism recognition yet.
+
+First implement ordinary reaction-scheme recognition.
+
+Step 6.1 — Segment the reaction image
+
+The reaction recognizer needs to identify:
+
+molecules
++
+reaction arrows
++
+reagent/condition text
+
+Conceptually:
+
+reaction image
+ ↓
+layout detection
+ ├── molecule regions
+ ├── reaction arrow
+ └── text regions
+
+Do not assume the entire crop is one molecule.
+
+⸻
+
+Step 6.2 — Recognize molecules independently
+
+Each detected molecule region should pass through the same molecule recognizer:
+
+molecule region
+ ↓
+OCSR
+ ↓
+SMILES
+ ↓
+validation
+
+This avoids duplicating chemistry recognition logic.
+
+⸻
+
+Step 6.3 — Detect reaction direction
+
+Represent the reaction arrow separately:
+
+interface ReactionArrow {
+  start: Point;
+  end: Point;
+  direction: "forward" | "reverse" | "equilibrium";
+}
+
+Determine which recognized molecule regions lie on each side.
+
+Then construct:
+
+reactants
+agents
+products
+
+⸻
+
+Step 6.4 — Recognize reagent/condition text
+
+Use ordinary OCR for text such as:
+
+H2SO4
+NaBH4
+heat
+EtOH
+Δ
+hv
+
+Do not force these through the molecule recognizer.
+
+Store them separately as reaction conditions/agents.
+
+⸻
+
+Step 6.5 — Construct reaction SMILES
+
+Generate:
+
+reactants>agents>products
+
+or the existing internal representation used by Ito.
+
+Validate the resulting reaction.
+
+Only then construct the existing ChemicalMechanismSpec.
+
+⸻
+
+Phase 7 — Add reaction verification UI
+
+Show the recognized reaction as an editable object:
+
+Original crop
+Reactants:
+[structure] + [structure]
+Conditions:
+[editable text]
+Products:
+[structure]
+Reaction:
+[editable representation]
+[Accept] [Edit] [Cancel]
+
+The user must be able to correct an incorrectly recognized molecule without starting recognition again.
+
+⸻
+
+Phase 8 — Mechanism recognition
+
+Only begin this after ordinary reaction recognition is reliable.
+
+Mechanism recognition is a separate problem.
+
+Input:
+
+reaction image
+
+Output:
+
+ChemicalMechanismSpec
+
+but construct it in stages.
+
+⸻
+
+Step 8.1 — Recognize molecular structures
+
+Reuse the molecule recognizer.
+
+⸻
+
+Step 8.2 — Recognize electron-pushing arrows visually
+
+Detect:
+
+* arrow source
+* arrow destination
+* arrow type
+* arrow direction
+* curvature
+
+Represent initially as geometric candidates:
+
+interface VisualElectronArrow {
+  source: Point;
+  target: Point;
+  barb: "full" | "fishhook";
+  confidence: number;
+}
+
+⸻
+
+Step 8.3 — Map visual arrows to chemical atoms/bonds
+
+Use the recognized molecular graph.
+
+For every arrow:
+
+visual source point
+ ↓
+nearest valid atom/bond
+ ↓
+chemical source
+visual destination point
+ ↓
+nearest valid atom/bond
+ ↓
+chemical destination
+
+Reject mappings that are chemically impossible.
+
+⸻
+
+Step 8.4 — Construct ElectronFlowArrow
+
+Only after mapping:
+
+ElectronFlowArrow
+
+should be generated.
+
+This means the existing mechanism renderer remains unchanged.
+
+⸻
+
+Phase 9 — Add confidence and failure handling
+
+Every recognition result should have an explicit state:
+
+type RecognitionStatus =
+  | "success"
+  | "low-confidence"
+  | "invalid"
+  | "unsupported"
+  | "error";
+
+Never silently produce a result when recognition failed.
+
+For low confidence:
+
+Recognition uncertain
+[Review result]
+
+rather than:
+
+Accepted automatically
+
+⸻
+
+Phase 10 — Add a unified Identify UI
+
+Once equation and molecule recognition work independently, add:
+
+Area selected
+    ↓
+Identify
+    ├── Equation
+    ├── Molecule
+    └── Reaction
+
+Do not initially make automatic classification mandatory.
+
+Manual type selection gives us a clean way to test recognition independently.
+
+Automatic classification can be added later.
+
+⸻
+
+Phase 11 — Only then add automatic classification
+
+Eventually:
+
+Area crop
+ ↓
+science classifier
+ ↓
+equation / molecule / reaction / ordinary figure
+ ↓
+appropriate recognizer
+
+This should be an optimization of the UX, not a prerequisite for recognition.
+
+⸻
+
+Phase 12 — Regression testing
+
+Before merging, verify:
+
+npm test -- --run
+npm run typecheck
+npm run build
+
+and manually test:
+
+Math
+
+* textbook equation
+* rotated equation
+* scanned equation
+* multi-line equation
+* equation containing Greek symbols
+* equation containing fractions/roots/scripts
+
+Molecules
+
+* simple molecule
+* aromatic molecule
+* charged molecule
+* branched molecule
+* ring system
+* molecule with heteroatoms
+
+Reactions
+
+* simple substitution
+* addition
+* elimination
+* multi-reactant reaction
+* reagent above arrow
+* conditions below arrow
+* reaction containing multiple products
+
+Existing functionality
+
+Verify that adding recognition does not regress:
+
+* Area annotations
+* text annotations
+* rotated text
+* text-layer extraction
+* MathML clipboard
+* chemistry SVG clipboard
+* mechanism rendering
+* PDF scrolling
+* toolbar behavior
+
+⸻
+
+Implementation order
+
+The actual order must remain:
+
+1. Baseline tests
+        ↓
+2. Fix existing M17 failures
+        ↓
+3. Test Area crop
+        ↓
+4. Harden chemistry representation
+        ↓
+5. Create recognition abstraction
+        ↓
+6. Equation image → LaTeX
+        ↓
+7. Equation verification UI
+        ↓
+8. Molecule image → SMILES
+        ↓
+9. Molecule verification UI
+        ↓
+10. Reaction segmentation
+        ↓
+11. Reaction recognition
+        ↓
+12. Reaction verification UI
+        ↓
+13. Electron-flow recognition
+        ↓
+14. Automatic science classification
+
+Do not skip directly from the current M17 code to a monolithic “AI recognizes science” feature.
+
+The design principle is:
+
+                 VISUAL LAYER
+                      │
+              ┌───────┴────────┐
+              ↓                ↓
+         Recognition       User crop
+              │                │
+              └───────┬────────┘
+                      ↓
+             STANDARD REPRESENTATION
+          ┌───────────┼───────────┐
+          ↓           ↓           ↓
+        LaTeX       SMILES     Reaction
+          ↓           ↓           ↓
+       MathML       Graph      Mechanism
+          └───────────┼───────────┘
+                      ↓
+              EXISTING ITO RENDERERS
+                      ↓
+             Editable scientific
+                  annotation
+
+The recognition models are replaceable. The scientific representations and renderers should remain deterministic and under Ito’s control.
