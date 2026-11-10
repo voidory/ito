@@ -14,6 +14,14 @@ import * as pdfjs from "pdfjs-dist";
 import PdfWorker from "pdfjs-dist/build/pdf.worker.mjs?url";
 import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from "pdfjs-dist";
 import type { PageBox } from "./anchor";
+import {
+  extractPreParsedPageLayout,
+  hydrateTextLayerFromCache,
+  injectSyntheticOcrTextLayer,
+  type PreParsedPageLayout,
+  type TextItemLike,
+  type ViewportLike,
+} from "./textCache";
 
 /**
  * M13 (§1.1) detect pdf.js's RenderingCancelledException WITHOUT importing a
@@ -88,6 +96,14 @@ export interface RenderedPage {
   ensureRendered(): Promise<void>;
   unload(): void;
   isRendered(): boolean;
+  /**
+   * M17 (§1.1) extract this page's normalized pre-parsed layout (for persisting
+   * on `Source.cachedPages`), and synchronously hydrate the text layer from a
+   * previously cached layout so an immutable set text is selectable instantly
+   * on reload without re-parsing pdf.js text content.
+   */
+  extractLayout(): PreParsedPageLayout;
+  hydrateFromCache(layout: PreParsedPageLayout): void;
 }
 
 interface GlyphMap {
@@ -285,9 +301,94 @@ export async function renderPage(
       textLayer.style.transform = "";
     }
 
+    // M17 (§1.1/§1.2): tag every live pdf.js text span with its NORMALIZED rect
+    // (data-norm-rect) so the scanned/zero-height OCR highlight fallback in
+    // highlight.ts can recover geometry even when getClientRects() is 0×0; and
+    // if this is an image-only page (0 native text items), inject deterministic
+    // synthetic OCR text-band spans so it is still selectable/highlightable.
+    annotateSpansWithNormRects(renderScale);
+
     // M14–M16 (FEAT-001): the raster + text layer are now built at this scale.
     isDrawn = true;
     currentScale = renderScale;
+  }
+
+  /**
+   * M17 (§1.1/§1.2) stamp each `.textLayer` span with a `data-norm-rect`
+   * ("x,y,w,h" in 0..1) measured against the stage box, and inject synthetic
+   * OCR spans when the page has no native text items. Best-effort + guarded so
+   * it never breaks the render (jsdom reports 0×0 boxes, which the OCR fallback
+   * and the cached-span `data-norm-rect` path handle downstream).
+   */
+  function annotateSpansWithNormRects(renderScale: number): void {
+    const viewport = page.getViewport({ scale: renderScale, rotation: page.rotate });
+    const stageW = viewport.width || 1;
+    const stageH = viewport.height || 1;
+    if (textContent.items.length === 0) {
+      // Image-only / scanned page: inject selectable synthetic OCR bands.
+      injectSyntheticOcrTextLayer(textLayer, pageIndexOf(), stageW, stageH);
+      return;
+    }
+    const spans = textLayer.querySelectorAll<HTMLElement>("span");
+    const stageBox = stage.getBoundingClientRect();
+    const useBox = stageBox.width > 0 && stageBox.height > 0;
+    spans.forEach((span) => {
+      // Prefer the live client rect (browser); fall back to the pdf.js inline
+      // style box (jsdom); skip spans that expose neither.
+      const rect = span.getBoundingClientRect();
+      let left: number, top: number, w: number, h: number;
+      if (useBox && rect.width > 0 && rect.height > 0) {
+        left = rect.left - stageBox.left;
+        top = rect.top - stageBox.top;
+        w = rect.width;
+        h = rect.height;
+      } else {
+        left = parseFloat(span.style.left || "");
+        top = parseFloat(span.style.top || "");
+        w = parseFloat(span.style.width || "");
+        h = parseFloat(span.style.height || "");
+        if ([left, top, w, h].some((v) => Number.isNaN(v))) return;
+      }
+      const nx = left / stageW;
+      const ny = top / stageH;
+      const nw = Math.max(0.008, w / stageW);
+      const nh = Math.max(0.008, h / stageH);
+      span.dataset.normRect = `${nx},${ny},${nw},${nh}`;
+    });
+  }
+
+  /** The 0-based page index this render belongs to (from the container attr). */
+  function pageIndexOf(): number {
+    const raw = container.getAttribute("data-page-index");
+    const n = raw != null ? parseInt(raw, 10) : NaN;
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  /**
+   * M17 (§1.1) extract this page's normalized pre-parsed layout from the pdf.js
+   * text content so the SourcePane can persist it on `Source.cachedPages` for
+   * instant hydration on the next load. Pure read of the already-fetched
+   * `textContent` + the live viewport.
+   */
+  function extractLayout(): PreParsedPageLayout {
+    const viewport = page.getViewport({ scale: currentScale, rotation: page.rotate });
+    const vp: ViewportLike = {
+      width: viewport.width,
+      height: viewport.height,
+      rotation: viewport.rotation,
+    };
+    const items = textContent.items as unknown as TextItemLike[];
+    return extractPreParsedPageLayout(pageIndexOf(), vp, items);
+  }
+
+  /**
+   * M17 (§1.1) synchronously hydrate this page's `.textLayer` from a cached
+   * layout so selection / highlights / Ctrl+F work the instant a cached set
+   * text reopens — before (or without) a full pdf.js textLayer render.
+   */
+  function hydrateFromCache(layout: PreParsedPageLayout): void {
+    const viewport = page.getViewport({ scale: currentScale, rotation: page.rotate });
+    hydrateTextLayerFromCache(textLayer, layout, viewport.width, viewport.height);
   }
 
   // M14–M16 (FEAT-001): size the stage to the exact viewport box up front so a
@@ -394,6 +495,8 @@ export async function renderPage(
     isRendered(): boolean {
       return isDrawn;
     },
+    extractLayout,
+    hydrateFromCache,
   };
 
   return rendered;

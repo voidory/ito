@@ -214,6 +214,40 @@ export interface Source {
    * from fuzzy matching. Optional/additive and exactOptional-safe.
    */
   readonly textShingles?: readonly string[] | undefined;
+  /**
+   * M17 (§1.1) a pre-parsed, normalized layout of the source's PDF pages,
+   * cached so an immutable imported set text (keyed by `contentHash` /
+   * `versionHash`) can hydrate its `.textLayer` synchronously on reload without
+   * re-running pdf.js `getTextContent()`. Each entry holds the page's size,
+   * rotation and the normalized 0..1 span rects. Optional/additive so existing
+   * serialized sources read unchanged, and `exactOptionalPropertyTypes:
+   * true`-safe. The concrete `PreParsedPageLayout` shape lives in
+   * `src/pdf/textCache.ts`; the model stores it structurally.
+   */
+  readonly cachedPages?: readonly PreParsedPageLayout[] | undefined;
+}
+
+/**
+ * M17 (§1.1) one normalized span of a pre-parsed PDF page layout (see
+ * `src/pdf/textCache.ts`). Re-declared here (structurally identical) so
+ * `Source.cachedPages` can reference it without the model importing the
+ * browser-only pdf module.
+ */
+export interface PreParsedSpan {
+  readonly str: string;
+  /** Normalized [x, y, width, height] in 0..1 page stage coordinates. */
+  readonly normRect: readonly [number, number, number, number];
+  readonly angleRad?: number;
+  readonly isOcrSynthetic?: boolean;
+}
+
+/** M17 (§1.1) one pre-parsed PDF page's cached layout (see textCache.ts). */
+export interface PreParsedPageLayout {
+  readonly pageIndex: number;
+  readonly widthPt: number;
+  readonly heightPt: number;
+  readonly rotation: number;
+  readonly spans: readonly PreParsedSpan[];
 }
 
 // ---------------------------------------------------------------------------
@@ -239,6 +273,55 @@ export interface AreaAnchor {
    * predate the cropper still typecheck.
    */
   readonly imageDataUrl?: string;
+  /**
+   * M17 (§2.1) extracted/edited LaTeX for a cropped mathematical equation. When
+   * present the Reader popover + SubjectEditor can preview the formatted math
+   * and 1-click "Copy for Word" as native MathML. Optional/additive and
+   * `exactOptionalPropertyTypes: true`-safe (`string | undefined`).
+   */
+  readonly latex?: string | undefined;
+  /**
+   * M17 (§2.1) extracted/edited chemical SMILES (or Reaction SMILES
+   * `Reactants>>Products`) for a cropped reaction scheme. Optional/additive.
+   */
+  readonly smiles?: string | undefined;
+  /**
+   * M17 (§2.1) a full chemical mechanism: a SMILES reaction scheme plus the
+   * curly electron-pushing (`ElectronFlowArrow[]`) arrows overlaid on it.
+   * Optional/additive and exactOptional-safe.
+   */
+  readonly mechanism?: ChemicalMechanismSpec | undefined;
+}
+
+/**
+ * M17 (§2.1) a single curly electron-pushing arrow in a reaction mechanism. A
+ * `"full"` double-barbed arrow pushes an electron PAIR (2e⁻); a `"fishhook"`
+ * single-barbed arrow pushes a single electron (1e⁻ radical). The source/sink
+ * reference an atom label/index or a bond (`"[atomIdxA, atomIdxB]"`).
+ */
+export interface ElectronFlowArrow {
+  readonly id: string;
+  /** Source of electrons: atom label/index or bond [atomIdxA, atomIdxB]. */
+  readonly fromAtomOrBond: string;
+  /** Sink of electrons: target atom label/index or bond. */
+  readonly toAtomOrBond: string;
+  /** "full" = 2e- double-barbed curly arrow; "fishhook" = 1e- radical arrow. */
+  readonly barb: "full" | "fishhook";
+  readonly curvature?: number;
+}
+
+/**
+ * M17 (§2.1) a chemical reaction mechanism: a (reaction) SMILES scheme plus the
+ * curly electron-pushing arrows overlaid on it, with optional reagent/condition
+ * captions above and below the reaction arrow.
+ */
+export interface ChemicalMechanismSpec {
+  /** Standard SMILES or Reaction SMILES (e.g. "C=C.BrBr>>BrCCBr"). */
+  readonly smiles: string;
+  /** Curly electron-pushing arrows overlaid on the reaction scheme. */
+  readonly arrows: readonly ElectronFlowArrow[];
+  readonly conditionsAbove?: string;
+  readonly conditionsBelow?: string;
 }
 
 /**

@@ -1,7 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Icons } from "../ui/icons";
 import { Popover } from "../ui/primitives";
-import type { AnnotationId } from "../../model";
+import type { AnnotationId, ChemicalMechanismSpec, ElectronFlowArrow } from "../../model";
+import {
+  convertLatexToMathML,
+  copyScienceToWordClipboard,
+  renderMechanismSvg,
+} from "../../pdf/scienceOcr";
 import {
   HIGHLIGHT_COLORS,
   type AnnotationStyle,
@@ -223,10 +228,9 @@ export function HighlightEditPopover({
   }, [resolveAnchor, popover.annotationId]);
 
   const view = wb.viewFor(popover.annotationId);
-  const imageDataUrl =
-    view && view.annotation.scope.kind === "area"
-      ? view.annotation.scope.anchor.imageDataUrl
-      : undefined;
+  const areaAnchor =
+    view && view.annotation.scope.kind === "area" ? view.annotation.scope.anchor : undefined;
+  const imageDataUrl = areaAnchor?.imageDataUrl;
   const [menuMode, setMenuMode] = useState<null | "associate" | "insert" | "link">(null);
 
   const setColor = async (color: HighlightColor): Promise<void> => {
@@ -290,6 +294,21 @@ export function HighlightEditPopover({
           src={imageDataUrl}
           alt="Captured figure"
           className="ito-area-figure-preview"
+        />
+      )}
+      {/* M17 (§3.1) crop-to-science actions: extract/edit LaTeX math and
+          SMILES/mechanism, preview + copy-for-Word, and an inline curly-arrow
+          builder. Science data lives on the AREA anchor (a cropped figure /
+          scheme region), so the panel is shown ONLY for area annotations —
+          where setAnnotationScienceData actually persists. */}
+      {areaAnchor && (
+        <SciencePanel
+          wb={wb}
+          annotationId={popover.annotationId}
+          latex={areaAnchor.latex}
+          smiles={areaAnchor.smiles}
+          mechanism={areaAnchor.mechanism}
+          bump={bump}
         />
       )}
       <CommentSurface
@@ -395,6 +414,195 @@ export function HighlightEditPopover({
 
 /** M9 name for the annotation edit popover. */
 export const AnnotationPopover = HighlightEditPopover;
+
+/**
+ * M17 (§3.1) the Reader popover's crop-to-science panel. Extract/edit LaTeX
+ * math and SMILES/mechanism on an (area) annotation, preview the compiled math
+ * + the live curly-arrow mechanism `<svg>`, add/toggle `full`/`fishhook`
+ * electron-pushing arrows, and 1-click copy either payload for Microsoft Word.
+ * All persistence routes through {@link Workbench.setAnnotationScienceData}.
+ */
+function SciencePanel({
+  wb,
+  annotationId,
+  latex,
+  smiles,
+  mechanism,
+  bump,
+}: {
+  wb: Workbench;
+  annotationId: AnnotationId;
+  latex?: string | undefined;
+  smiles?: string | undefined;
+  mechanism?: ChemicalMechanismSpec | undefined;
+  bump: () => void;
+}): JSX.Element {
+  const [editing, setEditing] = useState<null | "latex" | "chem">(null);
+  const [latexDraft, setLatexDraft] = useState(latex ?? "");
+  const [smilesDraft, setSmilesDraft] = useState(smiles ?? mechanism?.smiles ?? "");
+
+  const mechSpec: ChemicalMechanismSpec | undefined = useMemo(() => {
+    if (mechanism) return mechanism;
+    if (smiles) return { smiles, arrows: [] };
+    return undefined;
+  }, [mechanism, smiles]);
+
+  const svgMarkup = useMemo(
+    () => (mechSpec ? renderMechanismSvg(mechSpec) : null),
+    [mechSpec],
+  );
+  const mathPreview = useMemo(
+    () => (latex ? convertLatexToMathML(latex) : null),
+    [latex],
+  );
+
+  const saveLatex = async (value: string): Promise<void> => {
+    await wb.setAnnotationScienceData(annotationId, { latex: value });
+    setEditing(null);
+    bump();
+  };
+  const saveChem = async (value: string): Promise<void> => {
+    const spec: ChemicalMechanismSpec = { smiles: value, arrows: mechanism?.arrows ?? [] };
+    await wb.setAnnotationScienceData(annotationId, { smiles: value, mechanism: spec });
+    setEditing(null);
+    bump();
+  };
+
+  const addCurlyArrow = async (barb: "full" | "fishhook"): Promise<void> => {
+    const base = mechSpec ?? { smiles: smilesDraft || "C=C", arrows: [] };
+    const nextArrow: ElectronFlowArrow = {
+      id: `a${base.arrows.length + 1}`,
+      fromAtomOrBond: "C1",
+      toAtomOrBond: "C2",
+      barb,
+    };
+    const spec: ChemicalMechanismSpec = {
+      ...base,
+      arrows: [...base.arrows, nextArrow],
+    };
+    await wb.setAnnotationScienceData(annotationId, { smiles: spec.smiles, mechanism: spec });
+    bump();
+  };
+
+  return (
+    <div data-testid="science-panel" className="ito-science-panel">
+      <div className="ito-annot-popover-actions">
+        <button
+          type="button"
+          data-testid="extract-latex-btn"
+          className="ito-ctx-item"
+          onClick={() => {
+            setLatexDraft(latex ?? "");
+            setEditing((m) => (m === "latex" ? null : "latex"));
+          }}
+        >
+          <span className="ito-ctx-item-label">Extract / Edit LaTeX Math</span>
+        </button>
+        <button
+          type="button"
+          data-testid="extract-chem-btn"
+          className="ito-ctx-item"
+          onClick={() => {
+            setSmilesDraft(smiles ?? mechanism?.smiles ?? "");
+            setEditing((m) => (m === "chem" ? null : "chem"));
+          }}
+        >
+          <span className="ito-ctx-item-label">Extract / Edit SMILES &amp; Mechanism</span>
+        </button>
+      </div>
+
+      {editing === "latex" && (
+        <div className="ito-science-editor">
+          <textarea
+            data-testid="latex-input"
+            value={latexDraft}
+            onChange={(e) => setLatexDraft(e.target.value)}
+            rows={2}
+            placeholder="\frac{-b \pm \sqrt{b^2 - 4ac}}{2a}"
+            style={{ width: "100%", fontFamily: "monospace" }}
+          />
+          <button data-testid="save-latex-btn" onClick={() => void saveLatex(latexDraft)}>
+            Save LaTeX
+          </button>
+        </div>
+      )}
+
+      {editing === "chem" && (
+        <div className="ito-science-editor">
+          <textarea
+            data-testid="smiles-input"
+            value={smilesDraft}
+            onChange={(e) => setSmilesDraft(e.target.value)}
+            rows={2}
+            placeholder="C=C.BrBr>>BrCCBr"
+            style={{ width: "100%", fontFamily: "monospace" }}
+          />
+          <button data-testid="save-chem-btn" onClick={() => void saveChem(smilesDraft)}>
+            Save SMILES
+          </button>
+        </div>
+      )}
+
+      {latex && (
+        <div
+          data-testid="annotation-latex-preview"
+          className="ito-latex-preview"
+          data-latex={latex}
+          // The compiled MathML is a safe, self-generated string (no user HTML).
+          dangerouslySetInnerHTML={{ __html: mathPreview ?? "" }}
+        />
+      )}
+      {latex && (
+        <button
+          type="button"
+          data-testid="copy-word-math-btn"
+          className="ito-ctx-item"
+          onClick={() => void copyScienceToWordClipboard({ kind: "math", latex })}
+        >
+          <span className="ito-ctx-item-label">Copy Math for Word</span>
+        </button>
+      )}
+
+      {svgMarkup && (
+        <>
+          <div
+            className="ito-chem-preview"
+            // Self-generated SVG markup (renderMechanismSvg); no user HTML.
+            dangerouslySetInnerHTML={{ __html: svgMarkup }}
+          />
+          <div className="ito-annot-popover-actions ito-curly-arrow-builder">
+            <button
+              type="button"
+              data-testid="add-curly-arrow-btn"
+              className="ito-ctx-item"
+              onClick={() => void addCurlyArrow("full")}
+            >
+              <span className="ito-ctx-item-label">+ Curly Arrow (2e⁻ full)</span>
+            </button>
+            <button
+              type="button"
+              data-testid="add-fishhook-arrow-btn"
+              className="ito-ctx-item"
+              onClick={() => void addCurlyArrow("fishhook")}
+            >
+              <span className="ito-ctx-item-label">+ Fishhook (1e⁻)</span>
+            </button>
+          </div>
+          <button
+            type="button"
+            data-testid="copy-word-chem-btn"
+            className="ito-ctx-item"
+            onClick={() =>
+              mechSpec && void copyScienceToWordClipboard({ kind: "chem", spec: mechSpec })
+            }
+          >
+            <span className="ito-ctx-item-label">Copy Mechanism SVG for Word</span>
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
 
 /**
  * M14–M16 (FEAT-001) a compact picker that lists every OTHER highlight so the

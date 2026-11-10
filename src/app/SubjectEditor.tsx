@@ -7,13 +7,20 @@ import {
   compositionStats,
   hydrateState,
   insertBridgingNoteAt,
+  insertChemMechanismBlockAt,
+  insertLatexBlockAt,
   serializeState,
   subjectSchema,
   type CompositionStats,
   type DocumentJson,
   type EvidenceAttrs,
 } from "../editor";
-import type { AnnotationId, PageId } from "../model";
+import type { AnnotationId, ChemicalMechanismSpec, PageId } from "../model";
+import {
+  convertLatexToMathML,
+  copyScienceToWordClipboard,
+  renderMechanismSvg,
+} from "../pdf/scienceOcr";
 import { INTERSECTION_RELATIONSHIP_KINDS, type AnnotationView, type Workbench } from "./workbench";
 
 /**
@@ -161,6 +168,11 @@ export function SubjectEditor({
                 : null;
             },
           ),
+        // M17 (§3.2): a paragraph carrying latexFormula / chemMechanismJson
+        // renders as a live, non-editable science block (formatted math /
+        // curly-arrow SVG) with a copy-for-Word affordance; an ordinary
+        // paragraph falls back to the schema's default editable rendering.
+        paragraph: (node) => new ParagraphNodeView(node),
       },
       dispatchTransaction(tr) {
         const next = view.state.apply(tr);
@@ -319,6 +331,44 @@ export function SubjectEditor({
     if (!view) return;
     const pos = view.state.selection.from;
     const next = insertBridgingNoteAt(view.state, pos, "");
+    view.updateState(next);
+    view.focus();
+    refreshStats();
+    scheduleSave();
+  }, [refreshStats, scheduleSave]);
+
+  // M17 (§3.2) insert a live LaTeX EQUATION block at the cursor; the paragraph
+  // NodeView renders its formatted math preview + a "Copy for Word (MathML)".
+  const insertLatexBlock = useCallback(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    const pos = view.state.selection.from;
+    const next = insertLatexBlockAt(
+      view.state,
+      pos,
+      "\\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}",
+    );
+    view.updateState(next);
+    view.focus();
+    refreshStats();
+    scheduleSave();
+  }, [refreshStats, scheduleSave]);
+
+  // M17 (§3.2) insert a live CHEM-MECHANISM block (SMILES + ElectronFlowArrow[])
+  // at the cursor; the paragraph NodeView renders the curly-arrow vector <svg>
+  // + a "Copy SVG for Word".
+  const insertChemBlock = useCallback(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    const pos = view.state.selection.from;
+    const spec: ChemicalMechanismSpec = {
+      smiles: "C=C.BrBr>>BrCCBr",
+      conditionsAbove: "CH2Cl2",
+      arrows: [
+        { id: "a1", fromAtomOrBond: "C1=C2", toAtomOrBond: "Br1", barb: "full" },
+      ],
+    };
+    const next = insertChemMechanismBlockAt(view.state, pos, spec);
     view.updateState(next);
     view.focus();
     refreshStats();
@@ -518,6 +568,24 @@ export function SubjectEditor({
         >
           + Bridging Note
         </button>
+        <button
+          type="button"
+          data-testid="insert-latex-block-btn"
+          title="Insert a live LaTeX equation block"
+          className="ito-fmt-btn"
+          onClick={insertLatexBlock}
+        >
+          + LaTeX Equation
+        </button>
+        <button
+          type="button"
+          data-testid="insert-chem-block-btn"
+          title="Insert a chemical mechanism block (SMILES + curly arrows)"
+          className="ito-fmt-btn"
+          onClick={insertChemBlock}
+        >
+          + Chem Mechanism (SMILES + Arrows)
+        </button>
       </div>
 
       {picking && (
@@ -631,6 +699,97 @@ class EvidenceNodeView {
   }
   ignoreMutation(): boolean {
     return true;
+  }
+}
+
+/**
+ * M17 (§3.2) a ProseMirror NodeView for `paragraph`. When the paragraph carries
+ * a `latexFormula` it renders a live, read-only EQUATION block (compiled MathML
+ * preview + "Copy for Word (MathML)"); when it carries a `chemMechanismJson` it
+ * renders a live CHEM-MECHANISM block (the curly-arrow vector `<svg>` + "Copy
+ * SVG for Word"). An ordinary paragraph renders a normal editable `<p>` with a
+ * contentDOM so writing is unaffected. The attrs are the durable source of
+ * truth; this view is a convenience render over them.
+ */
+class ParagraphNodeView {
+  readonly dom: HTMLElement;
+  readonly contentDOM?: HTMLElement;
+
+  constructor(node: { attrs: Record<string, unknown> }) {
+    const latex = node.attrs.latexFormula;
+    const chemJson = node.attrs.chemMechanismJson;
+
+    if (typeof latex === "string" && latex.length > 0) {
+      const block = document.createElement("div");
+      block.className = "page-math-block";
+      block.setAttribute("data-testid", "page-math-block");
+      block.setAttribute("data-latex", latex);
+      block.contentEditable = "false";
+      const preview = document.createElement("div");
+      preview.className = "ito-math-preview";
+      preview.innerHTML = convertLatexToMathML(latex);
+      block.appendChild(preview);
+      const copy = document.createElement("button");
+      copy.type = "button";
+      copy.setAttribute("data-testid", "copy-math-word-btn");
+      copy.textContent = "Copy for Word (MathML)";
+      copy.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        void copyScienceToWordClipboard({ kind: "math", latex });
+      });
+      block.appendChild(copy);
+      this.dom = block;
+      return;
+    }
+
+    if (typeof chemJson === "string" && chemJson.length > 0) {
+      const block = document.createElement("div");
+      block.className = "page-chem-block";
+      block.setAttribute("data-testid", "page-chem-block");
+      block.contentEditable = "false";
+      let spec: ChemicalMechanismSpec | null = null;
+      try {
+        spec = JSON.parse(chemJson) as ChemicalMechanismSpec;
+      } catch {
+        spec = null;
+      }
+      if (spec) {
+        const svgHost = document.createElement("div");
+        svgHost.className = "ito-chem-preview";
+        svgHost.innerHTML = renderMechanismSvg(spec);
+        block.appendChild(svgHost);
+        const copy = document.createElement("button");
+        copy.type = "button";
+        copy.setAttribute("data-testid", "copy-chem-word-btn");
+        copy.textContent = "Copy SVG for Word";
+        const captured = spec;
+        copy.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          void copyScienceToWordClipboard({ kind: "chem", spec: captured });
+        });
+        block.appendChild(copy);
+      }
+      this.dom = block;
+      return;
+    }
+
+    // Ordinary editable paragraph: ProseMirror fills contentDOM with inline content.
+    const p = document.createElement("p");
+    this.dom = p;
+    this.contentDOM = p;
+  }
+
+  stopEvent(event: Event): boolean {
+    // Let clicks on the copy button through, but otherwise do not swallow
+    // events for an ordinary editable paragraph.
+    return (event.target as HTMLElement | null)?.tagName === "BUTTON";
+  }
+
+  ignoreMutation(mutation: { type: string }): boolean {
+    // Science blocks are non-editable; ignore any mutation inside them. For an
+    // ordinary paragraph (contentDOM present) let ProseMirror handle mutations.
+    if (this.contentDOM) return false;
+    return mutation.type !== "selection";
   }
 }
 

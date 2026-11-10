@@ -122,12 +122,110 @@ export function recomputeRectsFromQuote(
   }
   const fallback: NormalizedRect[] = [];
   for (const span of spans) {
+    // M17 (§1.2): a cached / synthesized OCR span carries its NORMALIZED rect
+    // on data-norm-rect, which is usable directly (no stage-box math) and never
+    // zero-area — the strongest fallback for a scanned layer.
+    const fromNorm = normRectFromDataset(span);
+    if (fromNorm) {
+      fallback.push(fromNorm);
+      continue;
+    }
     const box = spanBox(span);
     if (!box) continue;
     const norm = normalizeBox(box, stageBox);
     if (norm) fallback.push(norm);
   }
   return fallback;
+}
+
+/**
+ * M17 (§1.2) read a `.textLayer` span's `data-norm-rect` (set by the set-text
+ * layout cache + the synthetic OCR injector as `"x,y,w,h"` in 0..1) into a
+ * guaranteed non-zero {@link NormalizedRect}. Returns null when the attribute
+ * is absent or malformed. Exported so the anchor-fallback path can reuse it.
+ */
+export function normRectFromDataset(el: HTMLElement): NormalizedRect | null {
+  const raw = el.dataset?.normRect ?? el.getAttribute?.("data-norm-rect");
+  if (!raw) return null;
+  const parts = raw.split(",").map((p) => parseFloat(p));
+  if (parts.length !== 4 || parts.some((v) => !Number.isFinite(v))) return null;
+  const [x, y, w, h] = parts as [number, number, number, number];
+  if (w <= 0 || h <= 0) return null;
+  return { x, y, width: w, height: h };
+}
+
+/**
+ * M17 (§1.2) scanned / zero-height OCR highlight fallback. Given a DOM `Range`
+ * (as created from a selection over OCR text) and the page stage element,
+ * produce valid NON-ZERO normalized rects even when `range.getClientRects()`
+ * is empty or reports `0×0` boxes (the hallmark of a broken scanned OCR layer):
+ *
+ *  1. Prefer real client rects with positive area (normalized against the
+ *     stage box).
+ *  2. Else union the `.textLayer` spans the range touches, reading each span's
+ *     `data-norm-rect` (cached / synthesized OCR geometry) — always non-zero.
+ *  3. Else measure the spans' style/bounding box.
+ *
+ * Returns `[]` only when no geometry at all is recoverable, so a caller never
+ * clobbers good rects with an empty set. Deterministic + DOM-reading-only.
+ */
+export function createAnchorRectsWithOcrFallback(
+  pageStageEl: HTMLElement,
+  range: Range,
+): NormalizedRect[] {
+  const stageBox = pageStageEl.getBoundingClientRect();
+  // 1) Real client rects with positive area.
+  try {
+    const clientRects = Array.from(range.getClientRects()).filter(
+      (r) => r.width > 0 && r.height > 0,
+    );
+    if (clientRects.length > 0 && stageBox.width > 0 && stageBox.height > 0) {
+      return clientRects.map((r) => normalizeDomRect(r, stageBox));
+    }
+  } catch {
+    // fall through
+  }
+
+  // Collect the spans the range intersects (ancestor spans of its text nodes).
+  const touched = new Set<HTMLElement>();
+  const collect = (node: Node | null): void => {
+    if (!node) return;
+    const el =
+      node.nodeType === Node.TEXT_NODE
+        ? (node.parentElement?.closest<HTMLElement>("span") ?? null)
+        : (node as HTMLElement).closest?.<HTMLElement>("span") ?? null;
+    if (el) touched.add(el);
+  };
+  collect(range.startContainer);
+  collect(range.endContainer);
+  // Also walk any spans fully enclosed by the range's common ancestor.
+  const common =
+    range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
+      ? (range.commonAncestorContainer as HTMLElement)
+      : range.commonAncestorContainer.parentElement;
+  if (common) {
+    common.querySelectorAll<HTMLElement>("span").forEach((span) => {
+      try {
+        if (range.intersectsNode(span)) touched.add(span);
+      } catch {
+        // intersectsNode may be unavailable; startContainer/endContainer cover it.
+      }
+    });
+  }
+
+  const out: NormalizedRect[] = [];
+  for (const span of touched) {
+    const fromNorm = normRectFromDataset(span);
+    if (fromNorm) {
+      out.push(fromNorm);
+      continue;
+    }
+    const box = spanBox(span);
+    if (!box) continue;
+    const norm = normalizeBox(box, stageBox);
+    if (norm && norm.width > 0 && norm.height > 0) out.push(norm);
+  }
+  return out;
 }
 
 /** Normalize a DOMRect against a stage box into 0..1 coordinates. */

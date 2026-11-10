@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   createAnchor,
+  createAnchorRectsWithOcrFallback,
   cropCanvasRegionToDataUrl,
   hitTestAnnotations,
   installPointerSelection,
@@ -12,7 +13,7 @@ import {
   type HitTestTarget,
   type RenderedPage,
 } from "../../pdf";
-import type { NormalizedRect } from "../../model";
+import type { NormalizedRect, PreParsedPageLayout } from "../../model";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import type { AnnotationId, SourceId } from "../../model";
 import {
@@ -383,6 +384,44 @@ export function SourcePane({
           ...(pageTexts != null ? { pageTexts } : {}),
         });
       }
+
+      // M17 (§1.1): set-text pre-parsed layout cache. An imported PDF is an
+      // immutable set text, so parsing getTextContent() on every reload is
+      // wasted work. When the source already carries `cachedPages`, hydrate
+      // each RENDERED page's `.textLayer` from the cache IMMEDIATELY (selection
+      // / highlights / Ctrl+F work on load). On first load (no cache) extract
+      // the normalized layouts from the rendered pages and persist them so the
+      // next open is instant. Only drawn pages expose a layout; a virtualized
+      // page caches once it rasterizes (best-effort, never blocks the render).
+      if (source && !cancelled) {
+        if (source.cachedPages && source.cachedPages.length > 0) {
+          const byIndex = new Map(source.cachedPages.map((p) => [p.pageIndex, p]));
+          for (const rp of pages) {
+            if (!rp.isRendered()) continue;
+            const layout = byIndex.get(Number(rp.container.dataset.pageIndex ?? "0"));
+            if (layout) {
+              try {
+                rp.hydrateFromCache(layout);
+              } catch {
+                // Hydration is an optimization; a failure just means the live
+                // pdf.js text layer is used as-is.
+              }
+            }
+          }
+        } else {
+          const layouts: PreParsedPageLayout[] = [];
+          for (const rp of pages) {
+            if (!rp.isRendered()) continue;
+            try {
+              layouts.push(rp.extractLayout());
+            } catch {
+              // skip a page whose layout could not be extracted
+            }
+          }
+          if (layouts.length > 0) void wb.cacheParsedPdfPages(sourceId, layouts);
+        }
+      }
+
       setReady(true);
     })().catch((err) => console.error("render failed", err));
     return () => {
@@ -623,7 +662,7 @@ export function SourcePane({
       }
       const pageIndex = Number(page.container.dataset.pageIndex ?? "0");
       try {
-        const anchor = createAnchor({
+        let anchor = createAnchor({
           docId: sourceId,
           sourceVersionHash: source.versionHash,
           pageIndex,
@@ -631,6 +670,15 @@ export function SourcePane({
           pageBox: page.pageBox(),
           pageText: page.pageText,
         });
+        // M17 (§1.2(1)): scanned / OCR pages can report empty or 0×0 client
+        // rects, so createAnchor yields no `rects` and the highlight would be
+        // invisible. Recover non-zero normalized rects from the matched
+        // `.textLayer` spans (their cached/synthesized `data-norm-rect`) so a
+        // selection on an OCR span always commits a visible highlight.
+        if (anchor.rects.length === 0) {
+          const ocrRects = createAnchorRectsWithOcrFallback(page.stage, range);
+          if (ocrRects.length > 0) anchor = { ...anchor, rects: ocrRects };
+        }
         // FEAT-002 (2) tool-first: with a Highlight/Underline tool active, the
         // annotation is created IMMEDIATELY with the active colour and NO
         // popup. With no tool active, show the single fallback popup; it must

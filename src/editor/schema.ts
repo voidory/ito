@@ -114,12 +114,35 @@ const nodes: Record<string, NodeSpec> = {
     // block inserted from the SubjectEditor formatting toolbar — a visually
     // emphasised paragraph for the author's own synthesis. Like the other
     // flags it lives in the durable JSON, not just the rendered DOM.
+    //
+    // M17 (§3.2) `latexFormula` holds a LaTeX string for a live EQUATION block
+    // (rendered to formatted math + 1-click MathML "Copy for Word"); and
+    // `chemMechanismJson` holds a JSON-serialized `ChemicalMechanismSpec` for a
+    // live CHEM-MECHANISM block (rendered to the curly-arrow vector <svg> + a
+    // "Copy SVG for Word"). Both are optional/nullable and backward-compatible
+    // just like `bridgingNote`/`callout`: an older doc without them reads fine.
     attrs: {
       copiedComment: { default: false },
       bridgingNote: { default: false },
       callout: { default: false },
+      latexFormula: { default: null },
+      chemMechanismJson: { default: null },
     },
     toDOM(node) {
+      if (node.attrs.latexFormula != null) {
+        return [
+          "p",
+          { class: "page-math-block", "data-latex": String(node.attrs.latexFormula) },
+          0,
+        ];
+      }
+      if (node.attrs.chemMechanismJson != null) {
+        return [
+          "p",
+          { class: "page-chem-block", "data-chem": String(node.attrs.chemMechanismJson) },
+          0,
+        ];
+      }
       if (node.attrs.callout) {
         return ["p", { class: "synthesis-callout", "data-callout": "true" }, 0];
       }
@@ -139,6 +162,8 @@ const nodes: Record<string, NodeSpec> = {
             copiedComment: el.getAttribute("data-copied-comment") === "true",
             bridgingNote: el.getAttribute("data-bridging-note") === "true",
             callout: el.getAttribute("data-callout") === "true",
+            latexFormula: el.getAttribute("data-latex"),
+            chemMechanismJson: el.getAttribute("data-chem"),
           };
         },
       },

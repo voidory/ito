@@ -100,6 +100,47 @@ export function insertBridgingNoteAt(
   return state.apply(tr);
 }
 
+/**
+ * M17 (§3.2) insert a live LaTeX EQUATION block (`paragraph` carrying
+ * `latexFormula`) at the given document position. The paragraph holds the raw
+ * LaTeX in its attr (the durable source of truth); the SubjectEditor renders a
+ * formatted preview + a "Copy for Word (MathML)" affordance from it. Returns
+ * the next EditorState. DOM-free + deterministic.
+ */
+export function insertLatexBlockAt(
+  state: EditorState,
+  pos: number,
+  latex: string,
+): EditorState {
+  const para = subjectSchema.nodes.paragraph!.create({ latexFormula: latex });
+  const clamped = Math.max(0, Math.min(pos, state.doc.content.size));
+  const $pos = state.doc.resolve(clamped);
+  const insertAt = $pos.depth > 0 ? $pos.after($pos.depth) : clamped;
+  const tr = state.tr.insert(Math.min(insertAt, state.doc.content.size), para);
+  return state.apply(tr);
+}
+
+/**
+ * M17 (§3.2) insert a live CHEM-MECHANISM block (`paragraph` carrying
+ * `chemMechanismJson`, a JSON-serialized `ChemicalMechanismSpec`) at the given
+ * position. The SubjectEditor renders the interactive curly-arrow vector `<svg>`
+ * + a "Copy SVG for Word" affordance from it. `spec` is any JSON-serializable
+ * object (the model's `ChemicalMechanismSpec`). Returns the next EditorState.
+ */
+export function insertChemMechanismBlockAt(
+  state: EditorState,
+  pos: number,
+  spec: unknown,
+): EditorState {
+  const json = JSON.stringify(spec);
+  const para = subjectSchema.nodes.paragraph!.create({ chemMechanismJson: json });
+  const clamped = Math.max(0, Math.min(pos, state.doc.content.size));
+  const $pos = state.doc.resolve(clamped);
+  const insertAt = $pos.depth > 0 ? $pos.after($pos.depth) : clamped;
+  const tr = state.tr.insert(Math.min(insertAt, state.doc.content.size), para);
+  return state.apply(tr);
+}
+
 /** Insert evidence at the END of the document (used when no cursor is given). */
 export function appendEvidence(
   state: EditorState,

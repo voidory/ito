@@ -38,6 +38,8 @@ import {
   type AnnotationStyleRecord,
   type AnchorResolution,
   type AreaAnchor,
+  type ChemicalMechanismSpec,
+  type PreParsedPageLayout,
   type AssetIndexEntry,
   type BrainData,
   type BrainId,
@@ -1509,6 +1511,66 @@ export class Workbench {
     const sources = this.data.sources.slice();
     sources[idx] = { ...source, ...next };
     this.data = { ...this.data, sources };
+    await this.persist();
+  }
+
+  /**
+   * M17 (§1.1) persist a source's pre-parsed PDF page layouts on
+   * `Source.cachedPages` so an immutable imported set text can hydrate its
+   * `.textLayer` synchronously on the next reload (no pdf.js `getTextContent()`
+   * re-parse). A no-op for an unknown source or an empty page list. Writes the
+   * cache in place (idempotent — a later pass with more pages replaces it) and
+   * persists once.
+   */
+  async cacheParsedPdfPages(
+    sourceId: SourceId,
+    pages: readonly PreParsedPageLayout[],
+  ): Promise<void> {
+    const idx = this.data.sources.findIndex((s) => s.id === sourceId);
+    if (idx < 0) return;
+    if (pages.length === 0) return;
+    const source = this.data.sources[idx]!;
+    const sources = this.data.sources.slice();
+    sources[idx] = { ...source, cachedPages: pages };
+    this.data = { ...this.data, sources };
+    await this.persist();
+  }
+
+  /**
+   * M17 (§3.1) set scientific extraction data (`latex` / `smiles` /
+   * `mechanism`) on an annotation's AREA anchor. Follows the annotation-patch +
+   * `this.data = {...}` + persist discipline. A no-op for an unknown annotation
+   * or a non-area scope (science data lives on the AreaAnchor). Fields that are
+   * `undefined` are omitted from the write (exactOptional-safe) and a field set
+   * to `null` clears any previously stored value. Persists once.
+   */
+  async setAnnotationScienceData(
+    annotationId: AnnotationId,
+    data: {
+      latex?: string | null;
+      smiles?: string | null;
+      mechanism?: ChemicalMechanismSpec | null;
+    },
+  ): Promise<void> {
+    const idx = this.data.annotations.findIndex((a) => a.id === annotationId);
+    if (idx < 0) return;
+    const prev = this.data.annotations[idx]!;
+    if (prev.scope.kind !== "area") return;
+    const anchor = prev.scope.anchor;
+    const nextAnchor: typeof anchor = {
+      ...anchor,
+      ...(data.latex !== undefined ? { latex: data.latex ?? undefined } : {}),
+      ...(data.smiles !== undefined ? { smiles: data.smiles ?? undefined } : {}),
+      ...(data.mechanism !== undefined ? { mechanism: data.mechanism ?? undefined } : {}),
+    };
+    const updated: Annotation = {
+      ...prev,
+      scope: { kind: "area", anchor: nextAnchor },
+      updatedAt: new Date().toISOString(),
+    };
+    const annotations = this.data.annotations.slice();
+    annotations[idx] = updated;
+    this.data = { ...this.data, annotations };
     await this.persist();
   }
 
