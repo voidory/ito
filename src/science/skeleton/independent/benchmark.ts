@@ -9,10 +9,12 @@
  *
  * This is an independent-renderer benchmark, NOT a scanned-textbook benchmark.
  */
-import { gunzipSync, strFromU8, strToU8 } from "fflate";
+import { gunzipSync, strFromU8 } from "fflate";
 import { reconstructCarbonSkeleton } from "../carbonSkeleton";
 import type { CarbonSkeletonResult, GrayImage, Point } from "../types";
-import { aggregate, evaluate, type EvaluationMetrics, type GroundTruthGraph } from "../realworld/metrics";
+import { aggregateIndependent, evaluateIndependent } from "./independentMetrics";
+import type { EvaluationMetrics } from "../realworld/metrics";
+import type { GroundTruthGraph } from "../realworld/metrics";
 import { INDEPENDENT_CORPUS_B64 } from "./corpusBundle";
 
 interface Entry {
@@ -30,16 +32,14 @@ export interface IndependentCase {
 }
 export interface IndependentReport {
   readonly cases: IndependentCase[];
-  readonly aggregate: ReturnType<typeof aggregate>;
-  readonly byCategory: Record<string, ReturnType<typeof aggregate>>;
+  readonly aggregate: ReturnType<typeof aggregateIndependent>;
+  readonly byCategory: Record<string, ReturnType<typeof aggregateIndependent>>;
 }
 
 let cachedBundle: Bundle | undefined;
 function loadBundle(): Bundle {
   if (cachedBundle) return cachedBundle;
   const bytes = Uint8Array.from(atob(INDEPENDENT_CORPUS_B64), (c) => c.charCodeAt(0));
-  // Node has atob; Vitest/jsdom also provides it. Avoid Buffer so this stays
-  // browser-compatible and does not introduce a Node-only runtime dependency.
   cachedBundle = JSON.parse(strFromU8(gunzipSync(bytes))) as Bundle;
   return cachedBundle;
 }
@@ -61,7 +61,6 @@ function parseBondPaths(svg: string): { x0: number; y0: number; x1: number; y1: 
   return paths;
 }
 
-/** Supersampled line rasterisation of the independent RDKit SVG bond paths. */
 export function rasterizeIndependentSvg(svg: string, width = 420, height = 320): GrayImage {
   const SS = 3;
   const W = width * SS, H = height * SS;
@@ -88,7 +87,6 @@ export function rasterizeIndependentSvg(svg: string, width = 420, height = 320):
     }
   }
   const data = new Uint8ClampedArray(width * height);
-  // Area-average the supersampled binary image to retain anti-aliasing.
   for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
     let ink = 0;
     for (let sy = 0; sy < SS; sy++) for (let sx = 0; sx < SS; sx++) {
@@ -100,14 +98,13 @@ export function rasterizeIndependentSvg(svg: string, width = 420, height = 320):
 }
 
 export function evaluateIndependentEntry(entry: Entry, svg: string): IndependentCase {
-  const gray = rasterizeIndependentSvg(svg);
-  const result = reconstructCarbonSkeleton(gray);
+  const result = reconstructCarbonSkeleton(rasterizeIndependentSvg(svg));
   const gt: GroundTruthGraph = {
     atoms: entry.atoms.map(([x, y]) => ({ x, y }) as Point),
     bonds: entry.bonds.map(([a, b]) => [a, b] as [number, number]),
     expectedCycleRank: entry.expectedCycleRank,
   };
-  const metrics = evaluate(result, gt, entry.bondLengthPx * 0.35);
+  const metrics = evaluateIndependent(result, gt, entry.bondLengthPx * 0.35);
   return { entry, result, metrics };
 }
 
@@ -116,9 +113,9 @@ export function runIndependentBenchmark(): IndependentReport {
   const cases = manifest.variants.map((entry) => evaluateIndependentEntry(entry, svgs[entry.file] as string));
   const byCategory: Record<string, IndependentCase[]> = {};
   for (const c of cases) (byCategory[c.entry.category] ??= []).push(c);
-  const categoryReports: Record<string, ReturnType<typeof aggregate>> = {};
-  for (const [k, v] of Object.entries(byCategory)) categoryReports[k] = aggregate(v.map((x) => x.metrics));
-  return { cases, aggregate: aggregate(cases.map((x) => x.metrics)), byCategory: categoryReports };
+  const categoryReports: Record<string, ReturnType<typeof aggregateIndependent>> = {};
+  for (const [k, v] of Object.entries(byCategory)) categoryReports[k] = aggregateIndependent(v.map((x) => x.metrics));
+  return { cases, aggregate: aggregateIndependent(cases.map((x) => x.metrics)), byCategory: categoryReports };
 }
 
 export function independentCorpusSize(): number {
