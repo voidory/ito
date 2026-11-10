@@ -1,0 +1,4372 @@
+{
+  "note": "Real-world carbon-skeleton benchmark. Generated from corpus.ts + layout.ts. These are REAL molecular structures rendered to anti-aliased PNG (not scanned pages). Synthetic SVG fixtures are a SEPARATE benchmark category and MUST NOT be combined.",
+  "pad": 28,
+  "count": 55,
+  "structures": [
+    {
+      "name": "n-propane",
+      "description": "carbon skeleton of propane",
+      "category": "straight-chain",
+      "split": "development",
+      "width": 140,
+      "height": 80,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          28,
+          28
+        ],
+        [
+          69.6,
+          52
+        ],
+        [
+          111.1,
+          28
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 0
+    },
+    {
+      "name": "n-butane",
+      "description": "carbon skeleton of n-butane",
+      "category": "straight-chain",
+      "split": "evaluation",
+      "width": 181,
+      "height": 80,
+      "lineWidth": 2,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          28,
+          28
+        ],
+        [
+          69.6,
+          52
+        ],
+        [
+          111.1,
+          28
+        ],
+        [
+          152.7,
+          52
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 0
+    },
+    {
+      "name": "n-pentane",
+      "description": "carbon skeleton of n-pentane",
+      "category": "straight-chain",
+      "split": "development",
+      "width": 223,
+      "height": 80,
+      "lineWidth": 4,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          28,
+          28
+        ],
+        [
+          69.6,
+          52
+        ],
+        [
+          111.1,
+          28
+        ],
+        [
+          152.7,
+          52
+        ],
+        [
+          194.3,
+          28
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 0
+    },
+    {
+      "name": "n-hexane",
+      "description": "carbon skeleton of n-hexane",
+      "category": "straight-chain",
+      "split": "development",
+      "width": 230,
+      "height": 76,
+      "lineWidth": 3,
+      "bondLengthPx": 40,
+      "atoms": [
+        [
+          28,
+          28
+        ],
+        [
+          62.6,
+          48
+        ],
+        [
+          97.3,
+          28
+        ],
+        [
+          131.9,
+          48
+        ],
+        [
+          166.6,
+          28
+        ],
+        [
+          201.2,
+          48
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          5
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 0
+    },
+    {
+      "name": "n-heptane",
+      "description": "carbon skeleton of n-heptane",
+      "category": "straight-chain",
+      "split": "evaluation",
+      "width": 347,
+      "height": 84,
+      "lineWidth": 3,
+      "bondLengthPx": 56,
+      "atoms": [
+        [
+          28,
+          28
+        ],
+        [
+          76.5,
+          56
+        ],
+        [
+          125,
+          28
+        ],
+        [
+          173.5,
+          56
+        ],
+        [
+          222,
+          28
+        ],
+        [
+          270.5,
+          56
+        ],
+        [
+          319,
+          28
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          6
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 0
+    },
+    {
+      "name": "n-octane",
+      "description": "carbon skeleton of n-octane",
+      "category": "straight-chain",
+      "split": "evaluation",
+      "width": 347,
+      "height": 80,
+      "lineWidth": 2,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          28,
+          28
+        ],
+        [
+          69.6,
+          52
+        ],
+        [
+          111.1,
+          28
+        ],
+        [
+          152.7,
+          52
+        ],
+        [
+          194.3,
+          28
+        ],
+        [
+          235.8,
+          52
+        ],
+        [
+          277.4,
+          28
+        ],
+        [
+          319,
+          52
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          6
+        ],
+        [
+          6,
+          7
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 0
+    },
+    {
+      "name": "n-decane",
+      "description": "carbon skeleton of n-decane",
+      "category": "straight-chain",
+      "split": "evaluation",
+      "width": 337,
+      "height": 74,
+      "lineWidth": 3,
+      "bondLengthPx": 36,
+      "atoms": [
+        [
+          28,
+          28
+        ],
+        [
+          59.2,
+          46
+        ],
+        [
+          90.4,
+          28
+        ],
+        [
+          121.5,
+          46
+        ],
+        [
+          152.7,
+          28
+        ],
+        [
+          183.9,
+          46
+        ],
+        [
+          215.1,
+          28
+        ],
+        [
+          246.2,
+          46
+        ],
+        [
+          277.4,
+          28
+        ],
+        [
+          308.6,
+          46
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          6
+        ],
+        [
+          6,
+          7
+        ],
+        [
+          7,
+          8
+        ],
+        [
+          8,
+          9
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 0
+    },
+    {
+      "name": "octanoic-acid",
+      "description": "fatty acid backbone (carboxyl labelled)",
+      "category": "straight-chain",
+      "split": "development",
+      "width": 381,
+      "height": 112,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          28,
+          28
+        ],
+        [
+          69.6,
+          52
+        ],
+        [
+          111.1,
+          28
+        ],
+        [
+          152.7,
+          52
+        ],
+        [
+          194.3,
+          28
+        ],
+        [
+          235.8,
+          52
+        ],
+        [
+          277.4,
+          28
+        ],
+        [
+          319,
+          52
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          6
+        ],
+        [
+          6,
+          7
+        ]
+      ],
+      "labels": [
+        [
+          333,
+          46,
+          "OH"
+        ],
+        [
+          325,
+          70,
+          "O"
+        ]
+      ],
+      "expectedCycleRank": 0
+    },
+    {
+      "name": "ethanol-skeleton",
+      "description": "ethanol carbon skeleton with OH label",
+      "category": "straight-chain",
+      "split": "evaluation",
+      "width": 142,
+      "height": 100,
+      "lineWidth": 3,
+      "bondLengthPx": 60,
+      "atoms": [
+        [
+          28,
+          28
+        ],
+        [
+          80,
+          58
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ]
+      ],
+      "labels": [
+        [
+          94,
+          58,
+          "OH"
+        ]
+      ],
+      "expectedCycleRank": 0
+    },
+    {
+      "name": "isobutane",
+      "description": "2-methylpropane",
+      "category": "branched-chain",
+      "split": "evaluation",
+      "width": 140,
+      "height": 128,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          69.6,
+          76
+        ],
+        [
+          28,
+          100
+        ],
+        [
+          111.1,
+          100
+        ],
+        [
+          69.6,
+          28
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          2
+        ],
+        [
+          0,
+          3
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 0
+    },
+    {
+      "name": "isopentane",
+      "description": "2-methylbutane",
+      "category": "branched-chain",
+      "split": "development",
+      "width": 181,
+      "height": 104,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          28,
+          52
+        ],
+        [
+          69.6,
+          76
+        ],
+        [
+          111.1,
+          52
+        ],
+        [
+          152.7,
+          76
+        ],
+        [
+          69.6,
+          28
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          1,
+          4
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 0
+    },
+    {
+      "name": "neopentane",
+      "description": "2,2-dimethylpropane (quaternary carbon, degree-4)",
+      "category": "branched-chain",
+      "split": "evaluation",
+      "width": 152,
+      "height": 152,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          76,
+          76
+        ],
+        [
+          76,
+          28
+        ],
+        [
+          76,
+          124
+        ],
+        [
+          28,
+          76
+        ],
+        [
+          124,
+          76
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          2
+        ],
+        [
+          0,
+          3
+        ],
+        [
+          0,
+          4
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 0
+    },
+    {
+      "name": "2,3-dimethylbutane",
+      "description": "two adjacent methyl branches",
+      "category": "multi-branch",
+      "split": "evaluation",
+      "width": 181,
+      "height": 128,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          28,
+          52
+        ],
+        [
+          69.6,
+          76
+        ],
+        [
+          111.1,
+          52
+        ],
+        [
+          152.7,
+          76
+        ],
+        [
+          69.6,
+          28
+        ],
+        [
+          111.1,
+          100
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          1,
+          4
+        ],
+        [
+          2,
+          5
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 0
+    },
+    {
+      "name": "3-ethylpentane",
+      "description": "pentane with an ethyl branch",
+      "category": "multi-branch",
+      "split": "development",
+      "width": 223,
+      "height": 128,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          28,
+          28
+        ],
+        [
+          69.6,
+          52
+        ],
+        [
+          111.1,
+          28
+        ],
+        [
+          152.7,
+          52
+        ],
+        [
+          194.3,
+          28
+        ],
+        [
+          111.1,
+          76
+        ],
+        [
+          152.7,
+          100
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          2,
+          5
+        ],
+        [
+          5,
+          6
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 0
+    },
+    {
+      "name": "isooctane",
+      "description": "2,2,4-trimethylpentane (anti-knock reference)",
+      "category": "multi-branch",
+      "split": "evaluation",
+      "width": 229,
+      "height": 152,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          34.4,
+          52
+        ],
+        [
+          76,
+          76
+        ],
+        [
+          117.6,
+          52
+        ],
+        [
+          159.1,
+          76
+        ],
+        [
+          200.7,
+          52
+        ],
+        [
+          76,
+          28
+        ],
+        [
+          28,
+          76
+        ],
+        [
+          159.1,
+          124
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          1,
+          5
+        ],
+        [
+          1,
+          6
+        ],
+        [
+          3,
+          7
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 0
+    },
+    {
+      "name": "neopentyl-chain",
+      "description": "quaternary carbon feeding a chain (multi-branch)",
+      "category": "multi-branch",
+      "split": "development",
+      "width": 223,
+      "height": 104,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          28,
+          52
+        ],
+        [
+          69.6,
+          76
+        ],
+        [
+          111.1,
+          52
+        ],
+        [
+          152.7,
+          76
+        ],
+        [
+          194.3,
+          52
+        ],
+        [
+          69.6,
+          28
+        ],
+        [
+          28,
+          52
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          1,
+          5
+        ],
+        [
+          1,
+          6
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 0
+    },
+    {
+      "name": "cyclopropane",
+      "description": "3-membered ring (small ring)",
+      "category": "small-ring",
+      "split": "evaluation",
+      "width": 116,
+      "height": 108,
+      "lineWidth": 4,
+      "bondLengthPx": 60,
+      "atoms": [
+        [
+          58,
+          28
+        ],
+        [
+          88,
+          80
+        ],
+        [
+          28,
+          80
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          0
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 1
+    },
+    {
+      "name": "cyclobutane",
+      "description": "4-membered ring (small ring)",
+      "category": "small-ring",
+      "split": "development",
+      "width": 133,
+      "height": 133,
+      "lineWidth": 3,
+      "bondLengthPx": 54,
+      "atoms": [
+        [
+          66.2,
+          28
+        ],
+        [
+          104.4,
+          66.2
+        ],
+        [
+          66.2,
+          104.4
+        ],
+        [
+          28,
+          66.2
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          0
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 1
+    },
+    {
+      "name": "cyclopentane",
+      "description": "5-membered ring",
+      "category": "simple-ring",
+      "split": "development",
+      "width": 134,
+      "height": 130,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          66.8,
+          28
+        ],
+        [
+          105.7,
+          56.2
+        ],
+        [
+          90.8,
+          101.9
+        ],
+        [
+          42.8,
+          101.9
+        ],
+        [
+          28,
+          56.2
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          0
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 1
+    },
+    {
+      "name": "cyclohexane",
+      "description": "6-membered ring",
+      "category": "simple-ring",
+      "split": "evaluation",
+      "width": 140,
+      "height": 153,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          69.6,
+          28
+        ],
+        [
+          111.1,
+          52
+        ],
+        [
+          111.1,
+          100
+        ],
+        [
+          69.6,
+          124
+        ],
+        [
+          28,
+          100
+        ],
+        [
+          28,
+          52
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          0
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 1
+    },
+    {
+      "name": "cycloheptane",
+      "description": "7-membered ring",
+      "category": "simple-ring",
+      "split": "evaluation",
+      "width": 155,
+      "height": 153,
+      "lineWidth": 2,
+      "bondLengthPx": 44,
+      "atoms": [
+        [
+          77.4,
+          28
+        ],
+        [
+          117.1,
+          47.1
+        ],
+        [
+          126.9,
+          90
+        ],
+        [
+          99.4,
+          124.4
+        ],
+        [
+          55.4,
+          124.4
+        ],
+        [
+          28,
+          90
+        ],
+        [
+          37.8,
+          47.1
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          6
+        ],
+        [
+          6,
+          0
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 1
+    },
+    {
+      "name": "cyclooctane",
+      "description": "8-membered ring",
+      "category": "simple-ring",
+      "split": "evaluation",
+      "width": 161,
+      "height": 161,
+      "lineWidth": 3,
+      "bondLengthPx": 40,
+      "atoms": [
+        [
+          80.3,
+          28
+        ],
+        [
+          117.2,
+          43.3
+        ],
+        [
+          132.5,
+          80.3
+        ],
+        [
+          117.2,
+          117.2
+        ],
+        [
+          80.3,
+          132.5
+        ],
+        [
+          43.3,
+          117.2
+        ],
+        [
+          28,
+          80.3
+        ],
+        [
+          43.3,
+          43.3
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          6
+        ],
+        [
+          6,
+          7
+        ],
+        [
+          7,
+          0
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 1
+    },
+    {
+      "name": "benzene",
+      "description": "benzene carbon ring (Kekulé skeleton)",
+      "category": "simple-ring",
+      "split": "development",
+      "width": 140,
+      "height": 153,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          69.6,
+          28
+        ],
+        [
+          111.1,
+          52
+        ],
+        [
+          111.1,
+          100
+        ],
+        [
+          69.6,
+          124
+        ],
+        [
+          28,
+          100
+        ],
+        [
+          28,
+          52
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          0
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 1
+    },
+    {
+      "name": "methylcyclohexane",
+      "description": "cyclohexane + methyl",
+      "category": "substituted-ring",
+      "split": "evaluation",
+      "width": 140,
+      "height": 200,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          69.6,
+          76
+        ],
+        [
+          111.1,
+          100
+        ],
+        [
+          111.1,
+          148
+        ],
+        [
+          69.6,
+          172
+        ],
+        [
+          28,
+          148
+        ],
+        [
+          28,
+          100
+        ],
+        [
+          69.6,
+          28
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          0,
+          6
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 1
+    },
+    {
+      "name": "ethylbenzene",
+      "description": "benzene + ethyl group",
+      "category": "substituted-ring",
+      "split": "development",
+      "width": 140,
+      "height": 224,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          69.6,
+          100
+        ],
+        [
+          111.1,
+          124
+        ],
+        [
+          111.1,
+          172
+        ],
+        [
+          69.6,
+          196
+        ],
+        [
+          28,
+          172
+        ],
+        [
+          28,
+          124
+        ],
+        [
+          69.6,
+          52
+        ],
+        [
+          111.1,
+          28
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          0,
+          6
+        ],
+        [
+          6,
+          7
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 1
+    },
+    {
+      "name": "1,4-dimethylcyclohexane",
+      "description": "para-dimethyl cyclohexane",
+      "category": "substituted-ring",
+      "split": "development",
+      "width": 140,
+      "height": 248,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          69.6,
+          76
+        ],
+        [
+          111.1,
+          100
+        ],
+        [
+          111.1,
+          148
+        ],
+        [
+          69.6,
+          172
+        ],
+        [
+          28,
+          148
+        ],
+        [
+          28,
+          100
+        ],
+        [
+          69.6,
+          28
+        ],
+        [
+          69.6,
+          220
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          0,
+          6
+        ],
+        [
+          3,
+          7
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 1
+    },
+    {
+      "name": "tert-butylcyclohexane",
+      "description": "cyclohexane + tert-butyl (multi-branch substituent)",
+      "category": "substituted-ring",
+      "split": "development",
+      "width": 140,
+      "height": 248,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          69.6,
+          124
+        ],
+        [
+          111.1,
+          148
+        ],
+        [
+          111.1,
+          196
+        ],
+        [
+          69.6,
+          220
+        ],
+        [
+          28,
+          196
+        ],
+        [
+          28,
+          148
+        ],
+        [
+          69.6,
+          76
+        ],
+        [
+          28,
+          52
+        ],
+        [
+          111.1,
+          52
+        ],
+        [
+          69.6,
+          28
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          0,
+          6
+        ],
+        [
+          6,
+          7
+        ],
+        [
+          6,
+          8
+        ],
+        [
+          6,
+          9
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 1
+    },
+    {
+      "name": "cyclohexanol-skeleton",
+      "description": "cyclohexane ring with OH label touching ring",
+      "category": "substituted-ring",
+      "split": "evaluation",
+      "width": 140,
+      "height": 153,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          69.6,
+          28
+        ],
+        [
+          111.1,
+          52
+        ],
+        [
+          111.1,
+          100
+        ],
+        [
+          69.6,
+          124
+        ],
+        [
+          28,
+          100
+        ],
+        [
+          28,
+          52
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          0
+        ]
+      ],
+      "labels": [
+        [
+          69.6,
+          10,
+          "OH"
+        ]
+      ],
+      "expectedCycleRank": 1
+    },
+    {
+      "name": "toluene-skeleton",
+      "description": "methylbenzene with CH3 label",
+      "category": "substituted-ring",
+      "split": "evaluation",
+      "width": 140,
+      "height": 200,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          69.6,
+          76
+        ],
+        [
+          111.1,
+          100
+        ],
+        [
+          111.1,
+          148
+        ],
+        [
+          69.6,
+          172
+        ],
+        [
+          28,
+          148
+        ],
+        [
+          28,
+          100
+        ],
+        [
+          69.6,
+          28
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          0,
+          6
+        ]
+      ],
+      "labels": [
+        [
+          65.6,
+          12,
+          "CH3"
+        ]
+      ],
+      "expectedCycleRank": 1
+    },
+    {
+      "name": "styrene-skeleton",
+      "description": "benzene with a vinyl-length substituent",
+      "category": "substituted-ring",
+      "split": "evaluation",
+      "width": 140,
+      "height": 224,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          69.6,
+          100
+        ],
+        [
+          111.1,
+          124
+        ],
+        [
+          111.1,
+          172
+        ],
+        [
+          69.6,
+          196
+        ],
+        [
+          28,
+          172
+        ],
+        [
+          28,
+          124
+        ],
+        [
+          69.6,
+          52
+        ],
+        [
+          28,
+          28
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          0,
+          6
+        ],
+        [
+          6,
+          7
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 1
+    },
+    {
+      "name": "cumene-skeleton",
+      "description": "isopropylbenzene (branched substituent)",
+      "category": "substituted-ring",
+      "split": "development",
+      "width": 140,
+      "height": 224,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          69.6,
+          100
+        ],
+        [
+          111.1,
+          124
+        ],
+        [
+          111.1,
+          172
+        ],
+        [
+          69.6,
+          196
+        ],
+        [
+          28,
+          172
+        ],
+        [
+          28,
+          124
+        ],
+        [
+          69.6,
+          52
+        ],
+        [
+          28,
+          28
+        ],
+        [
+          111.1,
+          28
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          0,
+          6
+        ],
+        [
+          6,
+          7
+        ],
+        [
+          6,
+          8
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 1
+    },
+    {
+      "name": "decalin",
+      "description": "bicyclo[4.4.0]decane (two fused 6-rings)",
+      "category": "fused-ring",
+      "split": "evaluation",
+      "width": 223,
+      "height": 153,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          111.1,
+          52
+        ],
+        [
+          111.1,
+          100
+        ],
+        [
+          69.6,
+          124
+        ],
+        [
+          28,
+          100
+        ],
+        [
+          28,
+          52
+        ],
+        [
+          69.6,
+          28
+        ],
+        [
+          152.7,
+          124
+        ],
+        [
+          194.3,
+          100
+        ],
+        [
+          194.3,
+          52
+        ],
+        [
+          152.7,
+          28
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          1,
+          6
+        ],
+        [
+          6,
+          7
+        ],
+        [
+          7,
+          8
+        ],
+        [
+          8,
+          9
+        ],
+        [
+          9,
+          0
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 2
+    },
+    {
+      "name": "naphthalene",
+      "description": "fused bicyclic aromatic (10 carbons)",
+      "category": "fused-ring",
+      "split": "development",
+      "width": 223,
+      "height": 153,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          111.1,
+          52
+        ],
+        [
+          111.1,
+          100
+        ],
+        [
+          69.6,
+          124
+        ],
+        [
+          28,
+          100
+        ],
+        [
+          28,
+          52
+        ],
+        [
+          69.6,
+          28
+        ],
+        [
+          152.7,
+          124
+        ],
+        [
+          194.3,
+          100
+        ],
+        [
+          194.3,
+          52
+        ],
+        [
+          152.7,
+          28
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          1,
+          6
+        ],
+        [
+          6,
+          7
+        ],
+        [
+          7,
+          8
+        ],
+        [
+          8,
+          9
+        ],
+        [
+          9,
+          0
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 2
+    },
+    {
+      "name": "indane-skeleton",
+      "description": "benzene fused to a cyclopentane (5-6 fused)",
+      "category": "fused-ring",
+      "split": "evaluation",
+      "width": 207,
+      "height": 153,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          111.1,
+          52
+        ],
+        [
+          111.1,
+          100
+        ],
+        [
+          69.6,
+          124
+        ],
+        [
+          28,
+          100
+        ],
+        [
+          28,
+          52
+        ],
+        [
+          69.6,
+          28
+        ],
+        [
+          154.3,
+          52
+        ],
+        [
+          154.3,
+          100
+        ],
+        [
+          178.3,
+          76
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          0,
+          6
+        ],
+        [
+          6,
+          8
+        ],
+        [
+          8,
+          7
+        ],
+        [
+          7,
+          1
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 2
+    },
+    {
+      "name": "anthracene",
+      "description": "three linearly fused 6-rings",
+      "category": "polycyclic",
+      "split": "development",
+      "width": 306,
+      "height": 153,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          111.1,
+          52
+        ],
+        [
+          111.1,
+          100
+        ],
+        [
+          69.6,
+          124
+        ],
+        [
+          28,
+          100
+        ],
+        [
+          28,
+          52
+        ],
+        [
+          69.6,
+          28
+        ],
+        [
+          194.3,
+          52
+        ],
+        [
+          194.3,
+          100
+        ],
+        [
+          152.7,
+          124
+        ],
+        [
+          152.7,
+          28
+        ],
+        [
+          277.4,
+          52
+        ],
+        [
+          277.4,
+          100
+        ],
+        [
+          235.8,
+          124
+        ],
+        [
+          235.8,
+          28
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          6,
+          7
+        ],
+        [
+          7,
+          8
+        ],
+        [
+          8,
+          1
+        ],
+        [
+          0,
+          9
+        ],
+        [
+          9,
+          6
+        ],
+        [
+          10,
+          11
+        ],
+        [
+          11,
+          12
+        ],
+        [
+          12,
+          7
+        ],
+        [
+          6,
+          13
+        ],
+        [
+          13,
+          10
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 3
+    },
+    {
+      "name": "phenanthrene",
+      "description": "three angularly fused 6-rings",
+      "category": "polycyclic",
+      "split": "evaluation",
+      "width": 264,
+      "height": 225,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          111.1,
+          124
+        ],
+        [
+          111.1,
+          172
+        ],
+        [
+          69.6,
+          196
+        ],
+        [
+          28,
+          172
+        ],
+        [
+          28,
+          124
+        ],
+        [
+          69.6,
+          100
+        ],
+        [
+          194.3,
+          124
+        ],
+        [
+          194.3,
+          172
+        ],
+        [
+          152.7,
+          196
+        ],
+        [
+          152.7,
+          100
+        ],
+        [
+          235.8,
+          52
+        ],
+        [
+          235.8,
+          100
+        ],
+        [
+          152.7,
+          52
+        ],
+        [
+          194.3,
+          28
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          6,
+          7
+        ],
+        [
+          7,
+          8
+        ],
+        [
+          8,
+          1
+        ],
+        [
+          0,
+          9
+        ],
+        [
+          9,
+          6
+        ],
+        [
+          10,
+          11
+        ],
+        [
+          11,
+          6
+        ],
+        [
+          9,
+          12
+        ],
+        [
+          12,
+          13
+        ],
+        [
+          13,
+          10
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 3
+    },
+    {
+      "name": "biphenyl",
+      "description": "two benzene rings joined by a single bond",
+      "category": "connected-ring",
+      "split": "development",
+      "width": 297,
+      "height": 140,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          124,
+          69.6
+        ],
+        [
+          100,
+          111.1
+        ],
+        [
+          52,
+          111.1
+        ],
+        [
+          28,
+          69.6
+        ],
+        [
+          52,
+          28
+        ],
+        [
+          100,
+          28
+        ],
+        [
+          268,
+          69.6
+        ],
+        [
+          244,
+          111.1
+        ],
+        [
+          196,
+          111.1
+        ],
+        [
+          172,
+          69.6
+        ],
+        [
+          196,
+          28
+        ],
+        [
+          244,
+          28
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          6,
+          7
+        ],
+        [
+          7,
+          8
+        ],
+        [
+          8,
+          9
+        ],
+        [
+          9,
+          10
+        ],
+        [
+          10,
+          11
+        ],
+        [
+          11,
+          6
+        ],
+        [
+          0,
+          9
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 2
+    },
+    {
+      "name": "bicyclohexyl",
+      "description": "two cyclohexanes joined by a single bond",
+      "category": "connected-ring",
+      "split": "evaluation",
+      "width": 297,
+      "height": 140,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          124,
+          69.6
+        ],
+        [
+          100,
+          111.1
+        ],
+        [
+          52,
+          111.1
+        ],
+        [
+          28,
+          69.6
+        ],
+        [
+          52,
+          28
+        ],
+        [
+          100,
+          28
+        ],
+        [
+          268,
+          69.6
+        ],
+        [
+          244,
+          111.1
+        ],
+        [
+          196,
+          111.1
+        ],
+        [
+          172,
+          69.6
+        ],
+        [
+          196,
+          28
+        ],
+        [
+          244,
+          28
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          6,
+          7
+        ],
+        [
+          7,
+          8
+        ],
+        [
+          8,
+          9
+        ],
+        [
+          9,
+          10
+        ],
+        [
+          10,
+          11
+        ],
+        [
+          11,
+          6
+        ],
+        [
+          0,
+          9
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 2
+    },
+    {
+      "name": "diphenylmethane",
+      "description": "two benzene rings bridged by a CH2 (methylene)",
+      "category": "connected-ring",
+      "split": "evaluation",
+      "width": 344,
+      "height": 140,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          124,
+          69.6
+        ],
+        [
+          100,
+          111.1
+        ],
+        [
+          52,
+          111.1
+        ],
+        [
+          28,
+          69.6
+        ],
+        [
+          52,
+          28
+        ],
+        [
+          100,
+          28
+        ],
+        [
+          316,
+          69.6
+        ],
+        [
+          292,
+          111.1
+        ],
+        [
+          244,
+          111.1
+        ],
+        [
+          220,
+          69.6
+        ],
+        [
+          244,
+          28
+        ],
+        [
+          292,
+          28
+        ],
+        [
+          172,
+          69.6
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          6,
+          7
+        ],
+        [
+          7,
+          8
+        ],
+        [
+          8,
+          9
+        ],
+        [
+          9,
+          10
+        ],
+        [
+          10,
+          11
+        ],
+        [
+          11,
+          6
+        ],
+        [
+          0,
+          12
+        ],
+        [
+          12,
+          9
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 2
+    },
+    {
+      "name": "spiro-5-5",
+      "description": "two 5-rings sharing one carbon (spiro)",
+      "category": "polycyclic",
+      "split": "development",
+      "width": 134,
+      "height": 204,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          66.8,
+          101.9
+        ],
+        [
+          105.7,
+          130.1
+        ],
+        [
+          90.8,
+          175.7
+        ],
+        [
+          42.8,
+          175.7
+        ],
+        [
+          28,
+          130.1
+        ],
+        [
+          28,
+          73.7
+        ],
+        [
+          42.8,
+          28
+        ],
+        [
+          90.8,
+          28
+        ],
+        [
+          105.7,
+          73.7
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          0
+        ],
+        [
+          0,
+          5
+        ],
+        [
+          5,
+          6
+        ],
+        [
+          6,
+          7
+        ],
+        [
+          7,
+          8
+        ],
+        [
+          8,
+          0
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 2
+    },
+    {
+      "name": "spiro-6-6",
+      "description": "two 6-rings sharing one carbon (spiro)",
+      "category": "polycyclic",
+      "split": "evaluation",
+      "width": 140,
+      "height": 249,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          69.6,
+          124
+        ],
+        [
+          111.1,
+          148
+        ],
+        [
+          111.1,
+          196
+        ],
+        [
+          69.6,
+          220
+        ],
+        [
+          28,
+          196
+        ],
+        [
+          28,
+          148
+        ],
+        [
+          28,
+          100
+        ],
+        [
+          28,
+          52
+        ],
+        [
+          69.6,
+          28
+        ],
+        [
+          111.1,
+          52
+        ],
+        [
+          111.1,
+          100
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          0,
+          6
+        ],
+        [
+          6,
+          7
+        ],
+        [
+          7,
+          8
+        ],
+        [
+          8,
+          9
+        ],
+        [
+          9,
+          10
+        ],
+        [
+          10,
+          0
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 2
+    },
+    {
+      "name": "norbornane",
+      "description": "bicyclo[2.2.1]heptane (bridged bicyclic)",
+      "category": "polycyclic",
+      "split": "evaluation",
+      "width": 140,
+      "height": 153,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          69.6,
+          28
+        ],
+        [
+          111.1,
+          52
+        ],
+        [
+          111.1,
+          100
+        ],
+        [
+          69.6,
+          124
+        ],
+        [
+          28,
+          100
+        ],
+        [
+          28,
+          52
+        ],
+        [
+          69.6,
+          47.2
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          1,
+          6
+        ],
+        [
+          4,
+          6
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 2
+    },
+    {
+      "name": "adamantane",
+      "description": "adamantane carbon cage (tricyclic)",
+      "category": "polycyclic",
+      "split": "evaluation",
+      "width": 197,
+      "height": 232,
+      "lineWidth": 3,
+      "bondLengthPx": 44,
+      "atoms": [
+        [
+          98.4,
+          28
+        ],
+        [
+          28,
+          72
+        ],
+        [
+          168.8,
+          72
+        ],
+        [
+          98.4,
+          72
+        ],
+        [
+          28,
+          142.4
+        ],
+        [
+          168.8,
+          142.4
+        ],
+        [
+          98.4,
+          142.4
+        ],
+        [
+          58.8,
+          186.4
+        ],
+        [
+          138,
+          186.4
+        ],
+        [
+          98.4,
+          204
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          2
+        ],
+        [
+          0,
+          3
+        ],
+        [
+          1,
+          4
+        ],
+        [
+          2,
+          5
+        ],
+        [
+          3,
+          6
+        ],
+        [
+          4,
+          7
+        ],
+        [
+          5,
+          8
+        ],
+        [
+          6,
+          7
+        ],
+        [
+          6,
+          8
+        ],
+        [
+          7,
+          9
+        ],
+        [
+          8,
+          9
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 3
+    },
+    {
+      "name": "hydrindane",
+      "description": "cyclohexane fused to cyclopentane (6-5)",
+      "category": "fused-ring",
+      "split": "development",
+      "width": 207,
+      "height": 153,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          111.1,
+          52
+        ],
+        [
+          111.1,
+          100
+        ],
+        [
+          69.6,
+          124
+        ],
+        [
+          28,
+          100
+        ],
+        [
+          28,
+          52
+        ],
+        [
+          69.6,
+          28
+        ],
+        [
+          154.3,
+          52
+        ],
+        [
+          154.3,
+          100
+        ],
+        [
+          178.3,
+          76
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          0,
+          6
+        ],
+        [
+          6,
+          8
+        ],
+        [
+          8,
+          7
+        ],
+        [
+          7,
+          1
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 2
+    },
+    {
+      "name": "methylcyclopropane",
+      "description": "cyclopropane + methyl (small ring, substituent)",
+      "category": "small-ring",
+      "split": "development",
+      "width": 112,
+      "height": 161,
+      "lineWidth": 4,
+      "bondLengthPx": 56,
+      "atoms": [
+        [
+          56,
+          84
+        ],
+        [
+          84,
+          132.5
+        ],
+        [
+          28,
+          132.5
+        ],
+        [
+          56,
+          28
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          0
+        ],
+        [
+          0,
+          3
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 1
+    },
+    {
+      "name": "spiro-3-3",
+      "description": "two cyclobutanes sharing one carbon (small spiro)",
+      "category": "small-ring",
+      "split": "evaluation",
+      "width": 161,
+      "height": 160,
+      "lineWidth": 3,
+      "bondLengthPx": 52,
+      "atoms": [
+        [
+          80,
+          80
+        ],
+        [
+          80,
+          132
+        ],
+        [
+          28,
+          132
+        ],
+        [
+          28,
+          80
+        ],
+        [
+          80,
+          28
+        ],
+        [
+          132,
+          28
+        ],
+        [
+          132,
+          80
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          0,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          6
+        ],
+        [
+          6,
+          0
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 2
+    },
+    {
+      "name": "2-methylhexane",
+      "description": "hexane + methyl (branched)",
+      "category": "branched-chain",
+      "split": "development",
+      "width": 264,
+      "height": 104,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          28,
+          52
+        ],
+        [
+          69.6,
+          76
+        ],
+        [
+          111.1,
+          52
+        ],
+        [
+          152.7,
+          76
+        ],
+        [
+          194.3,
+          52
+        ],
+        [
+          235.8,
+          76
+        ],
+        [
+          69.6,
+          28
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          1,
+          6
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 0
+    },
+    {
+      "name": "3,3-dimethylpentane",
+      "description": "pentane with geminal dimethyl (quaternary)",
+      "category": "multi-branch",
+      "split": "development",
+      "width": 223,
+      "height": 152,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          28,
+          76
+        ],
+        [
+          69.6,
+          100
+        ],
+        [
+          111.1,
+          76
+        ],
+        [
+          152.7,
+          100
+        ],
+        [
+          194.3,
+          76
+        ],
+        [
+          111.1,
+          124
+        ],
+        [
+          111.1,
+          28
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          2,
+          5
+        ],
+        [
+          2,
+          6
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 0
+    },
+    {
+      "name": "4-propylheptane",
+      "description": "heptane with a propyl branch (long substituent)",
+      "category": "multi-branch",
+      "split": "evaluation",
+      "width": 306,
+      "height": 200,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          28,
+          28
+        ],
+        [
+          69.6,
+          52
+        ],
+        [
+          111.1,
+          28
+        ],
+        [
+          152.7,
+          52
+        ],
+        [
+          194.3,
+          28
+        ],
+        [
+          235.8,
+          52
+        ],
+        [
+          277.4,
+          28
+        ],
+        [
+          152.7,
+          100
+        ],
+        [
+          194.3,
+          124
+        ],
+        [
+          194.3,
+          172
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          6
+        ],
+        [
+          3,
+          7
+        ],
+        [
+          7,
+          8
+        ],
+        [
+          8,
+          9
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 0
+    },
+    {
+      "name": "xylene-skeleton",
+      "description": "1,2-dimethylbenzene (ortho)",
+      "category": "substituted-ring",
+      "split": "evaluation",
+      "width": 181,
+      "height": 200,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          69.6,
+          76
+        ],
+        [
+          111.1,
+          100
+        ],
+        [
+          111.1,
+          148
+        ],
+        [
+          69.6,
+          172
+        ],
+        [
+          28,
+          148
+        ],
+        [
+          28,
+          100
+        ],
+        [
+          69.6,
+          28
+        ],
+        [
+          152.7,
+          76
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          0,
+          6
+        ],
+        [
+          1,
+          7
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 1
+    },
+    {
+      "name": "mesitylene-skeleton",
+      "description": "1,3,5-trimethylbenzene",
+      "category": "substituted-ring",
+      "split": "evaluation",
+      "width": 236,
+      "height": 200,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          117.6,
+          76
+        ],
+        [
+          159.1,
+          100
+        ],
+        [
+          159.1,
+          148
+        ],
+        [
+          117.6,
+          172
+        ],
+        [
+          76,
+          148
+        ],
+        [
+          76,
+          100
+        ],
+        [
+          117.6,
+          28
+        ],
+        [
+          207.1,
+          148
+        ],
+        [
+          28,
+          148
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          0,
+          6
+        ],
+        [
+          2,
+          7
+        ],
+        [
+          4,
+          8
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 1
+    },
+    {
+      "name": "propylcyclopentane",
+      "description": "cyclopentane + propyl chain",
+      "category": "substituted-ring",
+      "split": "development",
+      "width": 137,
+      "height": 250,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          66.8,
+          148
+        ],
+        [
+          105.7,
+          176.2
+        ],
+        [
+          90.8,
+          221.9
+        ],
+        [
+          42.8,
+          221.9
+        ],
+        [
+          28,
+          176.2
+        ],
+        [
+          66.8,
+          100
+        ],
+        [
+          108.4,
+          76
+        ],
+        [
+          108.4,
+          28
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          0
+        ],
+        [
+          0,
+          5
+        ],
+        [
+          5,
+          6
+        ],
+        [
+          6,
+          7
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 1
+    },
+    {
+      "name": "1-methylnaphthalene",
+      "description": "naphthalene + methyl",
+      "category": "polycyclic",
+      "split": "development",
+      "width": 223,
+      "height": 200,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          111.1,
+          100
+        ],
+        [
+          111.1,
+          148
+        ],
+        [
+          69.6,
+          172
+        ],
+        [
+          28,
+          148
+        ],
+        [
+          28,
+          100
+        ],
+        [
+          69.6,
+          76
+        ],
+        [
+          152.7,
+          172
+        ],
+        [
+          194.3,
+          148
+        ],
+        [
+          194.3,
+          100
+        ],
+        [
+          152.7,
+          76
+        ],
+        [
+          69.6,
+          28
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          1,
+          6
+        ],
+        [
+          6,
+          7
+        ],
+        [
+          7,
+          8
+        ],
+        [
+          8,
+          9
+        ],
+        [
+          9,
+          0
+        ],
+        [
+          5,
+          10
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 2
+    },
+    {
+      "name": "tetralin-skeleton",
+      "description": "benzene fused to a saturated 6-ring",
+      "category": "fused-ring",
+      "split": "evaluation",
+      "width": 223,
+      "height": 153,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          111.1,
+          52
+        ],
+        [
+          111.1,
+          100
+        ],
+        [
+          69.6,
+          124
+        ],
+        [
+          28,
+          100
+        ],
+        [
+          28,
+          52
+        ],
+        [
+          69.6,
+          28
+        ],
+        [
+          152.7,
+          124
+        ],
+        [
+          194.3,
+          100
+        ],
+        [
+          194.3,
+          52
+        ],
+        [
+          152.7,
+          28
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          1,
+          6
+        ],
+        [
+          6,
+          7
+        ],
+        [
+          7,
+          8
+        ],
+        [
+          8,
+          9
+        ],
+        [
+          9,
+          0
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 2
+    },
+    {
+      "name": "fluorene-skeleton",
+      "description": "two benzene rings bridged into a central 5-ring",
+      "category": "polycyclic",
+      "split": "development",
+      "width": 297,
+      "height": 140,
+      "lineWidth": 3,
+      "bondLengthPx": 48,
+      "atoms": [
+        [
+          124,
+          69.6
+        ],
+        [
+          100,
+          111.1
+        ],
+        [
+          52,
+          111.1
+        ],
+        [
+          28,
+          69.6
+        ],
+        [
+          52,
+          28
+        ],
+        [
+          100,
+          28
+        ],
+        [
+          268,
+          69.6
+        ],
+        [
+          244,
+          111.1
+        ],
+        [
+          196,
+          111.1
+        ],
+        [
+          172,
+          69.6
+        ],
+        [
+          196,
+          28
+        ],
+        [
+          244,
+          28
+        ],
+        [
+          148,
+          63.1
+        ]
+      ],
+      "bonds": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          6,
+          7
+        ],
+        [
+          7,
+          8
+        ],
+        [
+          8,
+          9
+        ],
+        [
+          9,
+          10
+        ],
+        [
+          10,
+          11
+        ],
+        [
+          11,
+          6
+        ],
+        [
+          0,
+          9
+        ],
+        [
+          1,
+          12
+        ],
+        [
+          12,
+          8
+        ]
+      ],
+      "labels": [],
+      "expectedCycleRank": 3
+    }
+  ]
+}

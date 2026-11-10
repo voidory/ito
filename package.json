@@ -16,7 +16,9 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "gen-fixtures": "node scripts/gen-fixtures.mjs",
-    "koofr-probe": "node scripts/koofr-probe.mjs"
+    "koofr-probe": "node scripts/koofr-probe.mjs",
+    "realworld:manifest": "ITO_WRITE_REALWORLD_MANIFEST=1 vitest run src/science/skeleton/realworld/manifest",
+    "realworld:report": "ITO_WRITE_REALWORLD_REPORT=1 vitest run src/science/skeleton/realworld/report"
   },
   "dependencies": {
     "fflate": "^0.8.3",

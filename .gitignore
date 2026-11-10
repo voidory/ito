@@ -4,3 +4,9 @@ playwright-report
 test-results
 *.local
 .DS_Store
+# FEAT-005B: local Python venv used only to (re)render the real-world corpus.
+.chemenv
+# FEAT-005B: per-transform visual-debug SVGs are regenerable from the committed
+# PNGs (ITO_WRITE_REALWORLD_REPORT=1). Only the base-render debug SVGs are
+# committed to keep the repo light; transform variants are reproduced on demand.
+src/science/skeleton/fixtures/realworld/debug/*__*.svg
