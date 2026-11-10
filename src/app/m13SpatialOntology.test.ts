@@ -976,3 +976,261 @@ describe("M13 Test 5 — Node & Hub Top-2 Source Ranking + Switcher (§2.2)", ()
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// M13 FEAT-001 — Memory vs Observation node tier & drag no-navigation.
+//
+// A node promoted from a SINGLE highlight/note (`promoteAnnotationToNode`)
+// renders as a HOLLOW "memory" dot and GRADUATES to a filled "observation" dot
+// as soon as a 2nd cited evidence quote is inserted. Separately, a node drag +
+// release must NOT trigger the browser's trailing synthetic click, which would
+// otherwise route into node-workspace navigation (switching viewMode to
+// "files"). Driven against the REAL Workbench (in-memory storage).
+// ---------------------------------------------------------------------------
+
+describe("M13 FEAT-001 — Memory vs Observation node tier & drag no-navigation", () => {
+  // React 18 act() render environment (shared shape with the other render tests).
+  (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT =
+    true;
+
+  /**
+   * jsdom has no PointerEvent constructor. React's pointer-event plugin listens
+   * for native events named "pointerdown"/"pointermove"/"pointerup", so a
+   * MouseEvent carrying that type triggers the React handlers; we augment it
+   * with the `pointerId` the handlers read.
+   */
+  function pointer(
+    type: string,
+    props: { clientX?: number; clientY?: number; pointerId?: number },
+  ): Event {
+    const ev = new MouseEvent(type, {
+      bubbles: true,
+      clientX: props.clientX ?? 0,
+      clientY: props.clientY ?? 0,
+    });
+    Object.defineProperty(ev, "pointerId", { value: props.pointerId ?? 1 });
+    return ev;
+  }
+
+  async function renderInto(
+    node: unknown,
+  ): Promise<{ container: HTMLElement; unmount: () => void }> {
+    const { act } = await import("react");
+    const { createRoot } = await import("react-dom/client");
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(node as Parameters<typeof root.render>[0]);
+    });
+    return {
+      container,
+      unmount: () => {
+        act(() => root.unmount());
+        container.remove();
+      },
+    };
+  }
+
+  it("a promoted single-highlight node is a 'memory' tier and graduates to 'observation' on a 2nd evidence quote", async () => {
+    const { Workbench } = await import("./workbench");
+    const { InMemoryStorageAdapter } = await import("../test/InMemoryStorageAdapter");
+    const wb = await Workbench.open(new InMemoryStorageAdapter());
+
+    // First source + annotation -> promote to a node (one cited evidence).
+    const quote1 = "working memory capacity scales with prefrontal recruitment";
+    const srcA = await wb.importSource({
+      title: "Memory.pdf",
+      bytes: new TextEncoder().encode("MEM-BYTES"),
+      versionHash: "v1",
+      pageCount: 1,
+      pageTexts: [quote1],
+    });
+    const viewA = await wb.commitTextAnnotation({
+      sourceId: srcA.id,
+      anchor: {
+        docId: srcA.id,
+        sourceVersionHash: srcA.versionHash,
+        pageIndex: 0,
+        rects: [{ x: 0.1, y: 0.1, width: 0.6, height: 0.02 }],
+        selectedText: quote1,
+        prefix: "",
+        suffix: "",
+      },
+    });
+    const { page } = await wb.promoteAnnotationToNode(viewA.annotation.id);
+
+    const tierOf = (): "memory" | "observation" | undefined =>
+      wb.conceptGraph().nodes.find((n) => n.pageId === page.id)?.nodeTier;
+
+    // A freshly promoted single-highlight node is a HOLLOW "memory".
+    expect(tierOf()).toBe("memory");
+    const promoted = wb.conceptGraph().nodes.find((n) => n.pageId === page.id)!;
+    expect(promoted.isPromotedMemory).toBe(true);
+
+    // Import a 2nd source, annotate it, and cite that 2nd evidence into the
+    // SAME node -> the node GRADUATES to a filled "observation".
+    const quote2 = "attention gates which traces consolidate into long-term store";
+    const srcB = await wb.importSource({
+      title: "Attention.pdf",
+      bytes: new TextEncoder().encode("ATT-BYTES"),
+      versionHash: "v1",
+      pageCount: 1,
+      pageTexts: [quote2],
+    });
+    const viewB = await wb.commitTextAnnotation({
+      sourceId: srcB.id,
+      anchor: {
+        docId: srcB.id,
+        sourceVersionHash: srcB.versionHash,
+        pageIndex: 0,
+        rects: [{ x: 0.1, y: 0.2, width: 0.6, height: 0.02 }],
+        selectedText: quote2,
+        prefix: "",
+        suffix: "",
+      },
+    });
+    await wb.insertEvidenceIntoPage(viewB.annotation.id, page.id, { pos: null });
+
+    expect(tierOf()).toBe("observation");
+    const graduated = wb.conceptGraph().nodes.find((n) => n.pageId === page.id)!;
+    expect(graduated.isPromotedMemory).toBeFalsy();
+  });
+
+  it("renders a 'memory' node as a hollow dot (data-node-tier='memory', .graph-node-dot--memory)", async () => {
+    const { Workbench } = await import("./workbench");
+    const { InMemoryStorageAdapter } = await import("../test/InMemoryStorageAdapter");
+    const { createElement } = await import("react");
+    const { NodesCanvas } = await import("./NodesCanvas");
+    const wb = await Workbench.open(new InMemoryStorageAdapter());
+
+    // Promote a highlight into a memory node.
+    const quote = "the hippocampus indexes episodic context for later recall";
+    const src = await wb.importSource({
+      title: "Episodic.pdf",
+      bytes: new TextEncoder().encode("EP-BYTES"),
+      versionHash: "v1",
+      pageCount: 1,
+      pageTexts: [quote],
+    });
+    const view = await wb.commitTextAnnotation({
+      sourceId: src.id,
+      anchor: {
+        docId: src.id,
+        sourceVersionHash: src.versionHash,
+        pageIndex: 0,
+        rects: [{ x: 0.1, y: 0.1, width: 0.6, height: 0.02 }],
+        selectedText: quote,
+        prefix: "",
+        suffix: "",
+      },
+    });
+    const { page } = await wb.promoteAnnotationToNode(view.annotation.id);
+    // A 2nd empty subject page guarantees the single-node layout resolves a
+    // position for the promoted node (two placed nodes).
+    await wb.createSubjectPage("Anchor");
+
+    const { container, unmount } = await renderInto(
+      createElement(NodesCanvas, {
+        wb,
+        suppressMotion: true,
+        bump: () => undefined,
+      }),
+    );
+    try {
+      const g = container.querySelector(
+        `[data-testid="graph-node"][data-page-id="${page.id}"]`,
+      )!;
+      expect(g).not.toBeNull();
+      expect(g.getAttribute("data-node-tier")).toBe("memory");
+      const dot = g.querySelector("circle")!;
+      expect(dot).not.toBeNull();
+      expect(dot.getAttribute("class")).toContain("graph-node-dot--memory");
+    } finally {
+      unmount();
+    }
+  });
+
+  it("a moved node drag + release + synthetic click does NOT navigate to the files workspace", async () => {
+    const { Workbench } = await import("./workbench");
+    const { InMemoryStorageAdapter } = await import("../test/InMemoryStorageAdapter");
+    const { act, createElement } = await import("react");
+    const { NodesCanvas } = await import("./NodesCanvas");
+    const wb = await Workbench.open(new InMemoryStorageAdapter());
+
+    // Two plain subject pages so a node is laid out at a resolved position.
+    const pageA = await wb.createSubjectPage("Alpha");
+    await wb.createSubjectPage("Beta");
+    // Baseline: the shell is on the Nodes view, NOT the files workspace.
+    wb.setViewMode("nodes");
+    expect(wb.viewMode()).toBe("nodes");
+
+    const { container, unmount } = await renderInto(
+      createElement(NodesCanvas, {
+        wb,
+        suppressMotion: true,
+        bump: () => undefined,
+      }),
+    );
+    try {
+      const svg = container.querySelector(
+        '[data-testid="nodes-canvas"]',
+      ) as SVGSVGElement;
+      // jsdom has no layout; give the SVG a measurable client box so the drag
+      // delta maps to scene units deterministically.
+      svg.getBoundingClientRect = () =>
+        ({
+          width: 400,
+          height: 400,
+          left: 0,
+          top: 0,
+          right: 400,
+          bottom: 400,
+          x: 0,
+          y: 0,
+          toJSON() {},
+        }) as DOMRect;
+
+      const group = container.querySelector(
+        `[data-testid="graph-node"][data-page-id="${pageA.id}"]`,
+      ) as SVGGElement;
+      expect(group).not.toBeNull();
+      (group as unknown as { setPointerCapture?: () => void }).setPointerCapture =
+        () => undefined;
+
+      // Drive a realistic MOVED gesture: press, move >20px of client travel,
+      // release, then the browser's trailing synthetic click.
+      await act(async () => {
+        group.dispatchEvent(pointer("pointerdown", { clientX: 10, clientY: 10, pointerId: 1 }));
+      });
+      await act(async () => {
+        svg.dispatchEvent(pointer("pointermove", { clientX: 60, clientY: 90, pointerId: 1 }));
+      });
+      await act(async () => {
+        svg.dispatchEvent(pointer("pointerup", { pointerId: 1 }));
+      });
+      // jsdom does not synthesize the trailing click after a pointer sequence,
+      // so dispatch it manually on the node <g> (the real browser does this).
+      await act(async () => {
+        group.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      // CORE invariant: a moved drag + release + synthetic click never routes
+      // into the node workspace, so the view mode stays on "nodes" (NOT
+      // "files").
+      expect(wb.viewMode()).not.toBe("files");
+      expect(wb.snapshot().viewMode).toBe("nodes");
+
+      // The drag itself committed: a durable, non-zero drag offset was persisted
+      // (so we proved the gesture ran, it just didn't navigate).
+      const off = wb.presentationView().dragOffsets[pageA.id];
+      expect(off).toBeDefined();
+      expect(Math.abs(off!.x) + Math.abs(off!.y)).toBeGreaterThan(0);
+    } finally {
+      unmount();
+    }
+  });
+});

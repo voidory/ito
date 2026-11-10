@@ -37,6 +37,12 @@ export interface SceneNodeInput {
   readonly hidden: boolean;
   /** A durable laid-out/dragged position, or null to let the engine place it. */
   readonly position: { readonly x: number; readonly y: number } | null;
+  /**
+   * M13 FEAT-001 — the node's maturity tier ("memory" renders hollow,
+   * "observation" renders filled). Optional/additive; the renderer defaults to
+   * "observation" when absent.
+   */
+  readonly nodeTier?: "memory" | "observation";
 }
 
 /** Minimal structural link (a subset of the Workbench ConceptLink). */
@@ -122,6 +128,11 @@ export interface SceneNode {
   readonly title: string;
   readonly x: number;
   readonly y: number;
+  /**
+   * M13 FEAT-001 — the node's maturity tier, threaded from the input so the
+   * canvas renders a hollow ("memory") vs filled ("observation") dot.
+   */
+  readonly nodeTier?: "memory" | "observation";
 }
 
 /** A rendered hub glyph for a relationship. */
@@ -432,7 +443,13 @@ export function buildScene(graph: SceneGraphInput, options: BuildSceneOptions = 
     if (n.hidden) continue;
     const p = posOf(n.pageId);
     if (!p) continue;
-    nodes.push({ pageId: n.pageId, title: n.title, x: p.x, y: p.y });
+    nodes.push({
+      pageId: n.pageId,
+      title: n.title,
+      x: p.x,
+      y: p.y,
+      ...(n.nodeTier != null ? { nodeTier: n.nodeTier } : {}),
+    });
   }
 
   // Hubs: one per visible relationship whose endpoints are all placed.

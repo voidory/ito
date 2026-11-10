@@ -145,6 +145,13 @@ export function NodesCanvas({
 
   const velRef = useRef<{ x: number; y: number; t: number; vx: number; vy: number } | null>(null);
 
+  // M13 FEAT-001 — a drag-release must NOT trigger the browser's synthetic
+  // `click`, which would route through the clean-click dispatcher into node
+  // workspace navigation. `dragRef.current` is nulled in `endGesture` before
+  // that synthetic click fires, so we stash a short-lived suppression window.
+  const lastDragMovedAtRef = useRef<number>(0);
+  const suppressNextClickRef = useRef<boolean>(false);
+
   // N06: render one transient placeholder per open UNCONNECTED source. The
   // `placeholders` array (open-together) takes precedence; the single
   // `placeholder` prop is kept for backwards compatibility.
@@ -165,6 +172,7 @@ export function NodesCanvas({
       title: n.title,
       hidden: n.hidden,
       position: n.position,
+      nodeTier: n.nodeTier,
     })),
     links: filtered.links.map((l) => ({
       relationshipId: l.relationshipId,
@@ -468,6 +476,8 @@ export function NodesCanvas({
   const onNodePointerDown = useCallback(
     (e: React.PointerEvent<SVGGElement>, pageId: string): void => {
       e.stopPropagation();
+      // A fresh press starts a new gesture: clear any stale click suppression.
+      suppressNextClickRef.current = false;
       (e.currentTarget as SVGGElement).setPointerCapture?.(e.pointerId);
       const base = presentation.dragOffsets[pageId] ?? { x: 0, y: 0 };
       dragRef.current = {
@@ -491,7 +501,11 @@ export function NodesCanvas({
       const drag = dragRef.current;
       if (!drag) return;
       const { dx, dy } = toSceneDelta(e.clientX - drag.startX, e.clientY - drag.startY);
-      if (!drag.moved && (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5)) {
+      // Mark the gesture as "moved" on scene delta OR >3px of CLIENT travel, so
+      // a tiny-but-real drag (that would otherwise slip under the scene
+      // threshold) still suppresses the trailing synthetic click.
+      const clientMoved = Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) > 3;
+      if (!drag.moved && (clientMoved || Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5)) {
         drag.moved = true;
         // Now it is a real pan: keep receiving moves even off the canvas.
         if (drag.kind === "pan") svgRef.current?.setPointerCapture?.(e.pointerId);
@@ -552,6 +566,17 @@ export function NodesCanvas({
     const drag = dragRef.current;
     dragRef.current = null;
     if (!drag) return;
+    // M13 FEAT-001: a drag that actually moved (node-commit OR pan-momentum)
+    // must suppress the browser's trailing synthetic `click` — `dragRef` is
+    // already nulled above, so the old `dragRef.current?.moved` guard can no
+    // longer see it. Stash a short suppression window covering both paths.
+    if (drag.moved) {
+      lastDragMovedAtRef.current = Date.now();
+      suppressNextClickRef.current = true;
+      setTimeout(() => {
+        suppressNextClickRef.current = false;
+      }, 250);
+    }
     // M13 (§2.2): a CLEAN background click — a "pan" press that never crossed
     // the move threshold AND whose total client travel is <= 5px — is routed
     // through the 4-tier hit-tester to open the clicked overlap / basin page.
@@ -609,6 +634,8 @@ export function NodesCanvas({
         cancelAnimationFrame(inertiaFrame.current);
         inertiaFrame.current = 0;
       }
+      // A fresh press starts a new gesture: clear any stale click suppression.
+      suppressNextClickRef.current = false;
       snapRef.current = true; // the map follows the pointer 1:1 while held
       velRef.current = null;
       dragRef.current = {
@@ -657,7 +684,16 @@ export function NodesCanvas({
 
   const onNodeClick = (pageId: string): void => {
     // A drag that moved should not also open the page (gesture disambiguation).
-    if (dragRef.current?.moved) return;
+    // `dragRef` is nulled by endGesture before this synthetic click fires, so
+    // we also honour the short post-drag suppression window (M13 FEAT-001).
+    if (
+      dragRef.current?.moved ||
+      suppressNextClickRef.current ||
+      Date.now() - lastDragMovedAtRef.current < 250
+    ) {
+      suppressNextClickRef.current = false;
+      return;
+    }
     // FEAT-003 (3.1): in Connect Nodes mode a click TOGGLES the node in the
     // multi-select set (building a hub) rather than opening its page.
     if (connectMode) {
@@ -686,6 +722,17 @@ export function NodesCanvas({
   // Subject basin page; a miss does nothing.
   const dispatchCleanClick = useCallback(
     (clientX: number, clientY: number): void => {
+      // M13 FEAT-001: never navigate off the trailing synthetic click of a
+      // moved drag. A genuine clean pan click has drag.moved === false and
+      // leaves suppression unset, so it falls through unaffected.
+      if (
+        dragRef.current?.moved ||
+        suppressNextClickRef.current ||
+        Date.now() - lastDragMovedAtRef.current < 250
+      ) {
+        suppressNextClickRef.current = false;
+        return;
+      }
       if (connectMode) return;
       const scenePt = clientToScene(clientX, clientY);
       if (!scenePt) return;
@@ -1210,6 +1257,7 @@ export function NodesCanvas({
             }
             data-testid="graph-node"
             data-page-id={node.pageId}
+            data-node-tier={node.nodeTier ?? "observation"}
             data-focused={focusedPageId === node.pageId ? "true" : "false"}
             data-selected={selectedNodeIds.includes(node.pageId as PageId) ? "true" : "false"}
             data-x={round(node.x)}
@@ -1223,12 +1271,28 @@ export function NodesCanvas({
               setHoveredNode((cur) => (cur === node.pageId ? null : cur))
             }
           >
-            <circle
-              r={7}
-              className="graph-node-dot"
-              // De-phase the idle bob so the dots drift independently.
-              style={{ animationDelay: `${-((hashPhase(node.pageId) % 70) / 10)}s` }}
-            />
+            {node.nodeTier === "memory" ? (
+              // M13 FEAT-001: a promoted single-highlight "memory" renders as a
+              // HOLLOW ring until it graduates to a full Observation Node (a
+              // 2nd cited evidence quote or added synthesis prose) — see
+              // `Workbench.nodeTierFor`.
+              <circle
+                r={7}
+                className="graph-node-dot graph-node-dot--memory"
+                fill="var(--ito-bg-canvas, #faf6ef)"
+                stroke="var(--ito-ink, #2b2b2b)"
+                strokeWidth={2.2}
+                // De-phase the idle bob so the dots drift independently.
+                style={{ animationDelay: `${-((hashPhase(node.pageId) % 70) / 10)}s` }}
+              />
+            ) : (
+              <circle
+                r={7}
+                className="graph-node-dot"
+                // De-phase the idle bob so the dots drift independently.
+                style={{ animationDelay: `${-((hashPhase(node.pageId) % 70) / 10)}s` }}
+              />
+            )}
             <text
               className="graph-node-label"
               x={11}

@@ -159,7 +159,17 @@ export async function renderPage(
   let activeRenderTask: RenderTask | null = null;
 
   async function draw(renderScale: number): Promise<void> {
-    const viewport = page.getViewport({ scale: renderScale });
+    // M13 FEAT-001 — honour the page's intrinsic `/Rotate` entry. `getViewport`
+    // does NOT apply the page rotation unless `rotation` is passed explicitly,
+    // so a 90°/180°/270° page would otherwise render UNROTATED: the canvas box
+    // stays portrait and pdf.js's TextLayer lays its spans out horizontally in
+    // the top-left corner instead of along the visibly-rotated baseline. Pass
+    // `page.rotate` so pdf.js rotates BOTH the canvas raster AND the text layer
+    // consistently; every downstream consumer (the `--scale-factor` sizing, the
+    // DOM-geometry glyph map, `rangeToClientRects`/`selectRange`) reads live
+    // client rects off this same rotated layer, so the offset mapping is
+    // unaffected.
+    const viewport = page.getViewport({ scale: renderScale, rotation: page.rotate });
     const ratio = globalThis.devicePixelRatio || 1;
     canvas.width = Math.floor(viewport.width * ratio);
     canvas.height = Math.floor(viewport.height * ratio);
@@ -219,6 +229,29 @@ export async function renderPage(
       viewport,
     });
     await textLayerBuilder.render();
+
+    // M13 FEAT-001 — visually rotate the text layer to overlay the rotated
+    // canvas. pdf.js lays the spans out in the UNROTATED page coordinate system
+    // (the layer is sized to the raw pageWidth x pageHeight) and tags the
+    // container with `data-main-rotation`, expecting the host to rotate the
+    // whole layer. We apply that rotate()+translate() here using the live
+    // rotated viewport box so the layer re-registers exactly over the stage.
+    // The translate distances are the ROTATED on-screen dimensions
+    // (viewport.width/height already include the page rotation + scale), so the
+    // mapping stays correct across zoom/fit-width rerenders. Rotation 0 clears
+    // any prior transform.
+    const rot = ((viewport.rotation % 360) + 360) % 360;
+    const vw = viewport.width;
+    const vh = viewport.height;
+    if (rot === 90) {
+      textLayer.style.transform = `translate(${vw}px, 0px) rotate(90deg)`;
+    } else if (rot === 180) {
+      textLayer.style.transform = `translate(${vw}px, ${vh}px) rotate(180deg)`;
+    } else if (rot === 270) {
+      textLayer.style.transform = `translate(0px, ${vh}px) rotate(270deg)`;
+    } else {
+      textLayer.style.transform = "";
+    }
   }
 
   await draw(scale);

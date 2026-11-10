@@ -564,6 +564,17 @@ export interface ConceptNode {
   readonly hidden: boolean;
   /** 2D canvas position if one has been laid out/dragged, else null. */
   readonly position: { readonly x: number; readonly y: number } | null;
+  /**
+   * M13 FEAT-001 — the node's maturity tier. A node promoted from a single
+   * highlight/note (one cited evidence, no extra synthesis prose) is a
+   * "memory" (rendered hollow). A full Observation Node (2+ cited evidence
+   * instances, or added synthesis prose) is an "observation" (rendered
+   * filled). Non-ordinary subject pages (basins, intersections, masters)
+   * always default to "observation".
+   */
+  readonly nodeTier: "memory" | "observation";
+  /** True iff `nodeTier === "memory"` — a convenience flag for renderers. */
+  readonly isPromotedMemory?: boolean;
 }
 
 /** A link in the derived graph = one Relationship with its normalized endpoints. */
@@ -3981,13 +3992,18 @@ export class Workbench {
     const hiddenRels = new Set<RelationshipId>(presentation.hiddenRelationshipIds);
     const positions = presentation.nodePositions ?? presentation.positions;
 
-    const nodes: ConceptNode[] = this.data.pages.map((page) => ({
-      pageId: page.id,
-      title: page.title,
-      kind: page.kind,
-      hidden: hiddenPages.has(page.id),
-      position: positions[page.id] ?? null,
-    }));
+    const nodes: ConceptNode[] = this.data.pages.map((page) => {
+      const nodeTier = this.nodeTierFor(page);
+      return {
+        pageId: page.id,
+        title: page.title,
+        kind: page.kind,
+        hidden: hiddenPages.has(page.id),
+        position: positions[page.id] ?? null,
+        nodeTier,
+        ...(nodeTier === "memory" ? { isPromotedMemory: true } : {}),
+      };
+    });
 
     const links: ConceptLink[] = this.data.relationships.map((rel) => {
       const endpoints = relationshipEndpoints(rel);
@@ -4017,6 +4033,53 @@ export class Workbench {
   }
 
   // -- search / retrieval / neighbourhood (M2-FIX-2, §13, A10, D07) ---------
+
+  /**
+   * M13 FEAT-001 — classify a page's node maturity tier for the concept graph.
+   *
+   * A page is a "memory" (hollow dot) iff it is an ordinary subject/node page
+   * whose record is effectively a single promoted highlight: it cites AT MOST
+   * ONE evidence instance AND carries no synthesis prose beyond that quote.
+   * As soon as a 2nd evidence quote is inserted (evidenceCount >= 2) OR the
+   * author adds synthesis text, the node GRADUATES to "observation" (filled).
+   *
+   * Non-ordinary subject pages — Subject BASIN pages (P4), Subject-intersection
+   * pages (P3), node-intersection/Connecting pages (P2), and Category master
+   * pages — always default to "observation" so they are never hollowed.
+   */
+  private nodeTierFor(page: Page): "memory" | "observation" {
+    // Only ordinary subject pages are candidates for the "memory" tier.
+    if (page.kind !== "subject") return "observation";
+    if (
+      this.isSubjectBasinPage(page.id) ||
+      this.isSubjectIntersectionPage(page.id) ||
+      this.isNodeIntersectionPage(page.id)
+    ) {
+      return "observation";
+    }
+    // A category master page is a durable hub, never a promoted memory.
+    if (this.data.categories.some((c) => c.masterPageId === page.id)) {
+      return "observation";
+    }
+
+    const evidence = this.data.evidenceInstances.filter(
+      (e) => e.destinationPageId === page.id,
+    );
+    const evidenceCount = evidence.length;
+    if (evidenceCount >= 2) return "observation";
+
+    // "Extra synthesis": any body text beyond the single promoted quote. A
+    // freshly promoted node's body is exactly its one quoted evidence atom, so
+    // stripping the quoted text(s) leaves nothing for a pure memory node.
+    const body = this.pageBodyText(page);
+    let residual = body;
+    for (const ev of evidence) {
+      if (ev.quotedText) residual = residual.split(ev.quotedText).join("");
+    }
+    const hasExtraSynthesis = residual.replace(/\s+/g, "").length > 0;
+
+    return evidenceCount <= 1 && !hasExtraSynthesis ? "memory" : "observation";
+  }
 
   /**
    * Extract a page's searchable body text from its stored ProseMirror

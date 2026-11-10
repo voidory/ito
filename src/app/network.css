@@ -440,6 +440,17 @@
   animation: ito-dot-bob 7s ease-in-out infinite;
 }
 
+/* M13 FEAT-001: a promoted single-highlight "memory" node renders as a HOLLOW
+   ring — an unfilled circle with a visible ink stroke — until it graduates to
+   a full Observation Node (a 2nd cited evidence quote or added synthesis). The
+   inline fill/stroke in NodesCanvas is authoritative; this rule is the CSS
+   fallback so the variant stays hollow even without inline attrs. */
+.graph-node .graph-node-dot--memory {
+  fill: var(--ito-bg-canvas, #faf6ef);
+  stroke: var(--ito-ink, #2b2b2b);
+  stroke-width: 2.2px;
+}
+
 @keyframes ito-dot-bob {
   50% {
     transform: translateY(-1.6px);
