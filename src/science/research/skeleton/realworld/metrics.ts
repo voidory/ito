@@ -20,9 +20,9 @@
  *   - exact reconstruction (isomorphism, delegated to graphCompare).
  */
 
-import { cycleRank, degrees, type Edge } from "../graphAnalysis";
+import { cycleRank, degrees, type Edge } from "../../../skeleton/graphAnalysis";
 import { compareGraphs, type SimpleGraph } from "../graphCompare";
-import type { CarbonSkeletonResult, Point } from "../types";
+import type { CarbonSkeletonResult, Point } from "../../../skeleton/types";
 
 export interface GroundTruthGraph {
   /** Ground-truth atom coordinates in the SAME pixel space as the result. */

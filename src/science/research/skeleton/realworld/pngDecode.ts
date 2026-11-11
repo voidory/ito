@@ -24,8 +24,8 @@
  */
 
 import { unzlibSync } from "fflate";
-import { grayFromRgba } from "../imageIo";
-import type { GrayImage } from "../types";
+import { grayFromRgba } from "../../../skeleton/imageIo";
+import type { GrayImage } from "../../../skeleton/types";
 
 export interface DecodedImage {
   readonly width: number;

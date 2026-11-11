@@ -28,7 +28,7 @@
  * truth and the PNGs can be regenerated deterministically.
  */
 
-import type { Point } from "../types";
+import type { Point } from "../../../skeleton/types";
 
 /** Structural categories required by FEAT-005B, scored separately. */
 export type RealWorldCategory =

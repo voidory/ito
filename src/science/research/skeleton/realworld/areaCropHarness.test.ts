@@ -15,7 +15,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import type { AreaAnchor } from "../../../model/types";
+import type { AreaAnchor } from "../../../../model/types";
 import { probeAreaCrop, type DataUrlDecoder } from "./areaCropHarness";
 import { decodePngToGray } from "./pngDecode";
 

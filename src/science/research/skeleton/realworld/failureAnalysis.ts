@@ -8,8 +8,8 @@
  * fix the failure would need — never an arbitrary heuristic to game the score.
  */
 
-import { degrees, minimumCycleBasis, type Edge } from "../graphAnalysis";
-import type { CarbonSkeletonResult, Point } from "../types";
+import { degrees, minimumCycleBasis, type Edge } from "../../../skeleton/graphAnalysis";
+import type { CarbonSkeletonResult, Point } from "../../../skeleton/types";
 import type { EvaluationMetrics, GroundTruthGraph } from "./metrics";
 
 export type FailureCategory =

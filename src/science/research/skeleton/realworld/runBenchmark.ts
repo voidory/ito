@@ -15,8 +15,8 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { reconstructCarbonSkeleton } from "../carbonSkeleton";
-import type { CarbonSkeletonResult, Point } from "../types";
+import { reconstructCarbonSkeleton } from "../../../skeleton/carbonSkeleton";
+import type { CarbonSkeletonResult, Point } from "../../../skeleton/types";
 import { decodePngToGray } from "./pngDecode";
 import {
   aggregate,

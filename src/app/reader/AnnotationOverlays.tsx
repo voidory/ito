@@ -16,6 +16,10 @@ import type { MathRecognitionResult } from "../../science/recognition/mathRecogn
 import type { MoleculeRecognitionResult } from "../../science/recognition/moleculeRecognizer";
 import { validateSmiles } from "../../science/recognition/chemistryValidation";
 import {
+  recognizeCarbonSkeletonFromDataUrl,
+  type CarbonSkeletonRecognition,
+} from "../../science/recognition/carbonSkeleton";
+import {
   HIGHLIGHT_COLORS,
   type AnnotationStyle,
   type HighlightColor,
@@ -508,6 +512,34 @@ function SciencePanel({
     busy: boolean;
   }>(null);
 
+  // Production MVP — deterministic carbon-skeleton recognition. This is a
+  // separate, bounded capability from the backend-driven Identify flow above:
+  // it needs no model/backend and makes no network call. It recognises the
+  // carbon GRAPH/topology of a clean cropped skeletal structure, or fails
+  // explicitly when the input is outside the supported class.
+  const [skeleton, setSkeleton] = useState<
+    null | { busy: true } | { busy: false; result: CarbonSkeletonRecognition }
+  >(null);
+
+  const runCarbonSkeleton = async (): Promise<void> => {
+    if (!imageDataUrl) {
+      setSkeleton({
+        busy: false,
+        result: {
+          success: false,
+          status: "unsupported",
+          confidence: 0,
+          reason: "No captured crop image is available for this area.",
+          notes: [],
+        },
+      });
+      return;
+    }
+    setSkeleton({ busy: true });
+    const result = await recognizeCarbonSkeletonFromDataUrl(imageDataUrl);
+    setSkeleton({ busy: false, result });
+  };
+
   /**
    * Build a {@link RecognitionInput} from the ALREADY-STORED area crop. Per the
    * spec this never re-renders or re-crops the PDF: imageDataUrl is the crop
@@ -632,6 +664,16 @@ function SciencePanel({
         </button>
         <button
           type="button"
+          data-testid="identify-carbon-skeleton-btn"
+          className="ito-ctx-item"
+          disabled={!imageDataUrl || skeleton?.busy === true}
+          title="Recognise the carbon skeleton (graph/topology) of a clean skeletal structure"
+          onClick={() => void runCarbonSkeleton()}
+        >
+          <span className="ito-ctx-item-label">Carbon skeleton</span>
+        </button>
+        <button
+          type="button"
           data-testid="identify-reaction-btn"
           className="ito-ctx-item"
           disabled
@@ -640,6 +682,52 @@ function SciencePanel({
           <span className="ito-ctx-item-label">Reaction (coming soon)</span>
         </button>
       </div>
+
+      {skeleton && (
+        <div
+          data-testid="carbon-skeleton-result"
+          className="ito-recognition-verify"
+        >
+          {imageDataUrl && (
+            <img
+              src={imageDataUrl}
+              alt="Original crop"
+              className="ito-area-figure-preview"
+            />
+          )}
+          {skeleton.busy ? (
+            <div data-testid="carbon-skeleton-pending">Recognising carbon skeleton…</div>
+          ) : skeleton.result.success ? (
+            <div
+              data-testid="carbon-skeleton-success"
+              className="ito-recognition-note"
+            >
+              Recognised a {skeleton.result.skeleton.topology.shape} with{" "}
+              {skeleton.result.skeleton.topology.carbonCount} carbons,{" "}
+              {skeleton.result.skeleton.topology.bondCount} bonds, and{" "}
+              {skeleton.result.skeleton.topology.ringCount} ring(s) (confidence{" "}
+              {skeleton.result.confidence.toFixed(2)}).
+            </div>
+          ) : (
+            <div
+              data-testid="carbon-skeleton-failure"
+              className="ito-recognition-error"
+            >
+              Could not reliably recognise a carbon skeleton: {skeleton.result.reason}
+            </div>
+          )}
+          <div className="ito-annot-popover-actions">
+            <button
+              type="button"
+              data-testid="carbon-skeleton-dismiss-btn"
+              className="ito-ctx-item"
+              onClick={() => setSkeleton(null)}
+            >
+              <span className="ito-ctx-item-label">Dismiss</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {verify && (
         <div data-testid="recognition-verify" className="ito-recognition-verify">

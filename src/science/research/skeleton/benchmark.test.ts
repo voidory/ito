@@ -20,10 +20,10 @@ import {
   rasterizeFixture,
   type SkeletonFixture,
 } from "./fixtures";
-import { reconstructCarbonSkeleton } from "./carbonSkeleton";
+import { reconstructCarbonSkeleton } from "../../skeleton/carbonSkeleton";
 import { compareGraphs, type SimpleGraph } from "./graphCompare";
-import { rasterizeSegments } from "./raster";
-import type { GrayImage, Point } from "./types";
+import { rasterizeSegments } from "../../skeleton/raster";
+import type { GrayImage, Point } from "../../skeleton/types";
 
 interface RenderConfig {
   readonly label: string;

@@ -10,8 +10,8 @@
  * This is an independent-renderer benchmark, NOT a scanned-textbook benchmark.
  */
 import { gunzipSync, strFromU8 } from "fflate";
-import { reconstructCarbonSkeleton } from "../carbonSkeleton";
-import type { CarbonSkeletonResult, GrayImage, Point } from "../types";
+import { reconstructCarbonSkeleton } from "../../../skeleton/carbonSkeleton";
+import type { CarbonSkeletonResult, GrayImage, Point } from "../../../skeleton/types";
 import { aggregateIndependent, evaluateIndependent } from "./independentMetrics";
 import type { EvaluationMetrics } from "../realworld/metrics";
 import type { GroundTruthGraph } from "../realworld/metrics";

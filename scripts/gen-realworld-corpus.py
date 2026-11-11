@@ -2,7 +2,7 @@
 """FEAT-005B — render the real-world carbon-skeleton benchmark corpus to PNG.
 
 Reads the manifest written by `manifest.test.ts`
-(`src/science/skeleton/fixtures/realworld/manifest.json`) — the single source of
+(`src/science/research/skeleton/fixtures/realworld/manifest.json`) — the single source of
 truth for geometry — and renders each structure to a genuine anti-aliased PNG
 using Pillow with 4x supersampling. It emits:
 
@@ -34,8 +34,8 @@ from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 SS = 4  # supersampling factor for anti-aliasing
 ROOT = Path(__file__).resolve().parent.parent
-MANIFEST = ROOT / "src/science/skeleton/fixtures/realworld/manifest.json"
-OUT = ROOT / "src/science/skeleton/fixtures/realworld/png"
+MANIFEST = ROOT / "src/science/research/skeleton/fixtures/realworld/manifest.json"
+OUT = ROOT / "src/science/research/skeleton/fixtures/realworld/png"
 
 
 def load_font(size):
@@ -178,7 +178,7 @@ def main():
     if not MANIFEST.exists():
         print(f"manifest not found: {MANIFEST}", file=sys.stderr)
         print("run: ITO_WRITE_REALWORLD_MANIFEST=1 npx vitest run "
-              "src/science/skeleton/realworld/manifest", file=sys.stderr)
+              "src/science/research/skeleton/realworld/manifest", file=sys.stderr)
         sys.exit(1)
     manifest = json.loads(MANIFEST.read_text())
     OUT.mkdir(parents=True, exist_ok=True)

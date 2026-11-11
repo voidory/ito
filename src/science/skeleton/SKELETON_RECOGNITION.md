@@ -11,7 +11,14 @@ are later milestones and are intentionally **not** implemented here.
 
 ## Where it lives and why
 
-- Module: `src/science/skeleton/` — a new, **independent** module.
+> **This file documents the shared engine.** Two consumers build on it:
+> the **production MVP** at `src/science/recognition/carbonSkeleton/` (a small,
+> bounded, shippable product surface — see its README) and the **research /
+> benchmark** work at `src/science/research/skeleton/` (synthetic, real-world,
+> and independent-renderer benchmarks — see its README). The engine itself
+> depends on neither.
+
+- Module: `src/science/skeleton/` — the shared, deterministic **engine**.
 - It does **not** modify or depend on the existing M18 recognition pipeline
   (`src/science/recognition/*`: `RecognitionService`, the molecule / reaction /
   math recognizers, `chemGraph`, `chemistryValidation`). The Identify workflow
@@ -146,7 +153,7 @@ explicit status plus human-readable `notes`.
 
 ## Accuracy and limitations
 
-See `BENCHMARK.md` for the full table. On the controlled corpus of 22 synthetic
+See `../research/skeleton/BENCHMARK.md` for the full table. On the controlled corpus of 22 synthetic
 structures, scored by exact **graph isomorphism** (vertices, edges, degree
 sequence, cycle rank, topology):
 

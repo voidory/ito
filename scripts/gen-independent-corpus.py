@@ -2,7 +2,7 @@
 """Regenerate FEAT-005C's locked RDKit SVG source corpus.
 
 Requires RDKit. The script writes individual SVGs and variants.json under
-src/science/skeleton/fixtures/independent-source. The committed bundle is the
+src/science/research/skeleton/fixtures/independent-source. The committed bundle is the
 actual evaluation artifact; regeneration is intentionally a development
 operation.
 """
@@ -46,7 +46,7 @@ MOLECULES = [
 ]
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT / "src/science/skeleton/fixtures/independent-source"
+OUT = ROOT / "src/science/research/skeleton/fixtures/independent-source"
 OUT.mkdir(parents=True, exist_ok=True)
 
 entries = []

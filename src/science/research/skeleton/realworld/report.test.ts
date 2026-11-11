@@ -2,12 +2,12 @@
  * FEAT-005B — opt-in generator for the real-world reports + visual-debug SVGs.
  *
  * Run with ITO_WRITE_REALWORLD_REPORT=1 to (re)write:
- *   src/science/skeleton/realworld/REALWORLD_BENCHMARK.md
- *   src/science/skeleton/realworld/FAILURE_ANALYSIS.md
- *   src/science/skeleton/fixtures/realworld/debug/<name>[__transform].svg
+ *   src/science/research/skeleton/realworld/REALWORLD_BENCHMARK.md
+ *   src/science/research/skeleton/realworld/FAILURE_ANALYSIS.md
+ *   src/science/research/skeleton/fixtures/realworld/debug/<name>[__transform].svg
  *
  *   ITO_WRITE_REALWORLD_REPORT=1 npx vitest run \
- *     src/science/skeleton/realworld/report
+ *     src/science/research/skeleton/realworld/report
  *
  * Requires the rendered corpus (`variants.json`). Without the flag it is a cheap
  * no-op so CI never writes.
@@ -32,7 +32,7 @@ describe("real-world reports + debug artifacts", () => {
     if (!hasRenderedCorpus()) {
       throw new Error(
         "rendered corpus missing; run: ITO_WRITE_REALWORLD_MANIFEST=1 vitest run " +
-          "src/science/skeleton/realworld/manifest && python scripts/gen-realworld-corpus.py",
+          "src/science/research/skeleton/realworld/manifest && python scripts/gen-realworld-corpus.py",
       );
     }
 

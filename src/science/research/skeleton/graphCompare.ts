@@ -10,7 +10,7 @@
  * degree sequence, cycle rank) so failures can be diagnosed, not just detected.
  */
 
-import { cycleRank, degrees, type Edge } from "./graphAnalysis";
+import { cycleRank, degrees, type Edge } from "../../skeleton/graphAnalysis";
 
 export interface SimpleGraph {
   readonly vertexCount: number;

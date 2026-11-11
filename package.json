@@ -17,8 +17,10 @@
     "test:e2e": "playwright test",
     "gen-fixtures": "node scripts/gen-fixtures.mjs",
     "koofr-probe": "node scripts/koofr-probe.mjs",
-    "realworld:manifest": "ITO_WRITE_REALWORLD_MANIFEST=1 vitest run src/science/skeleton/realworld/manifest",
-    "realworld:report": "ITO_WRITE_REALWORLD_REPORT=1 vitest run src/science/skeleton/realworld/report"
+    "realworld:manifest": "ITO_WRITE_REALWORLD_MANIFEST=1 vitest run src/science/research/skeleton/realworld/manifest",
+    "realworld:report": "ITO_WRITE_REALWORLD_REPORT=1 vitest run src/science/research/skeleton/realworld/report",
+    "research:independent:test": "vitest run --config vitest.research.config.ts",
+    "research:independent:typecheck": "tsc --noEmit -p tsconfig.research.json"
   },
   "dependencies": {
     "fflate": "^0.8.3",

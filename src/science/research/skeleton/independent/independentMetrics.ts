@@ -6,9 +6,9 @@
  * algorithm). The edit metric is explicitly a mapped edit count, not
  * unrestricted minimum graph-edit distance.
  */
-import { cycleRank, degrees, type Edge } from "../graphAnalysis";
+import { cycleRank, degrees, type Edge } from "../../../skeleton/graphAnalysis";
 import { compareGraphs, type SimpleGraph } from "../graphCompare";
-import type { CarbonSkeletonResult, Point } from "../types";
+import type { CarbonSkeletonResult, Point } from "../../../skeleton/types";
 import type { AggregateMetrics, EvaluationMetrics, GroundTruthGraph, PrecisionRecall } from "../realworld/metrics";
 
 function prf(tp: number, fp: number, fn: number): PrecisionRecall {

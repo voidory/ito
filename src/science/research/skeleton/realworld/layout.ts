@@ -13,7 +13,7 @@
  *   3. reserves a uniform PAD margin (also leaving room for labels).
  */
 
-import type { Point } from "../types";
+import type { Point } from "../../../skeleton/types";
 import type { RealWorldStructure } from "./corpus";
 
 /** Pixel padding around the drawing (also the space labels may occupy). */

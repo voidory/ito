@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from "vitest";
 import { evaluate, matchVertices, type GroundTruthGraph } from "./metrics";
-import type { CarbonSkeletonResult } from "../types";
+import type { CarbonSkeletonResult } from "../../../skeleton/types";
 
 function result(
   atoms: { x: number; y: number }[],

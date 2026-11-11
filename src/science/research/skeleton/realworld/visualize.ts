@@ -19,16 +19,16 @@
  * benchmark run and opens in any browser / the read-only file explorer.
  */
 
-import { extractGeometricGraph } from "../graphExtraction";
-import { preprocess } from "../preprocess";
+import { extractGeometricGraph } from "../../../skeleton/graphExtraction";
+import { preprocess } from "../../../skeleton/preprocess";
 import type {
   BinaryImage,
   CarbonSkeletonResult,
   GeometricGraph,
   GrayImage,
   Point,
-} from "../types";
-import { DEFAULT_PIPELINE_OPTIONS } from "../types";
+} from "../../../skeleton/types";
+import { DEFAULT_PIPELINE_OPTIONS } from "../../../skeleton/types";
 import type { EvaluationMetrics, GroundTruthGraph } from "./metrics";
 
 export interface VisualizationInput {

@@ -4,11 +4,11 @@
  * Fixtures are defined ONCE in TypeScript (`fixtures.ts`), which is the single
  * source of truth for both the tests and the on-disk SVG / ground-truth
  * artifacts. Running with ITO_WRITE_SKELETON_FIXTURES=1 writes, under
- * `src/science/skeleton/fixtures/`:
+ * `src/science/research/skeleton/fixtures/`:
  *   - <name>.svg            : the skeletal drawing (for visual inspection / docs)
  *   - ground-truth.json     : every fixture's ground-truth carbon graph
  *
- *   ITO_WRITE_SKELETON_FIXTURES=1 npx vitest run src/science/skeleton/fixtures.artifacts
+ *   ITO_WRITE_SKELETON_FIXTURES=1 npx vitest run src/science/research/skeleton/fixtures.artifacts
  *
  * Without the env flag the suite is a no-op assertion, so it never slows the
  * normal test run or writes during CI.
@@ -25,10 +25,10 @@ import {
   rasterizeFixture,
   type SkeletonFixture,
 } from "./fixtures";
-import { reconstructCarbonSkeleton } from "./carbonSkeleton";
+import { reconstructCarbonSkeleton } from "../../skeleton/carbonSkeleton";
 import { compareGraphs } from "./graphCompare";
-import { rasterizeSegments } from "./raster";
-import type { GrayImage, Point } from "./types";
+import { rasterizeSegments } from "../../skeleton/raster";
+import type { GrayImage, Point } from "../../skeleton/types";
 
 const WRITE = process.env.ITO_WRITE_SKELETON_FIXTURES === "1";
 

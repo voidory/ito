@@ -1,17 +1,30 @@
 /**
- * FEAT-005 (M19) — public API of the deterministic carbon-skeleton
- * reconstruction module.
+ * FEAT-005 (M19) — the SHARED, deterministic carbon-skeleton reconstruction
+ * ENGINE.
  *
- * This module is intentionally STANDALONE and independent of the M18
- * recognition rendering pipeline. It takes a clean skeletal-structure image
- * crop and reconstructs the underlying carbon skeleton as a graph. It produces
- * a {@link CarbonSkeletonResult}, NOT SMILES. No AI, no network.
+ * This is the stable, pure computer-vision + graph-theory core. It is depended
+ * on by BOTH:
+ *   - the production MVP (`src/science/recognition/carbonSkeleton/`), which
+ *     wraps it in a small, bounded, reliable product surface; and
+ *   - the research benchmarks (`src/science/research/skeleton/`), which
+ *     exercise it against synthetic / real-world / independent corpora.
+ *
+ * It takes a clean skeletal-structure image crop and reconstructs the
+ * underlying carbon skeleton as a graph. It produces a
+ * {@link CarbonSkeletonResult}, NOT SMILES. No AI, no network, no corpus.
+ *
+ * This barrel intentionally exports ONLY the engine (types, preprocessing,
+ * graph extraction/analysis, reconstruction, image I/O, and the pure
+ * rasteriser used by the engine's own unit tests). The benchmark-only helpers
+ * (synthetic corpus `fixtures`, isomorphism scoring `graphCompare`) now live
+ * with the research area and are NOT re-exported here, so production code never
+ * pulls in benchmark machinery.
  *
  * Typical browser usage:
  *   const gray = await decodeImageDataUrlToGray(areaAnchor.imageDataUrl);
  *   const result = reconstructCarbonSkeleton(gray);
  *
- * In Node / tests, build a GrayImage directly (grayFromRgba / rasterizeFixture)
+ * In Node / tests, build a GrayImage directly (grayFromRgba / rasterizeSegments)
  * and call reconstructCarbonSkeleton.
  */
 
@@ -85,20 +98,3 @@ export {
   type RasterStyle,
   type Segment,
 } from "./raster";
-
-export {
-  isIsomorphic,
-  compareGraphs,
-  invariants,
-  type SimpleGraph,
-  type GraphComparison,
-  type GraphInvariants,
-} from "./graphCompare";
-
-export {
-  CARBON_SKELETON_CORPUS,
-  rasterizeFixture,
-  fixtureToSvg,
-  fixtureGroundTruth,
-  type SkeletonFixture,
-} from "./fixtures";

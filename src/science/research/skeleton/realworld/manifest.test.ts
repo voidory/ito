@@ -8,7 +8,7 @@
  * atoms, bonds, labels, canvas size, render hints and dev/eval split.
  *
  *   ITO_WRITE_REALWORLD_MANIFEST=1 npx vitest run \
- *     src/science/skeleton/realworld/manifest
+ *     src/science/research/skeleton/realworld/manifest
  *
  * Without the flag it is a cheap invariant assertion, so CI never writes.
  */

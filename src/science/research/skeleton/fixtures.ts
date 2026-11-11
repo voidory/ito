@@ -16,9 +16,9 @@
  * benchmark report).
  */
 
-import type { Point } from "./types";
-import { rasterizeSegments, type RasterStyle, type Segment } from "./raster";
-import type { GrayImage } from "./types";
+import type { Point } from "../../skeleton/types";
+import { rasterizeSegments, type RasterStyle, type Segment } from "../../skeleton/raster";
+import type { GrayImage } from "../../skeleton/types";
 
 export interface SkeletonFixture {
   readonly name: string;

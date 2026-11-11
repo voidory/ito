@@ -17,9 +17,9 @@
  * test pass a data-URL→GrayImage decoder built on {@link decodePngToGray}.
  */
 
-import type { AreaAnchor } from "../../../model/types";
-import { reconstructCarbonSkeleton } from "../carbonSkeleton";
-import type { CarbonSkeletonResult, GrayImage } from "../types";
+import type { AreaAnchor } from "../../../../model/types";
+import { reconstructCarbonSkeleton } from "../../../skeleton/carbonSkeleton";
+import type { CarbonSkeletonResult, GrayImage } from "../../../skeleton/types";
 import { pipelineStages } from "./visualize";
 
 export interface AreaCropProbeResult {

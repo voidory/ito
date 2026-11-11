@@ -24,3 +24,22 @@ export {
   createRecognitionService,
   type RecognitionServiceOptions,
 } from "./recognitionService";
+
+/**
+ * Production MVP — deterministic carbon-skeleton recognition. Bounded, reliable
+ * carbon-graph recovery for clean cropped skeletal structures. Separate from
+ * the backend-driven RecognitionService above: it needs no model/backend and
+ * makes no network call. The research benchmark machinery is NOT exported here;
+ * it lives under `src/science/research/skeleton/`.
+ */
+export {
+  recognizeCarbonSkeleton,
+  recognizeCarbonSkeletonFromDataUrl,
+  type RecognizeCarbonSkeletonOptions,
+  type CarbonSkeletonRecognition,
+  type RecognizedSkeleton,
+  type RecognizedCarbon,
+  type RecognizedBond,
+  type SkeletonTopology,
+  type CarbonSkeletonRecognitionStatus,
+} from "./carbonSkeleton";
