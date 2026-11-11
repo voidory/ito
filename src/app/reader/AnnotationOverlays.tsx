@@ -19,6 +19,7 @@ import {
   recognizeCarbonSkeletonFromDataUrl,
   type CarbonSkeletonRecognition,
 } from "../../science/recognition/carbonSkeleton";
+import { CarbonSkeletonResult } from "./CarbonSkeletonResult";
 import {
   HIGHLIGHT_COLORS,
   type AnnotationStyle,
@@ -683,51 +684,30 @@ function SciencePanel({
         </button>
       </div>
 
-      {skeleton && (
-        <div
-          data-testid="carbon-skeleton-result"
-          className="ito-recognition-verify"
-        >
-          {imageDataUrl && (
-            <img
-              src={imageDataUrl}
-              alt="Original crop"
-              className="ito-area-figure-preview"
-            />
-          )}
-          {skeleton.busy ? (
-            <div data-testid="carbon-skeleton-pending">Recognising carbon skeleton…</div>
-          ) : skeleton.result.success ? (
-            <div
-              data-testid="carbon-skeleton-success"
-              className="ito-recognition-note"
-            >
-              Recognised a {skeleton.result.skeleton.topology.shape} with{" "}
-              {skeleton.result.skeleton.topology.carbonCount} carbons,{" "}
-              {skeleton.result.skeleton.topology.bondCount} bonds, and{" "}
-              {skeleton.result.skeleton.topology.ringCount} ring(s) (confidence{" "}
-              {skeleton.result.confidence.toFixed(2)}).
+      {skeleton &&
+        (skeleton.busy ? (
+          <div
+            data-testid="carbon-skeleton-result"
+            className="ito-recognition-verify ito-cs-result"
+          >
+            {imageDataUrl && (
+              <img
+                src={imageDataUrl}
+                alt="Original crop"
+                className="ito-area-figure-preview"
+              />
+            )}
+            <div data-testid="carbon-skeleton-pending" className="ito-recognition-note">
+              Recognising carbon skeleton…
             </div>
-          ) : (
-            <div
-              data-testid="carbon-skeleton-failure"
-              className="ito-recognition-error"
-            >
-              Could not reliably recognise a carbon skeleton: {skeleton.result.reason}
-            </div>
-          )}
-          <div className="ito-annot-popover-actions">
-            <button
-              type="button"
-              data-testid="carbon-skeleton-dismiss-btn"
-              className="ito-ctx-item"
-              onClick={() => setSkeleton(null)}
-            >
-              <span className="ito-ctx-item-label">Dismiss</span>
-            </button>
           </div>
-        </div>
-      )}
+        ) : (
+          <CarbonSkeletonResult
+            result={skeleton.result}
+            imageDataUrl={imageDataUrl}
+            onDismiss={() => setSkeleton(null)}
+          />
+        ))}
 
       {verify && (
         <div data-testid="recognition-verify" className="ito-recognition-verify">

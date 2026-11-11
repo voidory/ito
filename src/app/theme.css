@@ -1148,6 +1148,112 @@ label[data-testid="open-restore-input"]:active {
   border-radius: 4px;
 }
 
+/* ── Carbon-skeleton MVP result (analysis preview) ──────────────────────── */
+
+.ito-cs-result {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* The crop + aligned graph overlay share one positioned box. The <img> sets
+   the box size; the SVG is stretched over it and scales with it. */
+.ito-cs-figure {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  line-height: 0;
+  border: 1px solid var(--ito-border, #ddd);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.ito-cs-figure-img {
+  display: block;
+  max-width: 100%;
+  max-height: 12rem;
+  height: auto;
+}
+
+/* preserveAspectRatio="none" means the SVG's viewBox (image pixel space) maps
+   onto the full displayed image box, so graph and image scale identically. */
+.ito-cs-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.ito-cs-bond {
+  stroke: #e0245e;
+  stroke-width: 2;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.ito-cs-carbon {
+  fill: #ffffff;
+  stroke: #e0245e;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Branch vertices (degree >= 3) are emphasised; ring vertices tinted. */
+.ito-cs-carbon--branch {
+  fill: #e0245e;
+}
+
+.ito-cs-carbon--ring {
+  fill: #1d9bf0;
+  stroke: #1d9bf0;
+}
+
+.ito-cs-carbon--endpoint {
+  fill: #ffffff;
+}
+
+.ito-cs-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.85rem;
+}
+
+.ito-cs-summary-title {
+  font-weight: 600;
+  color: var(--ito-text, #111);
+}
+
+.ito-cs-summary-counts {
+  color: var(--ito-text, #111);
+}
+
+.ito-cs-summary-topology {
+  color: var(--ito-text-muted, #555);
+}
+
+.ito-cs-summary-confidence {
+  font-size: 0.78rem;
+  color: var(--ito-text-muted, #666);
+}
+
+.ito-cs-summary-note {
+  margin: 0.2rem 0 0;
+  font-size: 0.72rem;
+  color: var(--ito-text-muted, #888);
+}
+
+.ito-cs-failure-title {
+  font-weight: 600;
+}
+
+.ito-cs-failure-reason {
+  margin-top: 0.2rem;
+  font-size: 0.78rem;
+  opacity: 0.85;
+}
+
 /* The live watercolor comment surface when it floats standalone (R02/R10). */
 .ito-comment-surface-floating {
   position: fixed;

@@ -22,9 +22,12 @@ import {
 The result is a discriminated union on `success`:
 
 - **success** — `{ success: true, status: "success", confidence, skeleton, notes }`
-  where `skeleton` has `carbons`, `bonds`, and `topology`
+  where `skeleton` has `carbons`, `bonds`, `topology`
   (`carbonCount`, `bondCount`, `ringCount`, optional `ring`, and a coarse
-  `shape`: `linear-chain` | `branched-chain` | `monocyclic`).
+  `shape`: `linear-chain` | `branched-chain` | `monocyclic`), and
+  `imageWidth`/`imageHeight` — the pixel dimensions of the image the recogniser
+  analysed. The carbon `x`/`y` coordinates live in that space, so a UI overlay
+  can use `viewBox="0 0 imageWidth imageHeight"` to stay aligned with the crop.
 - **failure** — `{ success: false, status: "unsupported" | "invalid", confidence, reason, notes }`
   with a single human-readable `reason`.
 

@@ -156,7 +156,15 @@ export function recognizeCarbonSkeleton(
     success: true,
     status: "success",
     confidence: engine.confidence,
-    skeleton: { carbons, bonds, topology },
+    skeleton: {
+      carbons,
+      bonds,
+      topology,
+      // The carbon coordinates above are in the analysed image's pixel space.
+      // Surface its dimensions so a UI overlay can align exactly to the crop.
+      imageWidth: image.width,
+      imageHeight: image.height,
+    },
     notes,
   };
 }

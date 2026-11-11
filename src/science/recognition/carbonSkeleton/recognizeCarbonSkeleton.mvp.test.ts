@@ -91,6 +91,17 @@ describe("recognizeCarbonSkeleton (production MVP)", () => {
     // Exactly two chain termini.
     expect(result.skeleton.carbons.filter((c) => c.isEndpoint)).toHaveLength(2);
     expect(result.skeleton.carbons.some((c) => c.isBranch)).toBe(false);
+    // The result reports the analysed image's pixel space (the coordinate
+    // system the carbon x/y live in), and every carbon falls inside it.
+    const img = render(zigzag(6));
+    expect(result.skeleton.imageWidth).toBe(img.width);
+    expect(result.skeleton.imageHeight).toBe(img.height);
+    for (const c of result.skeleton.carbons) {
+      expect(c.x).toBeGreaterThanOrEqual(0);
+      expect(c.x).toBeLessThanOrEqual(result.skeleton.imageWidth);
+      expect(c.y).toBeGreaterThanOrEqual(0);
+      expect(c.y).toBeLessThanOrEqual(result.skeleton.imageHeight);
+    }
   });
 
   it("2. recognises a branched carbon chain (isobutane: a central branch)", () => {

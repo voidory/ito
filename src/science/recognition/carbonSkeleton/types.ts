@@ -82,6 +82,16 @@ export interface RecognizedSkeleton {
   readonly carbons: readonly RecognizedCarbon[];
   readonly bonds: readonly RecognizedBond[];
   readonly topology: SkeletonTopology;
+  /**
+   * The pixel dimensions of the image the recogniser actually analysed. The
+   * {@link RecognizedCarbon} `x`/`y` coordinates live in THIS space (origin
+   * top-left). A UI overlay should use these as its SVG `viewBox` so the graph
+   * stays geometrically aligned with the crop regardless of display size —
+   * note the engine may have down-scaled a very large crop, so these are NOT
+   * necessarily the `<img>`'s intrinsic/natural dimensions.
+   */
+  readonly imageWidth: number;
+  readonly imageHeight: number;
 }
 
 /**
