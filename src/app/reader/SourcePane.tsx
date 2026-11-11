@@ -1482,6 +1482,7 @@ export function SourcePane({
               setSelectedAnnotationId(null);
             }}
             bump={bump}
+            redrawOverlays={redrawOverlays}
           />
         )}
         {contextMenu && (

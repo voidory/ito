@@ -69,6 +69,11 @@ async function click(el: Element): Promise<void> {
   await flush();
 }
 
+/** M19: open the compact "Scientific tools" submenu where recognition lives. */
+async function openScientificTools(): Promise<void> {
+  await click(document.querySelector('[data-testid="scientific-tools-btn"]')!);
+}
+
 async function importOne(wb: Workbench, title: string): Promise<Source> {
   return wb.importSource({
     title,
@@ -96,7 +101,7 @@ function popoverProps(wb: Workbench, annotationId: string, sourceId: string) {
 }
 
 describe("Carbon-skeleton MVP — Identify control", () => {
-  it("offers a 'Carbon skeleton' button next to Equation/Molecule for an area annotation", async () => {
+  it("offers a 'Carbon skeleton' tool inside the Scientific tools submenu", async () => {
     const storage = new InMemoryStorageAdapter();
     const wb = await Workbench.open(storage);
     const src = await importOne(wb, "Structures");
@@ -107,10 +112,14 @@ describe("Carbon-skeleton MVP — Identify control", () => {
     );
     await flush();
 
+    // Not exposed at the first level — it lives behind "Scientific tools".
+    expect(document.querySelector('[data-testid="identify-carbon-skeleton-btn"]')).toBeNull();
+    await openScientificTools();
+
     expect(
       document.querySelector('[data-testid="identify-carbon-skeleton-btn"]'),
     ).not.toBeNull();
-    // Existing Identify controls remain intact.
+    // Shown alongside the other implemented tools.
     expect(document.querySelector('[data-testid="identify-equation-btn"]')).not.toBeNull();
     expect(document.querySelector('[data-testid="identify-molecule-btn"]')).not.toBeNull();
   });
@@ -125,6 +134,7 @@ describe("Carbon-skeleton MVP — Identify control", () => {
       createElement(HighlightEditPopover, popoverProps(wb, area.annotation.id, src.id)),
     );
     await flush();
+    await openScientificTools();
 
     await click(document.querySelector('[data-testid="identify-carbon-skeleton-btn"]')!);
 

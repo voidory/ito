@@ -87,6 +87,15 @@ async function type(el: Element, value: string): Promise<void> {
   await flush();
 }
 
+/**
+ * M19: the scientific recognition controls now live behind a compact
+ * "Scientific tools" submenu rather than the first-level popover. Open it so
+ * the Equation / Molecule / Carbon skeleton controls resolve.
+ */
+async function openScientificTools(): Promise<void> {
+  await click(document.querySelector('[data-testid="scientific-tools-btn"]')!);
+}
+
 async function importOne(wb: Workbench, title: string): Promise<Source> {
   return wb.importSource({
     title,
@@ -124,8 +133,8 @@ function popoverProps(wb: Workbench, annotationId: string, sourceId: string) {
   };
 }
 
-describe("M18 FEAT-004 — Identify control renders with manual type selection", () => {
-  it("offers Identify + Equation/Molecule options for an area annotation", async () => {
+describe("M19 — compact area menu with a Scientific tools submenu", () => {
+  it("keeps the first-level menu compact: scientific controls are NOT shown directly", async () => {
     const storage = new InMemoryStorageAdapter();
     const wb = await Workbench.open(storage);
     const src = await importOne(wb, "Figures");
@@ -136,14 +145,62 @@ describe("M18 FEAT-004 — Identify control renders with manual type selection",
     );
     await flush();
 
-    expect(document.querySelector('[data-testid="identify-btn"]')).not.toBeNull();
+    // The first-level menu offers "Scientific tools" as ONE secondary entry…
+    expect(document.querySelector('[data-testid="scientific-tools-btn"]')).not.toBeNull();
+    // …and does NOT expose the recognition controls directly.
+    for (const id of [
+      "identify-equation-btn",
+      "identify-molecule-btn",
+      "identify-carbon-skeleton-btn",
+      "extract-latex-btn",
+      "extract-chem-btn",
+      "science-panel",
+    ]) {
+      expect(document.querySelector(`[data-testid="${id}"]`)).toBeNull();
+    }
+
+    // Basic annotation controls + Delete remain available at the first level.
+    expect(document.querySelector('[data-testid="color-controls"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="toggle-style-kind"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="popover-associate-insert"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="delete-highlight-only"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="delete-highlight-and-quotes"]')).not.toBeNull();
+  });
+
+  it("opening Scientific tools reveals Equation/Molecule/Carbon skeleton (and only there)", async () => {
+    const storage = new InMemoryStorageAdapter();
+    const wb = await Workbench.open(storage);
+    const src = await importOne(wb, "Figures");
+    const area = await wb.commitAreaAnnotation(src.id, 0, RECT, "", CROP);
+
+    await render(
+      createElement(HighlightEditPopover, popoverProps(wb, area.annotation.id, src.id)),
+    );
+    await flush();
+    await openScientificTools();
+
+    // The submenu is shown with a back affordance and the three real tools.
+    expect(document.querySelector('[data-testid="scientific-tools-menu"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="scientific-tools-back"]')).not.toBeNull();
     expect(document.querySelector('[data-testid="identify-equation-btn"]')).not.toBeNull();
     expect(document.querySelector('[data-testid="identify-molecule-btn"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="identify-carbon-skeleton-btn"]')).not.toBeNull();
+    // Existing extract/edit scientific controls moved here too.
+    expect(document.querySelector('[data-testid="extract-latex-btn"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="extract-chem-btn"]')).not.toBeNull();
 
-    // All existing SciencePanel controls remain intact (M17 Test 5 contract).
-    for (const id of ["extract-latex-btn", "extract-chem-btn"]) {
-      expect(document.querySelector(`[data-testid="${id}"]`)).not.toBeNull();
-    }
+    // No unimplemented / placeholder tool is exposed.
+    expect(document.querySelector('[data-testid="identify-reaction-btn"]')).toBeNull();
+
+    // The first-level actions are not duplicated underneath the submenu.
+    expect(document.querySelector('[data-testid="scientific-tools-btn"]')).toBeNull();
+    expect(document.querySelector('[data-testid="popover-associate-insert"]')).toBeNull();
+
+    // Back returns to the first-level menu.
+    await click(document.querySelector('[data-testid="scientific-tools-back"]')!);
+    expect(document.querySelector('[data-testid="scientific-tools-menu"]')).toBeNull();
+    expect(document.querySelector('[data-testid="scientific-tools-btn"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="identify-equation-btn"]')).toBeNull();
   });
 });
 
@@ -158,6 +215,7 @@ describe("M18 FEAT-004 — unconfigured service routes to manual entry (Phase 9)
       createElement(HighlightEditPopover, popoverProps(wb, area.annotation.id, src.id)),
     );
     await flush();
+    await openScientificTools();
 
     await click(document.querySelector('[data-testid="identify-equation-btn"]')!);
 
@@ -186,6 +244,7 @@ describe("M18 FEAT-004 — unconfigured service routes to manual entry (Phase 9)
       createElement(HighlightEditPopover, popoverProps(wb, area.annotation.id, src.id)),
     );
     await flush();
+    await openScientificTools();
 
     await click(document.querySelector('[data-testid="identify-equation-btn"]')!);
     await type(
@@ -212,6 +271,7 @@ describe("M18 FEAT-004 — unconfigured service routes to manual entry (Phase 9)
       createElement(HighlightEditPopover, popoverProps(wb2, area.annotation.id, src.id)),
     );
     await flush();
+    await openScientificTools();
     const mathPreview = document.querySelector('[data-testid="annotation-latex-preview"]');
     expect(mathPreview).not.toBeNull();
     expect(mathPreview!.innerHTML).toContain("<mfrac>");
@@ -227,6 +287,7 @@ describe("M18 FEAT-004 — unconfigured service routes to manual entry (Phase 9)
       createElement(HighlightEditPopover, popoverProps(wb, area.annotation.id, src.id)),
     );
     await flush();
+    await openScientificTools();
 
     await click(document.querySelector('[data-testid="identify-molecule-btn"]')!);
     await type(document.querySelector('[data-testid="recognized-smiles-input"]')!, "c1ccccc1");
@@ -268,6 +329,7 @@ describe("M18 FEAT-004 — unconfigured service routes to manual entry (Phase 9)
       createElement(HighlightEditPopover, popoverProps(wb, area.annotation.id, src.id)),
     );
     await flush();
+    await openScientificTools();
 
     await click(document.querySelector('[data-testid="identify-molecule-btn"]')!);
     await type(document.querySelector('[data-testid="recognized-smiles-input"]')!, "CC(");
@@ -294,6 +356,7 @@ describe("M18 FEAT-004 — injected fake backend exercises the success verificat
       }),
     );
     await flush();
+    await openScientificTools();
 
     await click(document.querySelector('[data-testid="identify-equation-btn"]')!);
 
@@ -327,6 +390,7 @@ describe("M18 FEAT-004 — injected fake backend exercises the success verificat
       }),
     );
     await flush();
+    await openScientificTools();
 
     await click(document.querySelector('[data-testid="identify-molecule-btn"]')!);
 
@@ -355,6 +419,7 @@ describe("M18 FEAT-004 — injected fake backend exercises the success verificat
       }),
     );
     await flush();
+    await openScientificTools();
 
     await click(document.querySelector('[data-testid="identify-equation-btn"]')!);
     expect(document.querySelector('[data-testid="recognized-latex-input"]')).not.toBeNull();

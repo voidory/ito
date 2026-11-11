@@ -323,8 +323,12 @@ describe("M17 Test 5 — annotation science persistence + popover controls", () 
     );
     await flush();
 
-    // The popover mounts via a portal to document.body, so query the document.
+    // M19: the scientific controls now live behind the compact "Scientific
+    // tools" submenu rather than the first-level popover. Open it first.
     void el;
+    await click(document.querySelector('[data-testid="scientific-tools-btn"]')!);
+
+    // The popover mounts via a portal to document.body, so query the document.
     for (const id of [
       "extract-latex-btn",
       "extract-chem-btn",

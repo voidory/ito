@@ -202,6 +202,7 @@ export function HighlightEditPopover({
   onClose,
   bump,
   resolveAnchor,
+  redrawOverlays,
   recognitionService,
 }: {
   wb: Workbench;
@@ -214,6 +215,16 @@ export function HighlightEditPopover({
    * resizes instead of staying where it first opened.
    */
   resolveAnchor?: (annotationId: AnnotationId) => AnchorRect | null;
+  /**
+   * Clear + rebuild the imperative annotation overlays from the CURRENT
+   * Workbench state. The reader draws highlights into the page DOM outside
+   * React, so after a DATA mutation that removes an annotation (delete) the
+   * stale overlay must be explicitly re-drawn — a React re-render (`bump`)
+   * alone does not touch that imperative DOM. SourcePane passes its own
+   * `redrawOverlays`; it is optional so the popover still renders in unit tests
+   * that drive it directly without a page DOM.
+   */
+  redrawOverlays?: () => void;
   /**
    * M18 FEAT-004 seam: the scientific {@link RecognitionService} used by the
    * Identify UI. Defaults (below, in SciencePanel) to a not-configured service
@@ -253,6 +264,10 @@ export function HighlightEditPopover({
     view && view.annotation.scope.kind === "area" ? view.annotation.scope.anchor : undefined;
   const imageDataUrl = areaAnchor?.imageDataUrl;
   const [menuMode, setMenuMode] = useState<null | "associate" | "insert" | "link">(null);
+  // M19: scientific recognition tools are a SECONDARY action, not the main menu.
+  // The first-level menu stays a compact annotation menu; the (area-only)
+  // scientific tools live behind a "Scientific tools >" submenu entry.
+  const [scienceMode, setScienceMode] = useState(false);
 
   const setColor = async (color: HighlightColor): Promise<void> => {
     const kind = view?.style.kind ?? "highlight";
@@ -309,30 +324,49 @@ export function HighlightEditPopover({
           ×
         </button>
       </div>
+      {/* M19 Scientific tools SUBMENU — a compact secondary view, shown only
+          when the user opens it from the first-level menu (area annotations
+          only). It reuses the existing SciencePanel verbatim (same recognition
+          behaviour + result UI); this reorganizes ACCESS to the tools, nothing
+          about the recognition itself. */}
+      {scienceMode && areaAnchor ? (
+        <div data-testid="scientific-tools-menu" className="ito-annot-popover-submenu">
+          <button
+            type="button"
+            data-testid="scientific-tools-back"
+            className="ito-ctx-item ito-annot-popover-submenu-back"
+            onClick={() => setScienceMode(false)}
+          >
+            <span className="ito-ctx-item-label">← Scientific tools</span>
+          </button>
+          {imageDataUrl && (
+            <img
+              data-testid="area-figure-preview"
+              src={imageDataUrl}
+              alt="Captured figure"
+              className="ito-area-figure-preview"
+            />
+          )}
+          <SciencePanel
+            wb={wb}
+            annotationId={popover.annotationId}
+            latex={areaAnchor.latex}
+            smiles={areaAnchor.smiles}
+            mechanism={areaAnchor.mechanism}
+            imageDataUrl={areaAnchor.imageDataUrl}
+            rect={areaAnchor.rect}
+            bump={bump}
+            {...(recognitionService ? { recognitionService } : {})}
+          />
+        </div>
+      ) : (
+      <>
       {imageDataUrl && (
         <img
           data-testid="area-figure-preview"
           src={imageDataUrl}
           alt="Captured figure"
           className="ito-area-figure-preview"
-        />
-      )}
-      {/* M17 (§3.1) crop-to-science actions: extract/edit LaTeX math and
-          SMILES/mechanism, preview + copy-for-Word, and an inline curly-arrow
-          builder. Science data lives on the AREA anchor (a cropped figure /
-          scheme region), so the panel is shown ONLY for area annotations —
-          where setAnnotationScienceData actually persists. */}
-      {areaAnchor && (
-        <SciencePanel
-          wb={wb}
-          annotationId={popover.annotationId}
-          latex={areaAnchor.latex}
-          smiles={areaAnchor.smiles}
-          mechanism={areaAnchor.mechanism}
-          imageDataUrl={areaAnchor.imageDataUrl}
-          rect={areaAnchor.rect}
-          bump={bump}
-          {...(recognitionService ? { recognitionService } : {})}
         />
       )}
       <CommentSurface
@@ -344,6 +378,24 @@ export function HighlightEditPopover({
       />
       {!menuMode && (
         <div className="ito-annot-popover-actions">
+          {/* M19 — scientific recognition is ONE secondary action behind a
+              submenu (area annotations only), not the main menu's whole body. */}
+          {areaAnchor && (
+            <button
+              type="button"
+              data-testid="scientific-tools-btn"
+              className="ito-ctx-item"
+              onClick={() => setScienceMode(true)}
+            >
+              <span className="ito-ctx-item-icon" aria-hidden="true">
+                {Icons.area}
+              </span>
+              <span className="ito-ctx-item-label">Scientific tools</span>
+              <span className="ito-ctx-item-chevron" aria-hidden="true">
+                ›
+              </span>
+            </button>
+          )}
           <button
             data-testid="popover-associate-insert"
             className="ito-ctx-item"
@@ -413,7 +465,11 @@ export function HighlightEditPopover({
           data-testid="delete-highlight-only"
           className="ito-annot-danger"
           onClick={async () => {
+            // Order matters: the data mutation must COMPLETE before we clear the
+            // imperative overlay DOM, so redrawOverlays rebuilds from state that
+            // no longer contains this annotation (fixes the stale yellow box).
             await wb.deleteAnnotationOnly(popover.annotationId);
+            redrawOverlays?.();
             bump();
             onClose();
           }}
@@ -425,6 +481,7 @@ export function HighlightEditPopover({
           className="ito-annot-danger"
           onClick={async () => {
             await wb.deleteAnnotationAndQuotes(popover.annotationId);
+            redrawOverlays?.();
             bump();
             onClose();
           }}
@@ -432,6 +489,8 @@ export function HighlightEditPopover({
           Delete highlight and quotes
         </button>
       </div>
+      </>
+      )}
     </Popover>
   );
 }
@@ -639,8 +698,9 @@ function SciencePanel({
   return (
     <div data-testid="science-panel" className="ito-science-panel">
       {/* M18 FEAT-004 — unified Identify control. Manual type selection only
-          (Equation / Molecule); automatic classification is explicitly NOT
-          required (spec Phase 10/11). Reaction is deferred (Phases 6-8). */}
+          (Equation / Molecule / Carbon skeleton); automatic classification is
+          explicitly NOT required. Only implemented tools are shown — no
+          placeholder / "coming soon" entries. */}
       <div className="ito-annot-popover-actions ito-identify-controls">
         <span data-testid="identify-btn" className="ito-identify-label">
           Identify:
@@ -672,15 +732,6 @@ function SciencePanel({
           onClick={() => void runCarbonSkeleton()}
         >
           <span className="ito-ctx-item-label">Carbon skeleton</span>
-        </button>
-        <button
-          type="button"
-          data-testid="identify-reaction-btn"
-          className="ito-ctx-item"
-          disabled
-          title="Reaction recognition is coming soon"
-        >
-          <span className="ito-ctx-item-label">Reaction (coming soon)</span>
         </button>
       </div>
 
