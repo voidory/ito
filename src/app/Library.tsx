@@ -1014,3 +1014,7 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: "0.85rem",
   },
 };
+
+/* The orientation banner is intentionally compact on desktop and stacks
+   cleanly on narrow tablet/desktop widths. */
+
