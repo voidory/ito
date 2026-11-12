@@ -56,8 +56,28 @@ test("the map background and a node get their own actions", async ({ page }) => 
 
   await page.locator(`[data-testid="graph-node"][data-page-id="${a}"] circle`).click({ button: "right" });
   await expect(page.getByTestId("app-context-menu")).toHaveAttribute("aria-label", "Node actions");
+  // "Open page" performs the same action as the node's on-canvas control (a
+  // plain click only selects): it opens the node's page in the workspace.
   await page.getByTestId("ctx-node-open").click();
+  await expect.poll(() => page.evaluate(() => window.__ito.openSubjectId())).toBe(a);
+  await expect(page.getByTestId("view-switch")).toHaveAttribute("data-view-mode", "files");
+});
+
+test("a hub's menu opens its Connecting Page beside the map", async ({ page }) => {
+  await boot(page);
+  const a = await page.evaluate(() => window.__ito.createSubject("Cause"));
+  const b = await page.evaluate(() => window.__ito.createSubject("Effect"));
+  const relId = await page.evaluate(([x, y]) => window.__ito.createRelationship([x!, y!]), [a, b] as const);
+  await page.getByTestId("view-nodes").click();
+
+  await page.getByTestId("graph-hub").click({ button: "right" });
+  await expect(page.getByTestId("app-context-menu")).toHaveAttribute("aria-label", "Connection actions");
+  await page.getByTestId("ctx-hub-open").click();
+
   await expect(page.getByTestId("nodes-page-dock")).toBeVisible();
+  const explanatory = await page.evaluate((id) => window.__ito.relationshipExplanatoryPageId(id), relId);
+  expect(explanatory).toBeTruthy();
+  await expect(page.getByTestId("nodes-page-dock")).toHaveAttribute("data-page-id", explanatory!);
 });
 
 test("editable text keeps the native menu", async ({ page }) => {

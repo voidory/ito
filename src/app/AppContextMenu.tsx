@@ -21,6 +21,28 @@ function press(testId: string): void {
   (document.querySelector(`[data-testid="${testId}"]`) as HTMLElement | null)?.click();
 }
 
+/**
+ * Open a node's page the way the canvas does. A click on a node only SELECTS it
+ * (select-then-open); the node then offers its own "Open page" control. So:
+ * select it, wait for that control to render, and press it — the same path as
+ * the visible button, including its camera dive and workspace switch.
+ */
+function openNodePage(node: Element): void {
+  (node.querySelector("circle") as unknown as HTMLElement | null)?.dispatchEvent(
+    new MouseEvent("click", { bubbles: true }),
+  );
+  let frames = 0;
+  const tryOpen = (): void => {
+    const open = node.querySelector(".node-open-page") as unknown as HTMLElement | null;
+    if (open) {
+      open.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      return;
+    }
+    if (++frames < 30) requestAnimationFrame(tryOpen);
+  };
+  requestAnimationFrame(tryOpen);
+}
+
 function isEditable(el: Element | null): boolean {
   if (!el) return false;
   if (el.closest("input, textarea, select, [contenteditable='true'], .ProseMirror")) return true;
@@ -104,7 +126,7 @@ export function buildContextEntries(target: Element, selectedText: string): {
       id: "node-open",
       label: "Open page",
       icon: Icons.open,
-      onSelect: () => (node.querySelector("circle") as unknown as HTMLElement | null)?.dispatchEvent(new MouseEvent("click", { bubbles: true })),
+      onSelect: () => openNodePage(node),
     });
     entries.push({ kind: "separator", id: "s-node" });
   } else if (hub) {
@@ -113,7 +135,13 @@ export function buildContextEntries(target: Element, selectedText: string): {
       id: "hub-open",
       label: "Open connecting page",
       icon: Icons.open,
-      onSelect: () => (hub as unknown as HTMLElement).dispatchEvent(new MouseEvent("click", { bubbles: true })),
+      onSelect: () => {
+        // A click on the hub itself only selects it; the explicit control opens.
+        const rel = hub.getAttribute("data-relationship-id");
+        (
+          document.querySelector(`[data-testid="open-connecting-page"][data-relationship-id="${rel}"]`) as unknown as HTMLElement | null
+        )?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      },
     });
     entries.push({
       id: "hub-label",
