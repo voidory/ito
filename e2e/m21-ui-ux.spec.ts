@@ -25,11 +25,10 @@ test.describe("M21 UI/UX priorities", () => {
     await page.goto("/");
     await expect(page.getByTestId("library-empty")).toBeVisible();
 
-    await page.getByTestId("empty-import-pdf").click();
     const chooser = page.waitForEvent("filechooser");
     // The hidden input is the existing import control; trigger it directly so
     // the test verifies the same Workbench import path as the visible button.
-    await page.getByTestId("import-pdf-btn").click();
+    await page.getByTestId("empty-import-pdf").click();
     const fileChooser = await chooser;
     await fileChooser.setFiles("src/test/fixtures/sample-3page.pdf");
 
