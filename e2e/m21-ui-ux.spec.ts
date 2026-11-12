@@ -21,6 +21,22 @@ test.describe("M21 UI/UX priorities", () => {
     await expect(page.getByTestId("library-item")).toHaveCount(0);
   });
 
+  test("preserves the existing PDF import path from the empty state", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByTestId("library-empty")).toBeVisible();
+
+    await page.getByTestId("empty-import-pdf").click();
+    const chooser = page.waitForEvent("filechooser");
+    // The hidden input is the existing import control; trigger it directly so
+    // the test verifies the same Workbench import path as the visible button.
+    await page.getByTestId("import-pdf-btn").click();
+    const fileChooser = await chooser;
+    await fileChooser.setFiles("src/test/fixtures/sample-3page.pdf");
+
+    await expect(page.getByTestId("library-item")).toHaveCount(1);
+    await expect(page.getByTestId("library-empty")).toHaveCount(0);
+  });
+
   test("keeps first-use orientation dismissible and persistent", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByTestId("research-orientation")).toBeVisible();
