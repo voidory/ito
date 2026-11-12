@@ -51,9 +51,13 @@ The generated PDFs are committed for test stability.
 ## Layout
 
 - `src/model/` — section-20 data contract types + durable ids.
-- `src/storage/` — `StorageAdapter` interface + `LocalFileStorageAdapter`.
-- `src/app/` — app shell (READY/ERROR state).
+- `src/storage/` — `StorageAdapter` interface + `IndexedDbStorageAdapter` (local) + `KoofrStorageAdapter` (remote WebDAV).
+- `src/app/` — app shell, the headless `Workbench` state core, and the React views.
 - `src/test/` — Vitest tests + fixtures.
 - `e2e/` — Playwright real-browser tests.
 - `scripts/` — fixture generation.
 - `docs/` — decisions (ADRs), plan, backlog, requirement→test map.
+
+**New to the codebase? Read `docs/ARCHITECTURE.md`** — the living core-architecture
+reference (data/app separation, the Workbench observable store, storage adapters,
+sync, the test-API gate). Keep it updated on every structural change.
