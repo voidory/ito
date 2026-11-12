@@ -51,7 +51,7 @@ test.describe("M21 UI/UX priorities", () => {
     await page.goto("/");
 
     page.on("dialog", async (dialog) => {
-      await dialog.accept(dialog.defaultValue || "Test Subject");
+      await dialog.accept(dialog.defaultValue() || "Test Subject");
     });
 
     await page.getByTestId("subjects-launcher-toggle").click();
@@ -92,7 +92,7 @@ test.describe("M21 UI/UX priorities", () => {
     await page.goto("/");
 
     page.on("dialog", async (dialog) => {
-      await dialog.accept(dialog.defaultValue || "Context Node");
+      await dialog.accept(dialog.defaultValue() || "Context Node");
     });
 
     await page.getByTestId("subjects-launcher-toggle").click();
@@ -116,7 +116,7 @@ test.describe("M21 UI/UX priorities", () => {
     await page.goto("/");
 
     page.on("dialog", async (dialog) => {
-      await dialog.accept(dialog.defaultValue || "Hub Node");
+      await dialog.accept(dialog.defaultValue() || "Hub Node");
     });
 
     await page.getByTestId("subjects-launcher-toggle").click();
