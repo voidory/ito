@@ -192,6 +192,19 @@ export function NodesCanvas({
     ? graph.categories.find((category) => category.categoryId === activeCategoryId) ?? null
     : null;
   const activeCategoryMemberIds = new Set(activeCategory?.memberPageIds ?? []);
+
+  useEffect(() => {
+    if (selectedNodeId && !graph.nodes.some((node) => node.pageId === selectedNodeId)) {
+      setSelectedNodeId(null);
+    }
+    if (selectedHubId && !graph.links.some((link) => link.relationshipId === selectedHubId)) {
+      setSelectedHubId(null);
+    }
+    if (selectedCategoryId && !graph.categories.some((category) => category.categoryId === selectedCategoryId)) {
+      setSelectedCategoryId(null);
+    }
+  }, [graph, selectedNodeId, selectedHubId, selectedCategoryId]);
+
   // Apply the §3.3 category filter off the LIVE graph: with a scope selected we
   // keep only that category's members plus nodes in overlapping categories
   // (categories sharing at least one member page with the scoped one).
@@ -877,6 +890,9 @@ export function NodesCanvas({
       if (next) {
         setConnectMode(false);
         setSelectedNodeIds([]);
+        setSelectedNodeId(null);
+        setSelectedHubId(null);
+        setSelectedCategoryId(null);
       }
       return next;
     });
@@ -909,6 +925,9 @@ export function NodesCanvas({
         setCategoryModalOpen(false);
       }
       setSelectedNodeIds([]);
+      setSelectedNodeId(null);
+      setSelectedHubId(null);
+      setSelectedCategoryId(null);
       return next;
     });
   };
@@ -923,6 +942,9 @@ export function NodesCanvas({
         setSelectedNodeIds([]);
         setHubLabel("");
         setConnectMode(false);
+        setSelectedNodeId(null);
+        setSelectedHubId(null);
+        setSelectedCategoryId(null);
         bump();
       });
   };
