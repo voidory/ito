@@ -10,3 +10,8 @@ export * from "./highlight";
 export * from "./pointerSelection";
 export * from "./textCache";
 export * from "./scienceOcr";
+export * from "./glyphMap";
+export * from "./analysisCache";
+export * from "./ingestPipeline";
+export * from "./instrumentation";
+export * from "./pageAnalyzer";

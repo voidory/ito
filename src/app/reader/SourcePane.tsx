@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
+  analyzePdfPage,
+  computeHeadTailHash,
   createAnchor,
   createAnchorRectsWithOcrFallback,
   cropCanvasRegionToDataUrl,
@@ -11,6 +13,7 @@ import {
   renderPage,
   resolveAnchor,
   type HitTestTarget,
+  type IngestionController,
   type RenderedPage,
 } from "../../pdf";
 import type { NormalizedRect, PreParsedPageLayout } from "../../model";
@@ -97,6 +100,9 @@ export function SourcePane({
   const docRef = useRef<PDFDocumentProxy | null>(null);
   // M14–M16 (FEAT-001) the live windowed-virtualization observer (large PDFs).
   const virtualizationObserverRef = useRef<IntersectionObserver | null>(null);
+  // M18 (FEAT-PDF-CACHE §15/§20-15) the in-flight analysis-cache ingestion
+  // controller for THIS source, so switching sources cancels obsolete work.
+  const ingestionControllerRef = useRef<IngestionController | null>(null);
   const [ready, setReady] = useState(false);
   const [toolbar, setToolbar] = useState<ToolbarState | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
@@ -423,6 +429,49 @@ export function SourcePane({
       }
 
       setReady(true);
+
+      // M18 (FEAT-PDF-CACHE §4/§8): drive the PERSISTENT per-page analysis cache
+      // in the background. This is the long-term source of reusable document
+      // information: on a cold open it analyses each page once (bounded
+      // concurrency) and persists incrementally; on a warm open the manifest is
+      // already complete and this is an O(1) lookup that schedules no analysis.
+      // It runs AFTER the pages are visible (never blocks first paint) and is
+      // cancelled if the source switches. A no-op when no analysis store is
+      // wired (jsdom / legacy path), so the existing render is unaffected.
+      if (source && !cancelled && wb.pdfAnalysisStore()) {
+        const bytesForId = bytes;
+        const fileSize = bytesForId.byteLength;
+        const headTailHash = computeHeadTailHash(bytesForId);
+        const pdfId = (doc as unknown as { fingerprints?: (string | null)[] })
+          .fingerprints?.[0] ?? null;
+        const identity = wb.pdfDocumentIdentity(sourceId, {
+          fileSize,
+          pdfId,
+          headTailHash,
+        });
+        if (identity) {
+          const controller = wb.createPdfIngestionController();
+          ingestionControllerRef.current?.cancel();
+          ingestionControllerRef.current = controller;
+          const analyzePage = (pageNumber: number) =>
+            analyzePdfPage(
+              doc as unknown as Parameters<typeof analyzePdfPage>[0],
+              pageNumber,
+            );
+          void wb
+            .openPdfAnalysisCache({
+              sourceId,
+              documentId: identity.documentId,
+              sourceFingerprint: identity.sourceFingerprint,
+              fileSize,
+              pageCount: doc.numPages,
+              analyzePage,
+              controller,
+              currentPage: 1,
+            })
+            .catch((err) => console.error("pdf analysis cache failed", err));
+        }
+      }
     })().catch((err) => console.error("render failed", err));
     return () => {
       cancelled = true;
@@ -430,6 +479,10 @@ export function SourcePane({
       // re-render / unmount never leaks observers across source swaps.
       virtualizationObserverRef.current?.disconnect();
       virtualizationObserverRef.current = null;
+      // M18 (FEAT-PDF-CACHE §15): cancel any in-flight analysis ingestion so a
+      // source switch does not keep analysing the old document (§20 case 15).
+      ingestionControllerRef.current?.cancel();
+      ingestionControllerRef.current = null;
     };
   }, [wb, sourceId]);
 

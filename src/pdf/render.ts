@@ -22,6 +22,7 @@ import {
   type TextItemLike,
   type ViewportLike,
 } from "./textCache";
+import { CachedGlyphMap } from "./glyphMap";
 
 /**
  * M13 (§1.1) detect pdf.js's RenderingCancelledException WITHOUT importing a
@@ -106,17 +107,6 @@ export interface RenderedPage {
   hydrateFromCache(layout: PreParsedPageLayout): void;
 }
 
-interface GlyphMap {
-  /** Flattened page text (what offsets index into). */
-  readonly text: string;
-  /** For each run div, [startOffset, endOffset) in `text` and the text node. */
-  readonly runs: readonly {
-    readonly node: Text;
-    readonly start: number;
-    readonly end: number;
-  }[];
-}
-
 /**
  * Render a single page (1-based pageNumber) into `mount`. Builds a canvas and a
  * pdf.js TextLayer with real, selectable text divs.
@@ -174,6 +164,12 @@ export async function renderPage(
     color: "transparent",
   } satisfies Partial<CSSStyleDeclaration>);
   stage.appendChild(textLayer);
+
+  // M18 (§11) build-once + cached glyph map for this text layer. Selection /
+  // range / pageText operations reuse it instead of re-walking the DOM each
+  // time; it is invalidated ONLY when the text layer DOM actually changes (a
+  // re-render at a new scale, or a cache hydration) — never on zoom/scroll.
+  const glyphMap = new CachedGlyphMap(textLayer);
 
   const textContent = await page.getTextContent();
 
@@ -308,6 +304,11 @@ export async function renderPage(
     // synthetic OCR text-band spans so it is still selectable/highlightable.
     annotateSpansWithNormRects(renderScale);
 
+    // M18 (§11): the text-layer DOM was just rebuilt (new text nodes), so the
+    // cached glyph map is stale — invalidate it so the next selection/range op
+    // rebuilds it once against the fresh DOM.
+    glyphMap.invalidate();
+
     // M14–M16 (FEAT-001): the raster + text layer are now built at this scale.
     isDrawn = true;
     currentScale = renderScale;
@@ -389,6 +390,9 @@ export async function renderPage(
   function hydrateFromCache(layout: PreParsedPageLayout): void {
     const viewport = page.getViewport({ scale: currentScale, rotation: page.rotate });
     hydrateTextLayerFromCache(textLayer, layout, viewport.width, viewport.height);
+    // M18 (§11): hydration replaced the text-layer spans, so the cached glyph
+    // map must be rebuilt against the hydrated DOM on next use.
+    glyphMap.invalidate();
   }
 
   // M14–M16 (FEAT-001): size the stage to the exact viewport box up front so a
@@ -402,37 +406,14 @@ export async function renderPage(
     await draw(scale);
   }
 
-  function buildGlyphMap(): GlyphMap {
-    // Walk the text-layer DOM in document order, concatenating text nodes and
-    // recording each node's offset span. This is derived from the LIVE DOM so
-    // the offsets line up with the client rects the DOM reports.
-    const runs: { node: Text; start: number; end: number }[] = [];
-    let text = "";
-    const walker = document.createTreeWalker(textLayer, NodeFilter.SHOW_TEXT);
-    let n = walker.nextNode();
-    while (n) {
-      const node = n as Text;
-      const content = node.data;
-      runs.push({ node, start: text.length, end: text.length + content.length });
-      text += content;
-      n = walker.nextNode();
-    }
-    return { text, runs };
-  }
-
+  /**
+   * M18 (§11) resolve a [start, end) offset range to a DOM Range via the CACHED
+   * glyph map (build-once, binary-search lookup). Replaces the former per-call
+   * TreeWalker + linear `.find()` scan; the map is reused across selection /
+   * range operations and rebuilt only when the text layer DOM changes.
+   */
   function rangeFor(start: number, end: number): Range {
-    const map = buildGlyphMap();
-    const startRun = map.runs.find((r) => start >= r.start && start < r.end);
-    const endRun = map.runs.find((r) => end > r.start && end <= r.end);
-    if (!startRun || !endRun) {
-      throw new Error(
-        `rangeFor: offsets [${start}, ${end}) not covered by text layer`,
-      );
-    }
-    const range = document.createRange();
-    range.setStart(startRun.node, start - startRun.start);
-    range.setEnd(endRun.node, end - endRun.start);
-    return range;
+    return glyphMap.rangeFor(start, end);
   }
 
   const rendered: RenderedPage = {
@@ -444,7 +425,8 @@ export async function renderPage(
     // The DOM-derived page text (what resolve matches against). Prefer the
     // live DOM text so offsets are internally consistent with client rects.
     get pageText() {
-      return buildGlyphMap().text;
+      // M18 (§11): reuse the cached glyph map's flattened text.
+      return glyphMap.text();
     },
     pageBox(): PageBox {
       // FIX-HIGHLIGHT-OFFSET (3.1): measure the STAGE, not the outer wrapper
@@ -489,6 +471,9 @@ export async function renderPage(
       canvas.height = 0;
       textLayer.replaceChildren();
       textLayer.style.transform = "";
+      // M18 (§11): the text layer was emptied; drop the cached glyph map so a
+      // later re-render rebuilds it against the fresh DOM.
+      glyphMap.invalidate();
       isDrawn = false;
       sizeStage(currentScale);
     },

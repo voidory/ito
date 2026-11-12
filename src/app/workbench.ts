@@ -78,6 +78,19 @@ import {
   parseDocStem,
 } from "../pdf/fingerprint";
 import {
+  computeDocumentId,
+  computeSourceFingerprint,
+  createManifest,
+  createIngestionController,
+  openWithCache,
+  validateCache,
+  type DocumentIdentityInput,
+  type IngestionController,
+  type IngestionProgress,
+  type PageAnalyzer,
+  type PdfPageAnalysis,
+} from "../pdf";
+import {
   deriveHubBlendColor,
   neighborhood as computeNeighborhood,
   pointInSubjectBasin,
@@ -115,11 +128,13 @@ import {
   strToU8,
   parseZoteroBundle,
   KoofrStorageAdapter,
+  IndexedDbPdfAnalysisStore,
   type BackupOptions,
   type IngestOptions,
   type RemotePointer,
   type StagedImport,
   type StorageAdapter,
+  type PdfAnalysisStore,
 } from "../storage";
 
 /** An empty subject-page composition: one empty paragraph (never null). */
@@ -745,12 +760,29 @@ export class Workbench {
   private constructor(
     private readonly storage: StorageAdapter,
     data: BrainData,
+    /**
+     * M18 (FEAT-PDF-CACHE) the persistent PDF analysis cache store. Optional so
+     * existing callers / tests that do not exercise the cache can omit it; a
+     * browser caller passes an {@link IndexedDbPdfAnalysisStore}. When absent
+     * the cache-driving methods are inert (the Reader falls back to the legacy
+     * `Source.cachedPages` path, deliberately left unchanged).
+     */
+    private readonly pdfAnalysis?: PdfAnalysisStore,
   ) {
     this.data = data;
   }
 
+  /** The persistent PDF analysis cache store, when one was provided (§14). */
+  pdfAnalysisStore(): PdfAnalysisStore | undefined {
+    return this.pdfAnalysis;
+  }
+
   /** Open an existing brain, or create+persist a new empty one. */
-  static async open(storage: StorageAdapter, brainId?: BrainId): Promise<Workbench> {
+  static async open(
+    storage: StorageAdapter,
+    brainId?: BrainId,
+    pdfAnalysis?: PdfAnalysisStore,
+  ): Promise<Workbench> {
     let data: BrainData | null = null;
     let createdFresh = false;
     if (brainId) {
@@ -783,7 +815,13 @@ export class Workbench {
       await storage.writeBrain(data);
       createdFresh = true;
     }
-    const wb = new Workbench(storage, data);
+    // M18 (FEAT-PDF-CACHE §14): default the analysis cache to IndexedDB in the
+    // browser; leave it undefined under jsdom/Node (no indexedDB global) so the
+    // Reader falls back to the legacy cachedPages path and tests stay DOM-free.
+    const analysis =
+      pdfAnalysis ??
+      (typeof indexedDB !== "undefined" ? new IndexedDbPdfAnalysisStore() : undefined);
+    const wb = new Workbench(storage, data, analysis);
     // One-time M1 -> M2.5 migration (ADR-0010): strip any legacy sentinel
     // Capture (sourceId===null + tagged style payload) out of BrainData.captures
     // and fold its styles into presentation.annotationStyles. A freshly created
@@ -1512,6 +1550,107 @@ export class Workbench {
     sources[idx] = { ...source, ...next };
     this.data = { ...this.data, sources };
     await this.persist();
+  }
+
+  /**
+   * M18 (FEAT-PDF-CACHE §3) compute the document identity for a source's bytes.
+   * Reuses the source's already-computed `contentHash` when present (the ingest
+   * path hashes bytes for the versionHash / M12 identity), so identity does NOT
+   * re-hash the whole file on reopen. `pdfId` is the pdf.js document fingerprint
+   * supplied by the Reader. Returns both the stable `documentId` cache key and
+   * the `sourceFingerprint` validation value.
+   */
+  pdfDocumentIdentity(
+    sourceId: SourceId,
+    info: { fileSize: number; pdfId?: string | null; headTailHash?: string | null },
+  ): { documentId: string; sourceFingerprint: string } | null {
+    const source = this.data.sources.find((s) => s.id === sourceId);
+    if (!source) return null;
+    const input: DocumentIdentityInput = {
+      fileSize: info.fileSize,
+      ...(source.contentHash ? { contentHash: source.contentHash } : {}),
+      ...(info.pdfId != null ? { pdfId: info.pdfId } : {}),
+      ...(info.headTailHash != null ? { headTailHash: info.headTailHash } : {}),
+    };
+    return {
+      documentId: computeDocumentId(input),
+      sourceFingerprint: computeSourceFingerprint(input),
+    };
+  }
+
+  /**
+   * M18 (FEAT-PDF-CACHE §8) run the fast-path open against the persistent PDF
+   * analysis cache. On a warm hit this is an O(1) manifest read; on a miss /
+   * resume it drives the one-pass bounded-concurrency ingestion, persisting each
+   * analysed page incrementally. A no-op (returns null) when no analysis store
+   * is wired (jsdom / legacy path). The caller supplies the pdf.js-backed
+   * `analyzePage` callback (see `analyzePdfPage`) and a cancellation controller.
+   */
+  async openPdfAnalysisCache(args: {
+    sourceId: SourceId;
+    documentId: string;
+    sourceFingerprint: string;
+    fileSize: number;
+    pageCount: number;
+    analyzePage: PageAnalyzer;
+    controller: IngestionController;
+    currentPage?: number;
+    progress?: IngestionProgress;
+  }): Promise<Awaited<ReturnType<typeof openWithCache>> | null> {
+    const store = this.pdfAnalysis;
+    if (!store) return null;
+    const freshManifest = createManifest({
+      documentId: args.documentId,
+      sourceFingerprint: args.sourceFingerprint,
+      fileSize: args.fileSize,
+      pageCount: args.pageCount,
+    });
+    return openWithCache({
+      store,
+      documentId: args.documentId,
+      freshManifest,
+      analyzePage: args.analyzePage,
+      controller: args.controller,
+      ...(args.currentPage != null ? { currentPage: args.currentPage } : {}),
+      ...(args.progress ? { progress: args.progress } : {}),
+    });
+  }
+
+  /**
+   * M18 (FEAT-PDF-CACHE §8/§9) read a single analysed page from the persistent
+   * cache WITHOUT deserializing the whole document (§14). Returns null when no
+   * store is wired or the page is not yet analysed. Used by the Reader fast-path
+   * to hydrate only the pages it actually displays.
+   */
+  async readAnalyzedPage(
+    documentId: string,
+    pageNumber: number,
+  ): Promise<PdfPageAnalysis | null> {
+    if (!this.pdfAnalysis) return null;
+    return this.pdfAnalysis.readPage(documentId, pageNumber);
+  }
+
+  /**
+   * M18 (FEAT-PDF-CACHE §8) validate the persistent cache for a document without
+   * running ingestion — a pure O(1) manifest read + check. Returns the
+   * validation decision (hit / resume / miss) or null when no store is wired.
+   */
+  async checkPdfAnalysisCache(args: {
+    documentId: string;
+    sourceFingerprint: string;
+    pageCount: number;
+  }): Promise<ReturnType<typeof validateCache> | null> {
+    if (!this.pdfAnalysis) return null;
+    const manifest = await this.pdfAnalysis.readManifest(args.documentId);
+    return validateCache(manifest, {
+      sourceFingerprint: args.sourceFingerprint,
+      pageCount: args.pageCount,
+    });
+  }
+
+  /** Expose a fresh ingestion cancellation controller (document-switch cancel). */
+  createPdfIngestionController(): IngestionController {
+    return createIngestionController();
   }
 
   /**
