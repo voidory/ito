@@ -17,7 +17,8 @@ import type { KoofrStorageAdapter as KoofrAdapter } from "../storage";
 import { MobileReaderSheet } from "./MobileReaderSheet";
 import { CaptureProcessingQueue } from "./CaptureProcessingQueue";
 import { revealPresentation } from "./threeScene.map";
-import type { KoofrStorageAdapter, StagedImport } from "../storage";
+import { KoofrStorageAdapter, loadSyncConfig } from "../storage";
+import type { StagedImport } from "../storage";
 import type { PageId, SourceId } from "../model";
 import { loadDocument, hashBytes } from "../pdf";
 import { importPdfFiles } from "./pdfImport";
@@ -71,7 +72,14 @@ export function App(): JSX.Element {
   // FEAT-003 (3.2): the live remote-sync adapter, lifted into the shell so the
   // SyncBanner's Configure Sync modal can wire a WebDAV or local demo remote
   // and the publish/refresh controls become enabled once configured.
-  const [remote, setRemote] = useState<KoofrStorageAdapter | null>(null);
+  // P5: restore a persisted WebDAV endpoint at boot so a previously-configured
+  // real remote reconnects automatically (the in-memory demo remote is never
+  // persisted, so it is not restored). The adapter is rebuilt from the stored
+  // serializable config; the non-serializable transport defaults to fetch.
+  const [remote, setRemote] = useState<KoofrStorageAdapter | null>(() => {
+    const cfg = loadSyncConfig();
+    return cfg ? new KoofrStorageAdapter(cfg) : null;
+  });
   const [subjectsExploreRequest, setSubjectsExploreRequest] = useState(0);
 
   const onRestoreFile = useCallback(

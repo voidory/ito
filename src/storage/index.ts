@@ -7,3 +7,4 @@ export * from "./staging";
 export * from "./pdfIngestionQueue";
 export * from "./pdfAnalysisStore";
 export * from "./zotero";
+export * from "./syncConfigStore";

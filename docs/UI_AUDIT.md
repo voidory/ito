@@ -23,7 +23,11 @@ each with a concrete plan to fix. Items are ordered by severity.
   two paths that swap the live brain outside `persist()` (`commitStagedImport`,
   `refreshFromRemote`) — now `notify()`, so a forgotten/mis-timed `bump()` can no longer
   leave the UI stale. `bump()` is kept as a backward-compatible re-notify shim.
-- **P5–P8**: still open (see below).
+- **P5 — DONE**: WebDAV sync config now persists (new `syncConfigStore` in
+  `localStorage`); `App` restores a configured real remote at boot so it reconnects
+  automatically, the config modal shows a "reconnects on reload" hint + a Disconnect
+  action, and the in-memory demo remote is explicitly labelled ephemeral (never persisted).
+- **P6–P8**: still open (see below).
 
 ---
 
