@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { ContextMenuSurface, type ContextMenuEntry } from "./ui/ContextMenu";
 import { Icons } from "./ui/icons";
+import type { RelationshipId } from "../model";
 import type { Workbench } from "./workbench";
 import {
   openNodePageAction,
   openRelationshipPageAction,
+  openRelationshipWorkspaceAction,
 } from "./nodeActions";
 
 /**
@@ -134,12 +136,7 @@ export function buildContextEntries(
         id: "hub-workspace",
         label: "Open workspace",
         icon: Icons.open,
-        onSelect: () => {
-          void wb.openRelationshipWorkspace(relationshipId as never).then(() => {
-            wb.setViewMode("files");
-            bump();
-          });
-        },
+        onSelect: () => openRelationshipWorkspaceAction(wb, relationshipId, bump),
       });
       entries.push({
         id: "hub-label",
@@ -149,7 +146,7 @@ export function buildContextEntries(
           const current =
             wb.conceptGraph().links.find((link) => link.relationshipId === relationshipId)?.label ?? "";
           const next = window.prompt("Connecting page label", current);
-          if (next !== null) void wb.setRelationshipLabel(relationshipId as never, next).then(bump);
+          if (next !== null) void wb.setRelationshipLabel(relationshipId as RelationshipId, next).then(bump);
         },
       });
     }
