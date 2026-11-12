@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { seedSampleLibrary } from "./helpers";
 
 /**
  * FEAT-003 (M3) - backup, offline-first citations, two-mode deletion, and
@@ -29,7 +30,8 @@ async function bootLibrary(page: Page): Promise<void> {
     timeout: 15_000,
   });
   await expect(page.getByTestId("library")).toBeVisible();
-  await expect(page.getByTestId("library-item").first()).toBeVisible({ timeout: 15_000 });
+  // Automatic seeding was removed: load the sample workspace explicitly.
+  await seedSampleLibrary(page);
 }
 
 /** Open the first PDF, select real text and commit ONE highlight; return its id. */

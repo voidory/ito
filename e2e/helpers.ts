@@ -1,4 +1,31 @@
-import type { Locator, Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
+
+/**
+ * Seed the sample workspace from the empty-library state.
+ *
+ * Automatic first-run fixture seeding was removed (the library now starts
+ * genuinely empty with an explicit "Load Sample Workspace" CTA — see the M21
+ * empty-state redesign). Specs that need documents in the library must seed
+ * themselves. This helper is idempotent: it loads the sample workspace only
+ * when the library is empty, then waits for the fixtures to appear, so it is
+ * safe to call from any spec's boot sequence regardless of prior state.
+ *
+ * Assumes the page has already navigated (`goto("/")`) and the app is ready.
+ */
+export async function seedSampleLibrary(page: Page): Promise<void> {
+  const loadSample = page.getByTestId("load-sample-workspace");
+  const anyItem = page.getByTestId("library-item").first();
+  // The app boots asynchronously: wait until EITHER the empty-state CTA or an
+  // already-present library item has rendered, so this is robust whether or not
+  // the caller pre-waited for app-status=ready and whether the library was
+  // already seeded (e.g. a reload).
+  await expect(loadSample.or(anyItem).first()).toBeVisible({ timeout: 20_000 });
+  // Load the sample workspace only when the library is still empty.
+  if (await loadSample.count()) {
+    await loadSample.click();
+  }
+  await expect(anyItem).toBeVisible({ timeout: 20_000 });
+}
 
 /**
  * Click the visual centre of an element with a real mouse click.

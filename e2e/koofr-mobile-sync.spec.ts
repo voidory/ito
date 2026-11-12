@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { seedSampleLibrary } from "./helpers";
 
 /**
  * FEAT-003 (M4, §15, §16.1, A20, A21, H06) — Koofr publication round-trip,
@@ -24,7 +25,8 @@ async function bootLibrary(page: Page): Promise<void> {
     timeout: 15_000,
   });
   await expect(page.getByTestId("library")).toBeVisible();
-  await expect(page.getByTestId("library-item").first()).toBeVisible({ timeout: 15_000 });
+  // Automatic seeding was removed: load the sample workspace explicitly.
+  await seedSampleLibrary(page);
 }
 
 test("A20/H06: publish then refresh round-trip reports up-to-date", async ({ page }) => {

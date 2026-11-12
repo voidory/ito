@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { seedSampleLibrary } from "./helpers";
 
 /**
  * FEAT-005 — Files / Nodes view switching + N06 placeholder, runtime validation
@@ -22,7 +23,8 @@ async function bootLibrary(page: Page): Promise<void> {
     timeout: 15_000,
   });
   await expect(page.getByTestId("library")).toBeVisible();
-  await expect(page.getByTestId("library-item").first()).toBeVisible({ timeout: 15_000 });
+  // Automatic seeding was removed: load the sample workspace explicitly.
+  await seedSampleLibrary(page);
 }
 
 test("the shell view switch toggles Files (Library) <-> Nodes (canvas)", async ({ page }) => {
@@ -150,8 +152,8 @@ test("N06 (open-together): every open unconnected PDF renders its own transient 
 }) => {
   await bootLibrary(page);
 
-  // Open TWO unconnected PDFs together (the library seeds >=2 fixtures). No
-  // analysis runs, so both sources stay unconnected.
+  // Open TWO unconnected PDFs together (the sample workspace loads >=2
+  // fixtures). No analysis runs, so both sources stay unconnected.
   const items = page.getByTestId("library-item");
   await items.nth(0).getByRole("checkbox").check();
   await items.nth(1).getByRole("checkbox").check();
