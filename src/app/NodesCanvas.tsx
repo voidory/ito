@@ -13,6 +13,11 @@ import type { CategoryId, PageId, RelationshipId, RelationshipKind, SourceId } f
 import type { ConceptGraph, Workbench } from "./workbench";
 import { Button, IconButton } from "./ui/primitives";
 import {
+  openNodePageAction,
+  openRelationshipPageAction,
+  openRelationshipWorkspaceAction,
+} from "./nodeActions";
+import {
   BasinWashes,
   mixHex,
   OverlapBleeds,
@@ -748,7 +753,7 @@ export function NodesCanvas({
   };
 
   const onOpenConnectingPage = (relationshipId: string): void => {
-    void wb.developRelationshipPage(relationshipId as RelationshipId).then(bump);
+    openRelationshipPageAction(wb, relationshipId, bump);
   };
 
   // M13 (§2.2, P2): a CLEAN click on a Node-Intersection hub/line opens the full
@@ -758,12 +763,7 @@ export function NodesCanvas({
   const openHubWorkspace = useCallback(
     (relationshipId: string, scenePt?: { x: number; y: number } | null): void => {
       recordDive(relationshipId, scenePt ?? null);
-      void wb
-        .openRelationshipWorkspace(relationshipId as RelationshipId)
-        .then(() => {
-          wb.setViewMode("files");
-          bump();
-        });
+      openRelationshipWorkspaceAction(wb, relationshipId, bump);
     },
     [wb, bump, recordDive],
   );
@@ -798,10 +798,24 @@ export function NodesCanvas({
   const openNodePage = (pageId: string): void => {
     const pos = scene.positions[pageId as PageId] ?? null;
     recordDive(pageId, pos);
-    wb.openNodeWorkspace(pageId as PageId);
-    wb.setViewMode("files");
-    bump();
+    openNodePageAction(wb, pageId, bump);
   };
+
+  // Selection is deliberately ephemeral UI state. Escape clears it without
+  // changing durable network records.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.key !== "Escape") return;
+      setSelectedNodeId(null);
+      setSelectedHubId(null);
+      setSelectedCategoryId(null);
+      setSelectedNodeIds([]);
+      setConnectMode(false);
+      setCategoryModalOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   // M13 (§2.2): route a CLEAN background click (<=5px client drag) through the
   // pure 4-tier hit-tester. P1/P2 are normally caught by the node/hub click
@@ -832,9 +846,7 @@ export function NodesCanvas({
       switch (result.kind) {
         case "node":
           recordDive(result.pageId, scene.positions[result.pageId as PageId] ?? scenePt);
-          wb.openNodeWorkspace(result.pageId as PageId);
-          wb.setViewMode("files");
-          bump();
+          openNodePageAction(wb, result.pageId, bump);
           break;
         case "hub":
           openHubWorkspace(result.relationshipId, scenePt);
@@ -1101,7 +1113,7 @@ export function NodesCanvas({
         data-zoom={round(zoom)}
         preserveAspectRatio="xMidYMid meet"
         data-suppress-motion={suppressMotion ? "true" : "false"}
-        role="img"
+        role="presentation"
         aria-label="Concept network"
         onPointerDown={onBackgroundPointerDown}
         onPointerMove={onPointerMove}
@@ -1473,6 +1485,82 @@ export function NodesCanvas({
         })}
       </g>
 
+      {/* Selected graph actions live outside the SVG so they are real,
+          keyboard-focusable DOM controls rather than interactive SVG content. */}
+      {selectedNodeId && scene.positions[selectedNodeId] && (
+        <div
+          data-testid="selected-node-actions"
+          className="nodes-selection-actions"
+          style={selectionActionStyle(
+            scene.positions[selectedNodeId]!,
+            viewBox,
+          )}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <span className="nodes-selection-label">
+            {scene.nodes.find((n) => n.pageId === selectedNodeId)?.title ?? "Node"}
+          </span>
+          <button
+            type="button"
+            data-testid="selected-node-open-page"
+            onClick={() => openNodePage(selectedNodeId)}
+          >
+            Open page
+          </button>
+          <button
+            type="button"
+            data-testid="selected-node-clear"
+            aria-label="Clear node selection"
+            onClick={() => setSelectedNodeId(null)}
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      {selectedHubId && scene.hubs.find((h) => h.relationshipId === selectedHubId) && (
+        <div
+          data-testid="selected-hub-actions"
+          className="nodes-selection-actions"
+          style={selectionActionStyle(
+            scene.hubs.find((h) => h.relationshipId === selectedHubId)!.center,
+            viewBox,
+          )}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <span className="nodes-selection-label">Connection</span>
+          <button
+            type="button"
+            data-testid="selected-hub-open-page"
+            onClick={() => onOpenConnectingPage(selectedHubId)}
+          >
+            Open connecting page
+          </button>
+          <button
+            type="button"
+            data-testid="selected-hub-open-workspace"
+            onClick={() => openHubWorkspace(selectedHubId)}
+          >
+            Open workspace
+          </button>
+          <button
+            type="button"
+            data-testid="selected-hub-edit-label"
+            onClick={() => onHubClick(selectedHubId)}
+          >
+            Edit label
+          </button>
+          <button
+            type="button"
+            data-testid="selected-hub-clear"
+            aria-label="Clear hub selection"
+            onClick={() => setSelectedHubId(null)}
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       {/* Circular dot nodes with minimal hover labels. */}
       <g data-testid="node-layer">
         {scene.nodes.map((node) => (
@@ -1575,6 +1663,22 @@ export function NodesCanvas({
       </svg>
     </div>
   );
+}
+
+function selectionActionStyle(
+  point: { x: number; y: number },
+  viewBox: string,
+): React.CSSProperties {
+  const [vx, vy, vw, vh] = viewBox.split(/\s+/).map(Number);
+  const left = ((point.x - (vx ?? 0)) / (vw || 1)) * 100;
+  const top = ((point.y - (vy ?? 0)) / (vh || 1)) * 100;
+  return {
+    position: "absolute",
+    left: `${left}%`,
+    top: `${top}%`,
+    transform: "translate(10px, -50%)",
+    zIndex: 8,
+  };
 }
 
 /** Vertical spacing between stacked N06 placeholders (presentation only). */
