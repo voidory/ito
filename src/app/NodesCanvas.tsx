@@ -769,7 +769,7 @@ export function NodesCanvas({
   );
 
   const onNodeClick = (pageId: string): void => {
-    // A drag that moved should not also open the page (gesture disambiguation).
+    // A drag that moved should not also select a node (gesture disambiguation).
     // `dragRef` is nulled by endGesture before this synthetic click fires, so
     // we also honour the short post-drag suppression window (M13 FEAT-001).
     if (
@@ -1409,8 +1409,8 @@ export function NodesCanvas({
             </text>
             {/*
               A13-M2: develop/open the hub's FULL Connecting Page in the
-              SubjectEditor. Distinct from the inline short-label edit (the
-              graph-hub click above, which keeps the prompt path reachable).
+              SubjectEditor. Distinct from selecting the hub and from the
+              inline short-label edit below.
               Clicking lazily creates-or-opens the explanatory subject Page and
               bumps so the shell re-renders into the editor. Hidden until the
               hub is hovered or selected/editing (§3.2 declutter).
@@ -1433,9 +1433,7 @@ export function NodesCanvas({
             >
               Open connecting page
             </text>
-            {/* Short-label edit lives on its own hover control: a single click on
-                the hub opens the page (which re-lays-out the map), so a
-                double-click gesture cannot be relied on. */}
+            {/* Keep label editing as an explicit action, separate from selection. */}
             <text
               className="open-connecting-page"
               data-testid="open-relationship-workspace"
