@@ -633,3 +633,35 @@
     max-width: 8rem;
   }
 }
+
+/* Visually hidden keyboard hit targets: accessible without adding graph clutter. */
+.nodes-accessible-controls {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.nodes-accessible-controls button {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.nodes-accessible-controls button:focus-visible {
+  position: fixed;
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: 0.4rem 0.6rem;
+  clip: auto;
+  clip-path: none;
+  z-index: 20;
+}
