@@ -100,6 +100,29 @@ test("rotated PDF selection follows visible glyph geometry at 90 and 270 degrees
 
   for (const rotation of [90, 270]) {
     const needle = "Rotated page at " + rotation + " degrees";
+    // Text below the fold is not reachable by the mouse (glyph rects are
+    // measured in viewport space): scroll the reader pane so this rotation's
+    // text line sits in the middle of its visible area (clear of the toolbar).
+    const pageIndex = rotation === 90 ? 0 : 2;
+    await page.evaluate(({ needle, pageIndex }) => {
+      const pageEl = document.querySelector(`.pdf-page[data-page-index="${pageIndex}"]`);
+      const span = [...(pageEl?.querySelectorAll(".textLayer span") ?? [])].find((el) =>
+        el.firstChild?.nodeType === Node.TEXT_NODE && el.firstChild.textContent?.includes(needle),
+      );
+      const pane = document.querySelector<HTMLElement>('[data-testid="pane-scroll"]');
+      const node = span?.firstChild;
+      if (!(node instanceof Text) || !pane) return;
+      const start = node.data.indexOf(needle);
+      if (start < 0) return;
+      // A span can hold a whole paragraph: centre the NEEDLE, not the span box.
+      const range = document.createRange();
+      range.setStart(node, start);
+      range.setEnd(node, start + needle.length);
+      const t = range.getBoundingClientRect();
+      const v = pane.getBoundingClientRect();
+      pane.scrollTop += t.top + t.height / 2 - (v.top + v.height / 2);
+    }, { needle, pageIndex });
+    await page.waitForTimeout(200);
     const path = await page.evaluate(({ needle, pageIndex }) => {
       const page = [...document.querySelectorAll(".pdf-page")].find(
         (el) => el.getAttribute("data-page-index") === String(pageIndex),
@@ -158,7 +181,7 @@ test("rotated PDF selection follows visible glyph geometry at 90 and 270 degrees
         target,
         vertical: target.bottom - target.top > (target.right - target.left) * 5,
       };
-    }, { needle, pageIndex: rotation === 90 ? 0 : 2 });
+    }, { needle, pageIndex });
 
     expect(path, "fixture text should be measurable").not.toBeNull();
     expect(path!.vertical, "text should be visually vertical").toBe(true);
@@ -169,7 +192,10 @@ test("rotated PDF selection follows visible glyph geometry at 90 and 270 degrees
     await page.mouse.move(path!.endPoint.x, path!.endPoint.y, { steps: 30 });
     await page.mouse.up();
 
-    await expect(page.getByTestId("live-selection-preview")).toBeVisible();
+    // The wrapper has no box of its own (its pills are position:fixed), so assert
+    // the wrapper is mounted and that the pills inside it are actually visible.
+    await expect(page.getByTestId("live-selection-preview")).toBeAttached();
+    await expect(page.locator(".ito-selection-live-preview").first()).toBeVisible();
     await expect(page.getByTestId("selection-toolbar")).toBeVisible();
 
     const measured = await page.evaluate(() => {

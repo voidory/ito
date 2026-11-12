@@ -57,6 +57,11 @@ async function highlight(page: Page, needle = NEEDLE, pageIndex = 0): Promise<vo
 
 /** Open two papers together and create+open a subject with a quote from one. */
 async function openThreePaneWorkspace(page: Page): Promise<string> {
+  // The side-by-side Paper A | subject | Paper B layout needs >= 1360px
+  // (WORKSPACE_3PANE_MIN_WIDTH in Reader.tsx). Below that the app deliberately
+  // collapses to a compact 2-pane layout, and the default 1280px test viewport
+  // would land there.
+  await page.setViewportSize({ width: 1440, height: 900 });
   await bootLibrary(page);
   // Pick the two multi-page fixtures by title so the choice does not depend on
   // the list order (the Multi-Column fixture is a single page and would not
@@ -167,10 +172,15 @@ test("R19 + N08: opening/closing the highlights tab preserves the visible passag
   // untouched (never faked-saved, never lost).
   const passageAfter = await scroller.evaluate((el) => el.scrollTop);
   expect(Math.abs(passageAfter - passageBefore)).toBeLessThanOrEqual(2);
+  // The toggle is an outside click, so the fixed-position comment popover
+  // dismisses itself (Popover closes on outside mouseup) and its textarea
+  // autosaves the in-progress draft on blur, so nothing is lost. Reopening the
+  // annotation shows the draft intact.
+  await expect(page.getByTestId("comment-surface")).toHaveCount(0);
+  await clickCenter(page, page.locator(".ito-highlight-fragment").first());
   await expect(page.getByTestId("comment-surface")).toBeVisible();
   await expect(page.getByTestId("comment-input")).toHaveValue("an unsaved draft thought");
-  // The single annotation still exists and the draft lives only in the surface
-  // (a layout transition commits nothing on its own).
+  // The layout transition created no extra annotation.
   expect(await page.evaluate(() => window.__ito.counts().annotations)).toBe(1);
 });
 

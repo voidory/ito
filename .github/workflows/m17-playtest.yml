@@ -3,7 +3,11 @@ name: M17 playtest
 on:
   push:
     branches:
-      - m17-playtest-science
+      - main
+      - release/v1.0
+  pull_request:
+    branches:
+      - main
 
 jobs:
   test:

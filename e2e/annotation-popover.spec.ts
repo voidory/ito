@@ -19,29 +19,33 @@ test("the comment popover follows its highlight while scrolling and never leaves
   const popover = page.getByTestId("highlight-edit-popover");
   await expect(popover).toBeVisible();
 
-  const frag = page.locator(".ito-highlight-fragment").first();
-  // Highlight overlays are removed and redrawn on refit, so a read can land in
-  // the gap; retry until both boxes exist.
-  const gap = async () => {
-    for (let i = 0; i < 40; i++) {
-      const f = await frag.boundingBox();
-      const p = await popover.boundingBox();
-      if (f && p) return { fragBottom: f.y + f.height, popTop: p.y, popBottom: p.y + p.height };
-      await page.waitForTimeout(50);
-    }
-    throw new Error("highlight or popover never had a box");
-  };
-  const before = await gap();
-  expect(before.popBottom).toBeLessThanOrEqual(600);
+  // The popover anchors to the union box of the highlight's drawn fragments
+  // (clampFixedAnchor): 48px ABOVE the highlight when it has room (top > 64),
+  // otherwise 12px BELOW its bottom. Highlight overlays are removed and redrawn
+  // on refit, so a read can land in the gap; the poll below retries.
+  const placement = () =>
+    page.evaluate(() => {
+      const frags = Array.from(
+        document.querySelectorAll<HTMLElement>(".ito-highlight .ito-highlight-fragment"),
+      ).map((el) => el.getBoundingClientRect());
+      const pop = document
+        .querySelector<HTMLElement>('[data-testid="highlight-edit-popover"]')
+        ?.getBoundingClientRect();
+      if (frags.length === 0 || !pop) return null;
+      const top = Math.min(...frags.map((r) => r.top));
+      const bottom = Math.max(...frags.map((r) => r.bottom));
+      const expectedTop = top > 64 ? top - 48 : bottom + 12;
+      return { off: Math.abs(pop.top - expectedTop), top, popBottom: pop.bottom };
+    });
+  const before = await placement();
+  expect(before).not.toBeNull();
+  expect(before!.popBottom).toBeLessThanOrEqual(600);
 
+  const topBefore = before!.top;
   await page.getByTestId("pane-scroll").evaluate((el) => (el.scrollTop += 150));
-  await expect
-    .poll(async () => {
-      const g = await gap();
-      // Still hugging the highlight (just below it), not left behind.
-      return Math.abs(g.popTop - (g.fragBottom + 8));
-    })
-    .toBeLessThan(4);
+  // The highlight really moved, and the popover re-anchored to it (not left behind).
+  await expect.poll(async () => (await placement())?.top ?? topBefore).toBeLessThan(topBefore - 100);
+  await expect.poll(async () => (await placement())?.off ?? Infinity).toBeLessThan(4);
 
   const vp = page.viewportSize()!;
   const box = (await popover.boundingBox())!;
