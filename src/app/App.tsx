@@ -51,6 +51,7 @@ export function App(): JSX.Element {
   // SyncBanner's Configure Sync modal can wire a WebDAV or local demo remote
   // and the publish/refresh controls become enabled once configured.
   const [remote, setRemote] = useState<KoofrStorageAdapter | null>(null);
+  const [subjectsExploreRequest, setSubjectsExploreRequest] = useState(0);
 
   const onRestoreFile = useCallback(
     async (file: File | null) => {
@@ -207,7 +208,11 @@ export function App(): JSX.Element {
             <ViewSwitch viewMode={state.viewMode} onSetViewMode={onSetViewMode} />
             {/* Subjects launcher: open any existing subject page, or create a
                 new standalone one, from the shell header (always reachable). */}
-            <SubjectsLauncher wb={wb} bump={bump} />
+            <SubjectsLauncher
+              wb={wb}
+              bump={bump}
+              openRequest={subjectsExploreRequest}
+            />
             {/*
               Shell-level search surface (FEAT-005): reachable in BOTH Files and
               Nodes. Selecting a result opens the match via existing Workbench
@@ -311,6 +316,11 @@ export function App(): JSX.Element {
               }}
               onImported={() => bump()}
               onLoadSampleWorkspace={() => void loadSampleWorkspace()}
+              onExploreNodes={() => {
+                wb.setViewMode("nodes");
+                bump();
+              }}
+              onExploreSubjects={() => setSubjectsExploreRequest((n) => n + 1)}
             />
           ) : mobileMode && state.openSourceIds.length === 1 ? (
             // M4/M5 (A21) Phone Reading: a single-document reader whose scroll +
@@ -409,11 +419,17 @@ export function SaveErrorBanner({
 export function SubjectsLauncher({
   wb,
   bump,
+  openRequest = 0,
 }: {
   wb: NonNullable<ReturnType<typeof useWorkbench>["wb"]>;
   bump: () => void;
+  openRequest?: number;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (openRequest > 0) setOpen(true);
+  }, [openRequest]);
   const subjects = wb.rawData().pages.filter((p) => p.kind === "subject");
 
   const openSubject = (id: SourceId | string): void => {
