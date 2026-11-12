@@ -183,7 +183,7 @@ export function App(): JSX.Element {
       onDrop={onShellDrop}
       style={{ fontFamily: "system-ui, sans-serif" }}
     >
-      <AppContextMenu />
+      {wb && <AppContextMenu wb={wb} bump={bump} />}
       {/* Hidden boot confirmation retained for traceability to the M0 checks. */}
       <span style={{ display: "none" }} data-testid="boot-detail">
         {boot.detail}
