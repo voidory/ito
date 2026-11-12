@@ -1419,66 +1419,17 @@ export function NodesCanvas({
             >
               {hub.label}
             </text>
-            {/*
-              A13-M2: develop/open the hub's FULL Connecting Page in the
-              SubjectEditor. Distinct from selecting the hub and from the
-              inline short-label edit below.
-              Clicking lazily creates-or-opens the explanatory subject Page and
-              bumps so the shell re-renders into the editor. Hidden until the
-              hub is hovered or selected/editing (§3.2 declutter).
-            */}
+            {/* The hub label is graphical only. Interactive actions are
+                rendered as accessible DOM controls outside the SVG. */}
             <text
-              className="open-connecting-page"
-              data-testid="open-connecting-page"
-              data-relationship-id={hub.relationshipId}
-              data-pill-visible={pillVisible ? "true" : "false"}
+              className="hub-label"
               x={round(hub.center.x)}
-              y={round(hub.center.y) + 22}
+              y={round(hub.center.y) - 12}
               textAnchor="middle"
-              role="button"
-              style={{
-                opacity: pillVisible ? 1 : 0,
-                pointerEvents: pillVisible ? "auto" : "none",
-              }}
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={() => onOpenConnectingPage(hub.relationshipId)}
+              style={{ opacity: pillVisible ? 1 : 0 }}
+              pointerEvents="none"
             >
-              Open connecting page
-            </text>
-            {/* Keep label editing as an explicit action, separate from selection. */}
-            <text
-              className="open-connecting-page"
-              data-testid="open-relationship-workspace"
-              data-relationship-id={hub.relationshipId}
-              x={round(hub.center.x)}
-              y={round(hub.center.y) + 56}
-              textAnchor="middle"
-              role="button"
-              style={{
-                opacity: pillVisible ? 1 : 0,
-                pointerEvents: pillVisible ? "auto" : "none",
-              }}
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={() => openHubWorkspace(hub.relationshipId)}
-            >
-              Open workspace
-            </text>
-            <text
-              className="open-connecting-page"
-              data-testid="edit-hub-label"
-              data-relationship-id={hub.relationshipId}
-              x={round(hub.center.x)}
-              y={round(hub.center.y) + 40}
-              textAnchor="middle"
-              role="button"
-              style={{
-                opacity: pillVisible ? 1 : 0,
-                pointerEvents: pillVisible ? "auto" : "none",
-              }}
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={() => onHubClick(hub.relationshipId)}
-            >
-              Edit label
+              {hub.label}
             </text>
           </g>
           );
@@ -1603,6 +1554,7 @@ export function NodesCanvas({
             style={{ cursor: "grab" }}
             onPointerDown={(e) => onNodePointerDown(e, node.pageId)}
             onClick={() => onNodeClick(node.pageId)}
+            onDoubleClick={() => openNodePage(node.pageId)}
             onMouseEnter={() => setHoveredNode(node.pageId)}
             onMouseLeave={() =>
               setHoveredNode((cur) => (cur === node.pageId ? null : cur))
