@@ -568,11 +568,11 @@
 }
 
 [data-testid="category-link-layer"][data-dimmed="true"],
-[data-testid="hub-curl-layer"][data-dimmed="true"] {
+[data-testid="hub-curl"][data-dimmed="true"] {
   opacity: 0.16;
+  transition: opacity 120ms ease;
 }
 
-[data-testid="category-link-layer"],
-[data-testid="hub-curl-layer"] {
+[data-testid="category-link-layer"] {
   transition: opacity 120ms ease;
 }
