@@ -260,17 +260,27 @@ export function ImportZoteroModal({
  * offers "Open together" to open a multi-selection in a shared workspace with
  * NO implied automatic analysis.
  */
+const LIBRARY_ORIENTATION_KEY = "ito:library-orientation-dismissed";
+
 export function Library({
   wb,
   onOpen,
   onOpenTogether,
   onImported,
+  onLoadSampleWorkspace,
+  onExploreNodes,
+  onExploreSubjects,
 }: {
   wb: Workbench;
   onOpen: (id: SourceId) => void;
   onOpenTogether: (ids: SourceId[]) => void;
   /** Called after a website import so the shell can re-render the list. */
   onImported?: () => void;
+  /** Explicit opt-in demo workspace; never called automatically. */
+  onLoadSampleWorkspace?: () => void;
+  /** Navigation hooks for the first-use orientation. */
+  onExploreNodes?: () => void;
+  onExploreSubjects?: () => void;
 }): JSX.Element {
   const [sortColumn, setSortColumn] = useState<LibrarySortColumn>("title");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -278,6 +288,13 @@ export function Library({
   const [addWebsiteOpen, setAddWebsiteOpen] = useState(false);
   const [importZoteroOpen, setImportZoteroOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [orientationDismissed, setOrientationDismissed] = useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem(LIBRARY_ORIENTATION_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
   const pdfInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
 
@@ -550,10 +567,97 @@ export function Library({
       )}
 
       <div style={styles.tableWrap}>
+        {!orientationDismissed && (
+          <section
+            data-testid="research-orientation"
+            role="region"
+            aria-label="Research workflow"
+            style={styles.orientation}
+          >
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <strong>Start building your research workspace</strong>
+              <p style={styles.orientationText}>
+                Import research material, read and annotate it, capture useful evidence,
+                then develop ideas in Subjects and explore relationships in Nodes.
+              </p>
+            </div>
+            <div style={styles.orientationActions}>
+              <button
+                data-testid="orientation-import"
+                onClick={() => pdfInputRef.current?.click()}
+              >
+                Import PDF
+              </button>
+              <button
+                data-testid="orientation-subjects"
+                onClick={() => onExploreSubjects?.()}
+                disabled={!onExploreSubjects}
+              >
+                Explore Subjects
+              </button>
+              <button
+                data-testid="orientation-nodes"
+                onClick={() => onExploreNodes?.()}
+                disabled={!onExploreNodes}
+              >
+                Explore Nodes
+              </button>
+              <button
+                data-testid="orientation-dismiss"
+                aria-label="Dismiss research workflow guidance"
+                onClick={() => {
+                  try {
+                    window.localStorage.setItem(LIBRARY_ORIENTATION_KEY, "1");
+                  } catch {
+                    // Best-effort preference persistence.
+                  }
+                  setOrientationDismissed(true);
+                }}
+              >
+                Dismiss
+              </button>
+            </div>
+          </section>
+        )}
+
         {sources.length === 0 && (
-          <p data-testid="library-empty" style={{ color: "#777" }}>
-            No documents yet.
-          </p>
+          <section data-testid="library-empty" style={styles.emptyState}>
+            <div>
+              <h3 style={{ margin: 0 }}>Your library is empty</h3>
+              <p style={styles.emptyText}>
+                Import papers and other research material to start building your workspace.
+              </p>
+            </div>
+            <div style={styles.emptyActions}>
+              <button
+                data-testid="empty-import-pdf"
+                style={styles.emptyPrimary}
+                onClick={() => pdfInputRef.current?.click()}
+              >
+                Import PDF
+              </button>
+              <button
+                data-testid="empty-import-zotero"
+                onClick={() => setImportZoteroOpen(true)}
+              >
+                Import from Zotero
+              </button>
+              <button
+                data-testid="empty-add-website"
+                onClick={() => setAddWebsiteOpen(true)}
+              >
+                Add Website
+              </button>
+              {onLoadSampleWorkspace && (
+                <button
+                  data-testid="load-sample-workspace"
+                  onClick={onLoadSampleWorkspace}
+                >
+                  Load Sample Workspace
+                </button>
+              )}
+            </div>
+          </section>
         )}
 
         {sources.length > 0 && (
@@ -785,6 +889,56 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#333",
   },
   tableWrap: { flex: 1, minWidth: 0 },
+  orientation: {
+    display: "flex",
+    alignItems: "center",
+    gap: "1rem",
+    marginBottom: "1rem",
+    padding: "0.9rem 1rem",
+    background: "#faf8f2",
+    border: "1px solid #e3ded2",
+    borderRadius: "10px",
+  },
+  orientationText: {
+    margin: "0.3rem 0 0",
+    color: "#666",
+    fontSize: "0.86rem",
+    lineHeight: 1.45,
+  },
+  orientationActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.4rem",
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+  },
+  emptyState: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: "min(42vh, 24rem)",
+    padding: "2rem",
+    textAlign: "center",
+    border: "1px dashed #d8d2c6",
+    borderRadius: "12px",
+    background: "#fcfbf8",
+  },
+  emptyText: {
+    margin: "0.5rem 0 1.25rem",
+    color: "#777",
+    maxWidth: "34rem",
+    lineHeight: 1.5,
+  },
+  emptyActions: {
+    display: "flex",
+    gap: "0.5rem",
+    flexWrap: "wrap",
+    justifyContent: "center",
+  },
+  emptyPrimary: {
+    fontWeight: 600,
+  },
   table: { width: "100%", borderCollapse: "collapse", marginBottom: "1.25rem" },
   th: {
     textAlign: "left",
