@@ -1291,14 +1291,7 @@ export function NodesCanvas({
         derives: directional plume). Drawn under the hub bump so the hub's own
         geometry + action pills stay crisp on top.
       */}
-      <g
-        data-testid="hub-curl-layer"
-        data-dimmed={
-          activeNodeId !== null || activeHubId !== null || activeCategoryId !== null
-            ? "true"
-            : "false"
-        }
-      >
+      <g data-testid="hub-curl-layer">
         {scene.hubs.map((hub) => {
           if (hub.endpoints.length < 2) return null;
           const link = graph.links.find((l) => l.relationshipId === hub.relationshipId);
@@ -1310,14 +1303,26 @@ export function NodesCanvas({
           const colorA = mixHex(hub.blendColor, "#ffffff", 0.22);
           const colorB = mixHex(hub.blendColor, "#1b1b1b", 0.28);
           return (
-            <WatercolorCurlRibbons
+            <g
               key={hub.relationshipId}
-              a={{ x: a.x, y: a.y }}
-              b={{ x: b.x, y: b.y }}
-              colorA={colorA}
-              colorB={colorB}
-              kind={kind}
-            />
+              data-testid="hub-curl"
+              data-relationship-id={hub.relationshipId}
+              data-dimmed={
+                (activeNodeId !== null || activeHubId !== null || activeCategoryId !== null) &&
+                !activeNodeRelationshipIds.has(hub.relationshipId) &&
+                activeHubId !== hub.relationshipId
+                  ? "true"
+                  : "false"
+              }
+            >
+              <WatercolorCurlRibbons
+                a={{ x: a.x, y: a.y }}
+                b={{ x: b.x, y: b.y }}
+                colorA={colorA}
+                colorB={colorB}
+                kind={kind}
+              />
+            </g>
           );
         })}
       </g>
@@ -1409,6 +1414,23 @@ export function NodesCanvas({
             {/* Short-label edit lives on its own hover control: a single click on
                 the hub opens the page (which re-lays-out the map), so a
                 double-click gesture cannot be relied on. */}
+            <text
+              className="open-connecting-page"
+              data-testid="open-relationship-workspace"
+              data-relationship-id={hub.relationshipId}
+              x={round(hub.center.x)}
+              y={round(hub.center.y) + 56}
+              textAnchor="middle"
+              role="button"
+              style={{
+                opacity: pillVisible ? 1 : 0,
+                pointerEvents: pillVisible ? "auto" : "none",
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => openHubWorkspace(hub.relationshipId)}
+            >
+              Open workspace
+            </text>
             <text
               className="open-connecting-page"
               data-testid="edit-hub-label"
