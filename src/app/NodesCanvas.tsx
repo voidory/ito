@@ -101,6 +101,10 @@ export function NodesCanvas({
   bump: () => void;
 }): JSX.Element {
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedHubId, setSelectedHubId] = useState<string | null>(null);
+  const [hoveredCategoryId, setHoveredCategoryId] = useState<string | null>(null);
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   // FIX-NODES-LABEL-OVERLAP (§3.2): the "Open connecting page" action pill is
   // hidden until a hub is hovered OR actively selected/editing, so the pills no
   // longer render permanently on every hub and overdraw nearby node dots and
@@ -170,6 +174,24 @@ export function NodesCanvas({
   // structural signature so the deterministic layout only re-runs when the
   // underlying records actually change (idle = stable positions, A09-M2).
   const graph = wb.conceptGraph();
+  const activeNodeId = selectedNodeId ?? hoveredNode;
+  const activeHubId = selectedHubId ?? hoveredHub;
+  const activeCategoryId = selectedCategoryId ?? hoveredCategoryId;
+  const activeNodeLinks = activeNodeId
+    ? graph.links.filter((link) => link.endpointPageIds.includes(activeNodeId))
+    : [];
+  const activeNodeRelationshipIds = new Set(
+    activeNodeLinks.map((link) => link.relationshipId),
+  );
+  const activeNodeNeighbourIds = new Set(activeNodeLinks.flatMap((link) => link.endpointPageIds));
+  const activeHub = activeHubId
+    ? graph.links.find((link) => link.relationshipId === activeHubId) ?? null
+    : null;
+  const activeHubEndpointIds = new Set(activeHub?.endpointPageIds ?? []);
+  const activeCategory = activeCategoryId
+    ? graph.categories.find((category) => category.categoryId === activeCategoryId) ?? null
+    : null;
+  const activeCategoryMemberIds = new Set(activeCategory?.memberPageIds ?? []);
   // Apply the §3.3 category filter off the LIVE graph: with a scope selected we
   // keep only that category's members plus nodes in overlapping categories
   // (categories sharing at least one member page with the scoped one).
@@ -755,11 +777,12 @@ export function NodesCanvas({
       );
       return;
     }
-    // M13 (§2.2, P1): open the OBSERVATION NODE's workspace — its Page beside
-    // the TOP-2 most-populated cited PDFs with EvidenceLines active (the Source
-    // Switcher Pill lists the rest). Switch to the Files/Reader workspace so the
-    // panes render; when the node cites no sources this degrades to opening the
-    // page alone (openNodeWorkspace handles the empty top-2).
+    setSelectedNodeId(pageId);
+    setSelectedHubId(null);
+    setSelectedCategoryId(null);
+  };
+
+  const openNodePage = (pageId: string): void => {
     const pos = scene.positions[pageId as PageId] ?? null;
     recordDive(pageId, pos);
     wb.openNodeWorkspace(pageId as PageId);
@@ -816,6 +839,9 @@ export function NodesCanvas({
             .then(bump);
           break;
         case "none":
+          setSelectedNodeId(null);
+          setSelectedHubId(null);
+          setSelectedCategoryId(null);
           break;
       }
     },
@@ -1173,6 +1199,16 @@ export function NodesCanvas({
               key={sq.categoryId}
               data-testid="category-squircle"
               data-category-id={sq.categoryId}
+              data-active={activeCategoryId === sq.categoryId ? "true" : "false"}
+              data-dimmed={
+                activeCategoryId !== null && activeCategoryId !== sq.categoryId
+                  ? "true"
+                  : "false"
+              }
+              onMouseEnter={() => setHoveredCategoryId(sq.categoryId)}
+              onMouseLeave={() =>
+                setHoveredCategoryId((current) => current === sq.categoryId ? null : current)
+              }
             >
               <path
                 className="category-squircle-fill"
@@ -1190,6 +1226,20 @@ export function NodesCanvas({
                 x={sq.bounds.cx}
                 y={sq.bounds.cy - sq.bounds.ry - 8}
                 textAnchor="middle"
+                style={{
+                  opacity:
+                    hoveredCategoryId === sq.categoryId || selectedCategoryId === sq.categoryId
+                      ? 1
+                      : 0,
+                  pointerEvents: "auto",
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedCategoryId(sq.categoryId);
+                  setSelectedNodeId(null);
+                  setSelectedHubId(null);
+                }}
               >
                 {sq.name}
               </text>
@@ -1209,7 +1259,14 @@ export function NodesCanvas({
       <OverlapBleeds squircles={scene.squircles} motion={motion} />
 
       {/* Category-to-category boundary connections (A14-M2). */}
-      <g data-testid="category-link-layer">
+      <g
+        data-testid="category-link-layer"
+        data-dimmed={
+          activeNodeId !== null || activeHubId !== null || activeCategoryId !== null
+            ? "true"
+            : "false"
+        }
+      >
         {scene.categoryLinks.map((cl) => (
           <line
             key={`${cl.fromCategoryId}|${cl.toCategoryId}`}
@@ -1234,7 +1291,14 @@ export function NodesCanvas({
         derives: directional plume). Drawn under the hub bump so the hub's own
         geometry + action pills stay crisp on top.
       */}
-      <g data-testid="hub-curl-layer">
+      <g
+        data-testid="hub-curl-layer"
+        data-dimmed={
+          activeNodeId !== null || activeHubId !== null || activeCategoryId !== null
+            ? "true"
+            : "false"
+        }
+      >
         {scene.hubs.map((hub) => {
           if (hub.endpoints.length < 2) return null;
           const link = graph.links.find((l) => l.relationshipId === hub.relationshipId);
@@ -1265,12 +1329,25 @@ export function NodesCanvas({
           // hovered or actively-selected/editing hub so pills never render
           // permanently on all hubs and overdraw neighbouring dots/labels.
           const pillVisible =
-            hoveredHub === hub.relationshipId || editingHub === hub.relationshipId;
+            hoveredHub === hub.relationshipId ||
+            selectedHubId === hub.relationshipId ||
+            editingHub === hub.relationshipId;
           return (
           <g
             key={hub.relationshipId}
             data-testid="hub-group"
             data-hub-active={pillVisible ? "true" : "false"}
+            data-selected={selectedHubId === hub.relationshipId ? "true" : "false"}
+            data-related={activeNodeRelationshipIds.has(hub.relationshipId) ? "true" : "false"}
+            data-dimmed={
+              (activeNodeId !== null || activeHubId !== null || activeCategoryId !== null) &&
+              selectedHubId !== hub.relationshipId &&
+              hoveredHub !== hub.relationshipId &&
+              !activeNodeRelationshipIds.has(hub.relationshipId) &&
+              activeHubId !== hub.relationshipId
+                ? "true"
+                : "false"
+            }
             onMouseEnter={() => setHoveredHub(hub.relationshipId)}
             onMouseLeave={() =>
               setHoveredHub((cur) => (cur === hub.relationshipId ? null : cur))
@@ -1286,7 +1363,12 @@ export function NodesCanvas({
               data-hub-cy={round(hub.center.y)}
               d={hub.d}
               fill={hub.blendColor}
-              onClick={() => openHubWorkspace(hub.relationshipId)}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => {
+                setSelectedHubId(hub.relationshipId);
+                setSelectedNodeId(null);
+                setSelectedCategoryId(null);
+              }}
             />
             <text
               className="hub-label"
@@ -1319,6 +1401,7 @@ export function NodesCanvas({
                 opacity: pillVisible ? 1 : 0,
                 pointerEvents: pillVisible ? "auto" : "none",
               }}
+              onPointerDown={(e) => e.stopPropagation()}
               onClick={() => onOpenConnectingPage(hub.relationshipId)}
             >
               Open connecting page
@@ -1338,6 +1421,7 @@ export function NodesCanvas({
                 opacity: pillVisible ? 1 : 0,
                 pointerEvents: pillVisible ? "auto" : "none",
               }}
+              onPointerDown={(e) => e.stopPropagation()}
               onClick={() => onHubClick(hub.relationshipId)}
             >
               Edit label
@@ -1359,7 +1443,30 @@ export function NodesCanvas({
             data-page-id={node.pageId}
             data-node-tier={node.nodeTier ?? "observation"}
             data-focused={focusedPageId === node.pageId ? "true" : "false"}
-            data-selected={selectedNodeIds.includes(node.pageId as PageId) ? "true" : "false"}
+            data-selected={
+              selectedNodeId === node.pageId ||
+              selectedNodeIds.includes(node.pageId as PageId)
+                ? "true"
+                : "false"
+            }
+            data-active={selectedNodeId === node.pageId || hoveredNode === node.pageId ? "true" : "false"}
+            data-related={
+              activeNodeNeighbourIds.has(node.pageId) ||
+              activeHubEndpointIds.has(node.pageId) ||
+              activeCategoryMemberIds.has(node.pageId)
+                ? "true"
+                : "false"
+            }
+            data-dimmed={
+              (activeNodeId !== null || activeHubId !== null || activeCategoryId !== null) &&
+              selectedNodeId !== node.pageId &&
+              hoveredNode !== node.pageId &&
+              !activeNodeNeighbourIds.has(node.pageId) &&
+              !activeHubEndpointIds.has(node.pageId) &&
+              !activeCategoryMemberIds.has(node.pageId)
+                ? "true"
+                : "false"
+            }
             data-x={round(node.x)}
             data-y={round(node.y)}
             transform={`translate(${node.x} ${node.y})`}
@@ -1397,10 +1504,28 @@ export function NodesCanvas({
               className="graph-node-label"
               x={11}
               y={4}
-              style={hoveredNode === node.pageId ? { opacity: 1 } : undefined}
+              style={{
+                opacity:
+                  hoveredNode === node.pageId || selectedNodeId === node.pageId ? 1 : 0,
+              }}
             >
               {node.title}
             </text>
+            {selectedNodeId === node.pageId && (
+              <text
+                className="node-open-page"
+                x={11}
+                y={19}
+                role="button"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openNodePage(node.pageId);
+                }}
+              >
+                Open page
+              </text>
+            )}
           </g>
         ))}
       </g>
