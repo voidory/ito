@@ -168,6 +168,11 @@ test("reader overflow menu escapes the toolbar scroll container", async ({ page 
 
   // A wheel gesture over the reader must not vertically scroll the toolbar.
   const toolbarBefore = await toolbar.evaluate((el) => el.scrollTop);
+  // The wheel must be over the reader's scrollable pane (the toolbar itself no
+  // longer scrolls), so the pane scrolls and the open menu dismisses.
+  const pane = await page.getByTestId("pane-scroll").first().boundingBox();
+  expect(pane).not.toBeNull();
+  await page.mouse.move(pane!.x + pane!.width / 2, pane!.y + pane!.height / 2);
   await page.mouse.wheel(0, 500);
   await expect.poll(() => toolbar.evaluate((el) => el.scrollTop)).toBe(toolbarBefore);
   await expect(menu).toBeHidden();
@@ -209,7 +214,13 @@ test("R02: a highlight saves quiet; comment is hidden until explicit reveal, the
 
   for (const width of [originalViewport.width, 320]) {
     await page.setViewportSize({ width, height: originalViewport.height });
-    const layout = await page.evaluate(() => {
+    const measureLayout = (): Promise<{
+      fitsWithinPopover: boolean;
+      fitsWithinViewport: boolean;
+      boxSizing: string;
+      maxWidth: string;
+    } | null> =>
+      page.evaluate(() => {
       const popover = document.querySelector<HTMLElement>('[data-testid="highlight-edit-popover"]');
       const textarea = document.querySelector<HTMLTextAreaElement>('[data-testid="comment-input"]');
       if (!popover || !textarea) return null;
@@ -230,6 +241,10 @@ test("R02: a highlight saves quiet; comment is hidden until explicit reveal, the
         maxWidth: textareaStyle.maxWidth,
       };
     });
+    // The popover re-clamps to the viewport after the resize event is handled,
+    // so wait for the layout to settle instead of measuring in the same tick.
+    await expect.poll(async () => (await measureLayout())?.fitsWithinViewport).toBe(true);
+    const layout = await measureLayout();
     expect(layout?.fitsWithinPopover).toBe(true);
     expect(layout?.fitsWithinViewport).toBe(true);
     expect(layout?.boxSizing).toBe("border-box");

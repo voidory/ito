@@ -328,7 +328,8 @@ test("A13-M2: developing a relationship's connection promotes it to a real Conne
     pages: 3,
   });
   // The SubjectEditor has the explanatory page open.
-  expect(await page.evaluate(() => window.__ito.openSubjectId())).toBe(explanatoryId);
+  // Opening is asynchronous after the page is created; wait for it.
+  await expect.poll(() => page.evaluate(() => window.__ito.openSubjectId())).toBe(explanatoryId);
 
   // Idempotent: developing again returns the SAME page, creating nothing new.
   const again = await page.evaluate((id) => window.__ito.developRelationshipPage(id), relId);
@@ -348,33 +349,45 @@ test("A13-M2: developing a relationship's connection promotes it to a real Conne
   expect(link2.endpointPageIds).toContain(explanatoryId);
 });
 
-test("clicking a node opens its page in an editor docked beside the map", async ({ page }) => {
+test("clicking a node selects it; its explicit Open page control opens the page", async ({
+  page,
+}) => {
   await bootToNodesView(page);
   const [a] = await createPages(page, ["Open me"]);
 
-  await expect(page.getByTestId("nodes-page-dock")).toHaveCount(0);
+  // A click is SELECTION only (it never navigates): the node is marked selected
+  // and no page editor is opened.
   await page.locator(`[data-testid="graph-node"][data-page-id="${a}"] circle`).click();
+  await expect(page.locator(`[data-testid="graph-node"][data-page-id="${a}"]`)).toHaveAttribute(
+    "data-selected",
+    "true",
+  );
+  expect(await page.evaluate(() => window.__ito.openSubjectId())).toBeNull();
 
-  const dock = page.getByTestId("nodes-page-dock");
-  await expect(dock).toBeVisible();
-  await expect(dock.getByTestId("subject-editor")).toBeVisible();
-  expect(await page.evaluate(() => window.__ito.openSubjectId())).toBe(a);
-  // The map is still there, sharing the space.
-  await expect(page.getByTestId("nodes-canvas")).toBeVisible();
-
-  // Closing the editor undocks it.
-  await dock.getByTestId("close-subject").click();
-  await expect(page.getByTestId("nodes-page-dock")).toHaveCount(0);
+  // Navigation is explicit: the selected node offers an "Open page" control.
+  await page.locator(`[data-testid="graph-node"][data-page-id="${a}"] .node-open-page`).click();
+  await expect
+    .poll(() => page.evaluate(() => window.__ito.openSubjectId()))
+    .toBe(a);
 });
 
-test("clicking a hub opens its Connecting Page docked beside the map", async ({ page }) => {
+test("clicking a hub selects it; Open connecting page docks its Connecting Page beside the map", async ({
+  page,
+}) => {
   await bootToNodesView(page);
   const [a, b] = await createPages(page, ["Cause", "Effect"]);
   const relId = await page.evaluate(
     ([x, y]) => window.__ito.createRelationship([x!, y!]),
     [a, b] as const,
   );
+
+  // A click is SELECTION only: the hub is marked selected, nothing is docked.
   await page.getByTestId("graph-hub").click();
+  await expect(page.getByTestId("hub-group")).toHaveAttribute("data-selected", "true");
+  await expect(page.getByTestId("nodes-page-dock")).toHaveCount(0);
+
+  // The explicit control develops the Connecting Page and docks it beside the map.
+  await page.getByTestId("open-connecting-page").click();
   await expect(page.getByTestId("nodes-page-dock")).toBeVisible();
   const explanatory = await page.evaluate(
     (id) => window.__ito.relationshipExplanatoryPageId(id),
