@@ -178,20 +178,20 @@ export function NodesCanvas({
   const activeHubId = selectedHubId ?? hoveredHub;
   const activeCategoryId = selectedCategoryId ?? hoveredCategoryId;
   const activeNodeLinks = activeNodeId
-    ? graph.links.filter((link) => link.endpointPageIds.includes(activeNodeId))
+    ? graph.links.filter((link) => (link.endpointPageIds as readonly string[]).includes(activeNodeId))
     : [];
-  const activeNodeRelationshipIds = new Set(
+  const activeNodeRelationshipIds = new Set<string>(
     activeNodeLinks.map((link) => link.relationshipId),
   );
-  const activeNodeNeighbourIds = new Set(activeNodeLinks.flatMap((link) => link.endpointPageIds));
+  const activeNodeNeighbourIds = new Set<string>(activeNodeLinks.flatMap((link) => link.endpointPageIds));
   const activeHub = activeHubId
     ? graph.links.find((link) => link.relationshipId === activeHubId) ?? null
     : null;
-  const activeHubEndpointIds = new Set(activeHub?.endpointPageIds ?? []);
+  const activeHubEndpointIds = new Set<string>(activeHub?.endpointPageIds ?? []);
   const activeCategory = activeCategoryId
     ? graph.categories.find((category) => category.categoryId === activeCategoryId) ?? null
     : null;
-  const activeCategoryMemberIds = new Set(activeCategory?.memberPageIds ?? []);
+  const activeCategoryMemberIds = new Set<string>(activeCategory?.memberPageIds ?? []);
 
   useEffect(() => {
     if (selectedNodeId && !graph.nodes.some((node) => node.pageId === selectedNodeId)) {
