@@ -505,3 +505,74 @@
 .ito-sheen {
   pointer-events: none;
 }
+
+
+/* M20: keep exploration in the graph itself; selection persists after hover. */
+.graph-node[data-dimmed="true"],
+[data-testid="hub-group"][data-dimmed="true"],
+[data-testid="category-squircle"][data-dimmed="true"] {
+  opacity: 0.2;
+  transition: opacity 120ms ease;
+}
+
+.graph-node[data-active="true"] circle,
+.graph-node[data-selected="true"] circle {
+  fill: #b5653f;
+  stroke: #fbfaf7;
+  stroke-width: 2.5;
+  r: 9;
+}
+
+.graph-node[data-related="true"] circle {
+  stroke: #b5653f;
+  stroke-width: 2;
+}
+
+.graph-node[data-active="true"] .graph-node-label,
+.graph-node[data-selected="true"] .graph-node-label {
+  opacity: 1;
+  font-weight: 700;
+}
+
+[data-testid="hub-group"][data-selected="true"] .graph-hub,
+[data-testid="hub-group"]:hover .graph-hub {
+  opacity: 0.82;
+  stroke: #8f4f35;
+  stroke-width: 2;
+}
+
+[data-testid="hub-group"][data-related="true"] .graph-hub {
+  opacity: 0.68;
+}
+
+[data-testid="category-squircle"][data-active="true"] .category-squircle-border {
+  opacity: 0.95;
+  stroke-width: 2.5;
+}
+
+[data-testid="category-squircle"][data-dimmed="true"] {
+  opacity: 0.32;
+}
+
+.node-open-page {
+  font: 600 9px system-ui, sans-serif;
+  fill: #8f4f35;
+  opacity: 0.85;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.node-open-page:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+[data-testid="category-link-layer"][data-dimmed="true"],
+[data-testid="hub-curl-layer"][data-dimmed="true"] {
+  opacity: 0.16;
+}
+
+[data-testid="category-link-layer"],
+[data-testid="hub-curl-layer"] {
+  transition: opacity 120ms ease;
+}
