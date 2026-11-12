@@ -1,5 +1,5 @@
 export * from "./StorageAdapter";
-export * from "./LocalFileStorageAdapter";
+export * from "./IndexedDbStorageAdapter";
 export * from "./KoofrStorageAdapter";
 export * from "./hash";
 export * from "./backup";

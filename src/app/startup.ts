@@ -22,7 +22,7 @@ export async function runStartupChecks(): Promise<string> {
   }
 
   // P3: the only storage adapter the app wires up is the IndexedDB-backed one
-  // (useWorkbench → LocalFileStorageAdapter). There is NO in-memory fallback:
+  // (useWorkbench → IndexedDbStorageAdapter). There is NO in-memory fallback:
   // if IndexedDB is missing, Workbench.open will fail and nothing can be saved.
   // The old READY note falsely claimed the app kept running "in-memory", which
   // masked a hard failure as a soft note. Surface the truth instead.

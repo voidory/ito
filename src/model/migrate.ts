@@ -11,7 +11,7 @@
  *
  * The steps match the existing StorageAdapter.Migration shape
  * (`(data: BrainData) => BrainData | Promise<BrainData>`) so the SAME registry
- * can be handed to LocalFileStorageAdapter.registerMigration and to this pure
+ * can be handed to IndexedDbStorageAdapter.registerMigration and to this pure
  * runner. The additive v0 -> v1 and v1 -> v2 steps only bump the version and
  * default new fields (near-identity), because every M3 contract change is
  * additive and optional.

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
-import { LocalFileStorageAdapter } from "../storage";
+import { IndexedDbStorageAdapter } from "../storage";
 import type { StorageAdapter } from "../storage";
 import { Workbench, type WorkbenchState } from "./workbench";
 
@@ -36,7 +36,7 @@ let defaultWorkbench: Promise<Workbench> | null = null;
 
 function openDefaultWorkbench(): Promise<Workbench> {
   if (!defaultWorkbench) {
-    defaultWorkbench = Workbench.open(new LocalFileStorageAdapter());
+    defaultWorkbench = Workbench.open(new IndexedDbStorageAdapter());
     defaultWorkbench.catch(() => {
       defaultWorkbench = null; // allow a later retry after a failed open
     });

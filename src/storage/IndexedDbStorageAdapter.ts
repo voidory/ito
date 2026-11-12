@@ -33,9 +33,12 @@ type StoredPointer = {
 };
 
 /**
- * LocalFileStorageAdapter persists a brain to the browser using IndexedDB for
- * structured records and binary assets (PDF bytes). It implements the
- * safe-publication shape from spec section 15 even locally:
+ * IndexedDbStorageAdapter persists a brain to the browser using IndexedDB for
+ * structured records and binary assets (PDF bytes). (Formerly named
+ * `LocalFileStorageAdapter`, which was misleading — it has never touched OPFS
+ * or the filesystem; the implementation is pure IndexedDB via `idb`.)
+ *
+ * It implements the safe-publication shape from spec section 15 even locally:
  *
  *   1. Write the new payload to a STAGED key.
  *   2. Read it back and verify it matches (write-then-verify).
@@ -45,7 +48,7 @@ type StoredPointer = {
  * A crash between (1) and (3) leaves the old published pointer intact, so a
  * brain never ends up pointing at a partial payload.
  */
-export class LocalFileStorageAdapter implements StorageAdapter {
+export class IndexedDbStorageAdapter implements StorageAdapter {
   private dbPromise: Promise<IDBPDatabase> | null = null;
   private readonly migrations: Map<number, Migration> = new Map();
 

@@ -34,7 +34,16 @@ each with a concrete plan to fix. Items are ordered by severity.
   theme change. Remaining one-off neutral grays and SVG presentation attributes (which can't
   take CSS `var()`) were intentionally left; a formal no-raw-hex lint rule is deferred (the
   repo ships no ESLint config).
-- **P7–P8**: still open (see below).
+- **P8 — DONE (with a correction)**: renamed `LocalFileStorageAdapter` →
+  `IndexedDbStorageAdapter` (+ renamed the `*.superseded.test.ts` to
+  `indexedDbStorageAdapter.staging-gc.test.ts`) and fixed the stale "OPFS/file" comments;
+  archived the `KIRO_HANDOFF_*.md` briefs to `docs/archive/` (repointing the ADR-0014
+  reference). **The evidence-line path was investigated and found to be LIVE, not dead** —
+  it is wired end-to-end, reachable via the Subjects launcher / Nodes canvas, visible by
+  default, and covered by passing e2e + unit tests. The handoff's proposed removal was never
+  carried out; deleting it would be a real feature regression, so it is retained (see P8).
+  Milestone-comment pruning is deferred to the P7 refactor.
+- **P7**: still open (see below).
 
 ---
 
@@ -285,15 +294,25 @@ JSX break hid in a 1,000-line component.
   M17 ~67×, …) — rationale accreted per milestone rather than refactored.
 - The reader-rework handoff asked to delete the old workspace-pane/evidence-line
   layout, but `reader/EvidenceLines.tsx` + `PassageEvidenceLine` /
-  `workspaceLayout.linesVisible` machinery still exist — a partially-removed path.
+  `workspaceLayout.linesVisible` machinery still exist — flagged here as a
+  possibly-partially-removed path. **(See resolution below — it is LIVE.)**
 
-**Fix plan.**
-1. Move `KIRO_HANDOFF_*.md` out of the product repo (or into `docs/archive/`).
-2. Rename `LocalFileStorageAdapter` → `IndexedDbStorageAdapter`; fix the stale
-   "OPFS/file" comments to match reality.
-3. Confirm the evidence-line layout is dead; if so delete it, else document why
-   it's retained.
-4. Delete the `superseded` test if its coverage is subsumed; otherwise rename it.
+**Fix plan + resolution.**
+1. ✅ Archived `KIRO_HANDOFF_*.md` to `docs/archive/` (with a README noting they
+   are historical) and repointed the ADR-0014 reference.
+2. ✅ Renamed `LocalFileStorageAdapter` → `IndexedDbStorageAdapter` and fixed the
+   stale "OPFS/file" comments to state the truth (pure IndexedDB).
+3. ✅ **Evidence-line layout investigated — it is LIVE, not dead.** It renders in
+   the reader whenever a subject page is open on a non-narrow viewport
+   (`Reader.tsx` `subjectOpen && !narrow`), is reachable through the Subjects
+   launcher and the Nodes canvas, is visible by default
+   (`DEFAULT_WORKSPACE_LAYOUT.linesVisible = true`), has a working toolbar toggle
+   (`overflow-toggle-lines`), and is covered by passing e2e (`e2e/workspace.spec.ts`)
+   and unit (`workbench.workspace.test.ts`, `m13SpatialOntology.test.ts`) tests.
+   The handoff's proposed removal was never carried out; **retained** — deleting it
+   would be a feature regression, not a cleanup.
+4. ✅ Renamed the `*.superseded.test.ts` to `indexedDbStorageAdapter.staging-gc.test.ts`
+   (it is ACTIVE coverage of the staging-key GC policy, not superseded).
 5. (Lower priority) prune milestone-narrative comments during the P7 refactor.
 
 ---
