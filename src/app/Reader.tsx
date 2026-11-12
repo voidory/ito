@@ -1,32 +1,67 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  createAnchor,
-  loadDocument,
-  renderHighlightOverlay,
-  renderPage,
-  resolveAnchor,
-  type RenderedPage,
-} from "../pdf";
-import type { PDFDocumentProxy } from "pdfjs-dist";
-import type { AnchorResolution, AnnotationId, PageId, SourceId, TextAnchor } from "../model";
-import {
-  HIGHLIGHT_COLORS,
-  type AnnotationStyle,
-  type AnnotationView,
-  type HighlightColor,
-  type Workbench,
-} from "./workbench";
+import type { AnnotationId, PageId, SourceId } from "../model";
+import { type HighlightColor, type Workbench } from "./workbench";
 import { SubjectEditor } from "./SubjectEditor";
+import { importPdfFiles } from "./pdfImport";
+import { ReaderToolbar, type ActiveTool } from "./reader/ReaderToolbar";
+import { AnnotationSidebar } from "./reader/AnnotationSidebar";
+import { LeftSidebar } from "./reader/LeftSidebar";
+import {
+  cssEscapeId,
+  styles,
+  BinaryOffloadedPopover,
+  type OffloadedPopover as OffloadedPopoverState,
+} from "./reader/AnnotationOverlays";
+import { SourcePane } from "./reader/SourcePane";
+import { PaneGroup, PassageEvidenceLines } from "./reader/EvidenceLines";
+import { type PaneCommands, type ReturnTarget } from "./reader/paneTypes";
 
-/** A pending source-return request (spec section 8.2, A17). */
-interface ReturnTarget {
-  readonly sourceId: SourceId | null;
-  readonly anchor: TextAnchor | null;
-  readonly pageIndex: number;
-  readonly resolution: AnchorResolution;
-  /** Monotonic nonce so repeat returns to the same quote re-trigger the scroll. */
-  readonly nonce: number;
-}
+/*
+ * FEAT-001/002: the reader is composed of focused modules under src/app/reader/*:
+ * the annotation OVERLAYS (AnnotationOverlays), the single TOOLBAR + the two
+ * SIDEBARs, the SourcePane (pdf.js lifecycle + in-pane annotation interactions)
+ * and the inter-pane EvidenceLines/PaneGroup. Reader.tsx remains the shell +
+ * state owner and BARREL re-exports the moved symbols so existing imports
+ * (tests + testApi.ts) keep resolving unchanged.
+ */
+export {
+  anchorRectFrom,
+  clampFixedAnchor,
+  clampZoom,
+  drawAnnotation,
+  sanitizeSnapshotHtml,
+  serializedRerender,
+  AssociationMenu,
+  BinaryOffloadedPopover,
+  CommentSurface,
+  HighlightEditPopover,
+  LiveSelectionPreview,
+  ReaderContextMenu,
+  SelectionToolbar,
+} from "./reader/AnnotationOverlays";
+export type {
+  AnchorRect,
+  ContextMenuState,
+  EditPopoverState,
+  MenuState,
+  OffloadedPopover,
+  ToolbarState,
+} from "./reader/AnnotationOverlays";
+export {
+  createScrollCoalescer,
+  type PaneCommands,
+  type ScrollCoalescer,
+} from "./reader/paneTypes";
+
+/**
+ * M14–M16 (FEAT-001) the minimum viewport width (px) at which the integrated
+ * workspace renders the full 3-pane center-editor layout (Paper A | Editor |
+ * Paper B) when two sources are open together with a subject page. BELOW this
+ * width the workspace adapts to a compact 2-pane layout (Paper A | Editor) with
+ * the 2nd PDF surfaced as a 1-click quick-swap tab. Exported so the test asserts
+ * the exact boundary.
+ */
+export const WORKSPACE_3PANE_MIN_WIDTH = 1360;
 
 /**
  * The reading workbench (spec section 6). Renders one or more open documents
@@ -60,7 +95,104 @@ export function Reader({
   const together = openSourceIds.length > 1;
   const [returnTarget, setReturnTarget] = useState<ReturnTarget | null>(null);
   const [returnNotice, setReturnNotice] = useState<string | null>(null);
+  // A17/D02: when a followed quote resolves to 'binary-offloaded' we surface a
+  // popover that renders the stored quote + comment + page number + source
+  // title and offers "Attach PDF Binary". The citation still functions from
+  // this stored metadata; attaching re-hydrates the live render.
+  const [offloadedPopover, setOffloadedPopover] = useState<OffloadedPopoverState | null>(null);
   const nonceRef = useRef(0);
+  const readerPdfInputRef = useRef<HTMLInputElement>(null);
+
+  // FEAT-001/002 tool-first state owned by the reader shell. The active tool
+  // persists until toggled off or Esc; the active colour drives immediate
+  // highlight/underline commits (1-4) and the no-tool popup default.
+  const [activeTool, setActiveTool] = useState<ActiveTool>(null);
+  const [activeColor, setActiveColor] = useState<HighlightColor>("yellow");
+  // FEAT-002: the annotation selected from the sidebar (flashed + card-active).
+  const [selectedAnnotationId, setSelectedAnnotationId] = useState<AnnotationId | null>(null);
+  // FEAT-002: the left sidebar (Thumbnails / Outline), toggled from the toolbar.
+  const [leftSidebarOpen, setLeftSidebarOpen] = useState(false);
+
+  // Scroll the reader to an annotation's page, flash its overlay, and mark it
+  // selected (sidebar card click). The flash reuses a short-lived CSS class on
+  // the overlay container keyed by data-annotation-id.
+  const selectAnnotation = useCallback(
+    (annotationId: AnnotationId, pageNumber: number) => {
+      setSelectedAnnotationId(annotationId);
+      paneCommandsRef.current?.goToPage(pageNumber);
+      if (typeof document !== "undefined") {
+        const el = document.querySelector<HTMLElement>(
+          `[data-annotation-id="${cssEscapeId(annotationId)}"]`,
+        );
+        if (el) {
+          el.classList.add("ito-highlight-flash");
+          window.setTimeout(() => el.classList.remove("ito-highlight-flash"), 1200);
+        }
+      }
+    },
+    [],
+  );
+
+  // The primary source pane registers its imperative zoom/paging/find commands
+  // here so the single reader toolbar can drive them; it reports zoom/page back
+  // up via onNavChange. A single-document reader (the default) wires one pane.
+  const paneCommandsRef = useRef<PaneCommands | null>(null);
+  const [nav, setNav] = useState<{ zoom: number; page: number; pageCount: number }>({
+    zoom: 1,
+    page: 1,
+    pageCount: 1,
+  });
+
+  // Global keyboard: colours 1-4, tools H/U/N/A, Esc clears the tool. Ignored
+  // while typing in an input/textarea/contenteditable so the comment box and
+  // page input keep working.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      const t = e.target as HTMLElement | null;
+      const typing =
+        !!t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.tagName === "SELECT" ||
+          t.isContentEditable);
+      if (e.key === "Escape") {
+        setActiveTool(null);
+        return;
+      }
+      if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+      const colorKeys: Record<string, HighlightColor> = {
+        "1": "yellow",
+        "2": "green",
+        "3": "blue",
+        "4": "pink",
+      };
+      if (colorKeys[e.key]) {
+        setActiveColor(colorKeys[e.key]!);
+        return;
+      }
+      const toolKeys: Record<string, Exclude<ActiveTool, null>> = {
+        h: "highlight",
+        u: "underline",
+        n: "note",
+        a: "area",
+      };
+      const tool = toolKeys[e.key.toLowerCase()];
+      if (tool) setActiveTool((cur) => (cur === tool ? null : tool));
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Local-PDF import from the Reader header (same hash + numPages + importSource
+  // path as the Library button). Resets the input so the same file re-imports.
+  const importReaderFiles = useCallback(
+    async (files: FileList | null) => {
+      if (!files || files.length === 0) return;
+      const count = await importPdfFiles(wb, Array.from(files));
+      if (count > 0) bump();
+    },
+    [wb, bump],
+  );
 
   // Source-return (A17): resolve the evidence's live source WITHOUT closing the
   // subject page. A changed/missing version produces an explicit notice and
@@ -70,12 +202,44 @@ export function Reader({
       const resolved = wb.resolveEvidenceSource(evidenceId);
       if (!resolved) return;
       nonceRef.current += 1;
+      // A17: a binary-offloaded resolution does NOT navigate to unrelated
+      // content; it opens a popover with the stored quote/comment/page/title
+      // and an "Attach PDF Binary" action to re-hydrate the live render.
+      if (resolved.resolution.kind === "binary-offloaded") {
+        const data = wb.rawData();
+        const evidence = data.evidenceInstances.find((e) => e.id === evidenceId);
+        const annotation = data.annotations.find(
+          (a) => a.id === evidence?.annotationId,
+        );
+        const source = data.sources.find((s) => s.id === resolved.sourceId);
+        const pageIndex = resolved.anchor?.pageIndex ?? resolved.scopeStartPageIndex;
+        setReturnNotice(null);
+        setReturnTarget(null);
+        // A binary-offloaded resolution always carries a real source id (the
+        // annotation + source still exist; only the PDF bytes were evicted).
+        setOffloadedPopover({
+          evidenceId,
+          sourceId: resolved.sourceId!,
+          sourceTitle: source?.title ?? "Source",
+          quotedText: evidence?.quotedText ?? "",
+          comment: annotation?.comment ?? "",
+          pageNumber: pageIndex + 1,
+          reason: resolved.resolution.reason,
+        });
+        return;
+      }
       if (resolved.resolution.kind !== "resolved") {
         setReturnNotice(
           resolved.resolution.kind === "mismatched"
             ? "The source version changed since this quote was captured; the exact passage could not be located."
             : `The source passage is unavailable: ${resolved.resolution.reason}.`,
         );
+        // A deleted annotation resolves with a null sourceId: there is nowhere
+        // to navigate, so show only the notice and clear any prior target.
+        if (resolved.sourceId == null) {
+          setReturnTarget(null);
+          return;
+        }
         setReturnTarget({
           sourceId: resolved.sourceId,
           anchor: resolved.anchor,
@@ -86,6 +250,10 @@ export function Reader({
         return;
       }
       setReturnNotice(null);
+      if (resolved.sourceId == null) {
+        setReturnTarget(null);
+        return;
+      }
       setReturnTarget({
         sourceId: resolved.sourceId,
         anchor: resolved.anchor,
@@ -100,9 +268,8 @@ export function Reader({
   // Make sure the source the quote points at is actually open; if it is not in
   // the current workspace, open it alongside (still never replaces the subject).
   useEffect(() => {
-    // ADD the source alongside the open panes; never replace them.
-    if (returnTarget?.sourceId && !openSourceIds.includes(returnTarget.sourceId)) {
-      wb.ensureSourceOpen(returnTarget.sourceId);
+    if (returnTarget && !openSourceIds.includes(returnTarget.sourceId)) {
+      wb.openSource(returnTarget.sourceId);
       bump();
     }
   }, [returnTarget, openSourceIds, wb, bump]);
@@ -113,8 +280,6 @@ export function Reader({
   const paneScrollRefs = useRef<Map<string, HTMLElement>>(new Map());
   const bodyRef = useRef<HTMLDivElement>(null);
   const linesVisible = wb.snapshot().workspaceLayout.linesVisible;
-  const saveError = wb.snapshot().saveError;
-  const [retrying, setRetrying] = useState(false);
 
   // Narrow-screen (phone) responsive detection. A squeezed three-pane
   // miniature is explicitly NOT attempted; narrow screens get a documented
@@ -122,8 +287,16 @@ export function Reader({
   const [narrow, setNarrow] = useState<boolean>(() =>
     typeof window !== "undefined" ? window.innerWidth < 760 : false,
   );
+  // M14–M16 (FEAT-001): the live viewport width driving the adaptive <1360px
+  // multi-pane breakpoint. Tracked alongside the phone `narrow` flag.
+  const [viewportWidth, setViewportWidth] = useState<number>(() =>
+    typeof window !== "undefined" ? window.innerWidth : WORKSPACE_3PANE_MIN_WIDTH,
+  );
   useEffect(() => {
-    const onResize = (): void => setNarrow(window.innerWidth < 760);
+    const onResize = (): void => {
+      setNarrow(window.innerWidth < 760);
+      setViewportWidth(window.innerWidth);
+    };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
@@ -132,6 +305,18 @@ export function Reader({
   // page is the middle composition pane. The approved arrangement interleaves
   // the subject between sources (Paper A | subject | Paper B) when two sources
   // are open together; otherwise it trails the single source.
+  // M14–M16 (FEAT-001): below WORKSPACE_3PANE_MIN_WIDTH a 2-sources+subject
+  // workspace is TOO narrow for the full Paper A | Editor | Paper B layout, so
+  // it collapses to a compact Paper A | Editor and surfaces Paper B as a
+  // 1-click quick-swap tab. `compactTwoPane` gates that layout; `secondSourceId`
+  // is the hidden Paper B offered for the swap.
+  const compactTwoPane =
+    !narrow &&
+    subjectOpen &&
+    openSourceIds.length >= 2 &&
+    viewportWidth < WORKSPACE_3PANE_MIN_WIDTH;
+  const secondSourceId: SourceId | null = compactTwoPane ? openSourceIds[1]! : null;
+
   const paneSlots: { slotId: string; kind: "source" | "subject"; sourceId?: SourceId }[] =
     (() => {
       const sources = openSourceIds.map((id) => ({
@@ -141,6 +326,11 @@ export function Reader({
       }));
       if (!subjectOpen) return sources;
       const subjectPane = { slotId: "subject", kind: "subject" as const };
+      // Compact 2-pane: render ONLY the first PDF pane beside the Editor; the
+      // 2nd PDF (Paper B) is reachable via the quick-swap tab.
+      if (compactTwoPane) {
+        return [sources[0]!, subjectPane];
+      }
       if (sources.length >= 2) {
         return [sources[0]!, subjectPane, ...sources.slice(1)];
       }
@@ -152,48 +342,207 @@ export function Reader({
     else paneScrollRefs.current.delete(slotId);
   }, []);
 
+  const primaryTitle =
+    (openSourceIds[0] && wb.rawData().sources.find((s) => s.id === openSourceIds[0])?.title) ||
+    "Reader";
+  const switchable = wb
+    .rawData()
+    .sources.filter((s) => !openSourceIds.includes(s.id));
+
+  // M13 (§2.2): the Source Switcher Pill data for a node / node-intersection
+  // workspace — the cited sources ranked by citation count DESC. The open
+  // workspace shows the TOP-2 in the pane slots; any cited source NOT currently
+  // open is offered under "Swap to:". Only shown when there are cited sources
+  // AND the open page is a node / node-intersection workspace page.
+  const openPageKind = wb.snapshot().openPageKind;
+  const sourceRanking =
+    openPageKind === "node" || openPageKind === "node-intersection"
+      ? wb.citedSourceRankingForOpenWorkspace()
+      : [];
+  const swapTargets = sourceRanking.filter((r) => !openSourceIds.includes(r.sourceId));
+  // Swap a cited source into a reader pane: if two panes are open, replace the
+  // lowest-ranked open source; otherwise add alongside (ensureSourceOpen). This
+  // keeps the subject page open and the other panes untouched (§8.2 note).
+  const swapInSource = useCallback(
+    (toSourceId: SourceId) => {
+      const openCited = sourceRanking.filter((r) => openSourceIds.includes(r.sourceId));
+      const replaceTarget = openCited.length >= 2 ? openCited[openCited.length - 1]!.sourceId : null;
+      if (replaceTarget) wb.switchReaderPane(replaceTarget, toSourceId);
+      else wb.ensureSourceOpen(toSourceId);
+      bump();
+    },
+    [wb, bump, sourceRanking, openSourceIds],
+  );
+
   return (
     <div data-testid="reader" data-view="reader" style={styles.root}>
-      <header style={styles.toolbar}>
-        <button data-testid="back-to-library" onClick={onBackToLibrary}>
-          ← Library
+      <ReaderToolbar
+        title={primaryTitle}
+        sidebarOpen={highlightsTabOpen}
+        onToggleSidebar={() => onToggleTab(!highlightsTabOpen)}
+        leftSidebarOpen={leftSidebarOpen}
+        onToggleLeftSidebar={() => setLeftSidebarOpen((v) => !v)}
+        onBackToLibrary={onBackToLibrary}
+        activeTool={activeTool}
+        onToggleTool={(t) => setActiveTool((cur) => (cur === t ? null : t))}
+        activeColor={activeColor}
+        onSetColor={setActiveColor}
+        zoom={nav.zoom}
+        onZoomOut={() => paneCommandsRef.current?.zoomOut()}
+        onZoomIn={() => paneCommandsRef.current?.zoomIn()}
+        onResetZoom={() => paneCommandsRef.current?.resetZoom()}
+        onFitWidth={() => paneCommandsRef.current?.fitWidth()}
+        page={nav.page}
+        pageCount={nav.pageCount}
+        onGoToPage={(n) => paneCommandsRef.current?.goToPage(n)}
+        onPrevPage={() => paneCommandsRef.current?.goToPage(Math.max(1, nav.page - 1))}
+        onNextPage={() => paneCommandsRef.current?.goToPage(Math.min(nav.pageCount, nav.page + 1))}
+        onOpenFind={() => paneCommandsRef.current?.openFind()}
+        suppressMotion={suppressMotion}
+        linesVisible={linesVisible}
+        onToggleMotion={() => onToggleMotion(!suppressMotion)}
+        onToggleLines={() => {
+          wb.setLinesVisible(!linesVisible);
+          bump();
+        }}
+        onSwitchPaper={
+          switchable.length > 0
+            ? () => {
+                const to = switchable[0]!.id;
+                if (openSourceIds[0]) wb.switchReaderPane(openSourceIds[0], to);
+                bump();
+              }
+            : undefined
+        }
+        onImportPdf={() => readerPdfInputRef.current?.click()}
+      />
+      {/* M14–M16 (FEAT-002): "← Return to Map" — switch back to the Nodes view
+          and smoothly pull the camera back out from the last dive target. Only
+          shown once a dive into this workspace was recorded. */}
+      {wb.lastDiveTarget() != null && (
+        <button
+          data-testid="return-to-map-dive-btn"
+          className="ito-return-to-map"
+          onClick={() => {
+            wb.returnToMap();
+            bump();
+          }}
+          style={{
+            alignSelf: "flex-start",
+            margin: "0.35rem 0.75rem",
+            padding: "0.3rem 0.7rem",
+            fontSize: "0.82rem",
+            border: "1px solid #d9d4c7",
+            borderRadius: "6px",
+            background: "#f4f1ea",
+            cursor: "pointer",
+          }}
+        >
+          ← Return to Map
         </button>
-        {together && (
-          <span data-testid="open-together-indicator" style={{ color: "#555" }}>
-            Shared workspace · no analysis
-          </span>
-        )}
-        <span style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
-          <label style={{ fontSize: "0.85rem", color: "#555" }}>
-            <input
-              type="checkbox"
-              data-testid="suppress-motion"
-              checked={suppressMotion}
-              onChange={(e) => onToggleMotion(e.target.checked)}
-            />{" "}
-            Suppress motion
-          </label>
-          <label style={{ fontSize: "0.85rem", color: "#555" }}>
-            <input
-              type="checkbox"
-              data-testid="toggle-lines"
-              checked={linesVisible}
-              onChange={(e) => {
-                wb.setLinesVisible(e.target.checked);
+      )}
+      <input
+        ref={readerPdfInputRef}
+        data-testid="import-pdf-input"
+        type="file"
+        accept=".pdf,application/pdf"
+        multiple
+        className="ito-visually-hidden-input"
+        onChange={(e) => {
+          void importReaderFiles(e.target.files);
+          e.target.value = "";
+        }}
+      />
+      {together && (
+        <div data-testid="open-together-indicator" className="ito-open-together">
+          Shared workspace · no analysis
+        </div>
+      )}
+
+      {/* M13 (§2.2): Source Switcher Pill — lists cited sources with counts and
+          offers to "Swap to:" any cited source not currently in a pane (e.g.
+          "Paper A (5) · Paper B (3) · Swap to: Paper C (1)"). Toggling swaps a
+          3rd+ PDF into a pane via switchReaderPane/ensureSourceOpen.
+          M14–M16 (FEAT-001): in the compact <1360px 2-pane layout the switcher
+          also renders even with no cited sources, carrying the prominent
+          `compact-second-source-tab` at its FRONT for 1-click swapping to the
+          hidden Paper B. */}
+      {(sourceRanking.length > 0 || compactTwoPane) && (
+        <div
+          data-testid="workspace-source-switcher"
+          className="ito-source-switcher"
+          role="group"
+          aria-label="Cited sources"
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            gap: "0.3rem",
+            padding: "0.35rem 0.75rem",
+            fontSize: "0.82rem",
+            background: "#f4f1ea",
+            borderBottom: "1px solid #e5e2dc",
+          }}
+        >
+          {/* M14–M16 (FEAT-001): prominent 1-click quick-swap tab for the hidden
+              Paper B in the compact 2-pane layout. Clicking promotes Paper B
+              into the single visible PDF pane (swapping it with Paper A) so the
+              user can flip between the two papers without the full 3-pane width. */}
+          {compactTwoPane && secondSourceId != null && (
+            <button
+              data-testid="compact-second-source-tab"
+              data-source-id={secondSourceId}
+              className="ito-compact-source-tab"
+              onClick={() => {
+                wb.promoteOpenSource(secondSourceId);
                 bump();
               }}
-            />{" "}
-            Show source lines
-          </label>
-          <button
-            data-testid="toggle-highlights-tab"
-            aria-pressed={highlightsTabOpen}
-            onClick={() => onToggleTab(!highlightsTabOpen)}
-          >
-            {highlightsTabOpen ? "Hide highlights" : "Show highlights"}
-          </button>
-        </span>
-      </header>
+              style={{
+                fontWeight: 600,
+                padding: "0.2rem 0.6rem",
+                marginRight: "0.4rem",
+                border: "1px solid #c9b98a",
+                borderRadius: "6px",
+                background: "#fbf3dd",
+                cursor: "pointer",
+              }}
+            >
+              {wb.rawData().sources.find((s) => s.id === secondSourceId)?.title ?? "Paper B"} →
+            </button>
+          )}
+          <span style={{ fontWeight: 600, marginRight: "0.25rem" }}>Sources:</span>
+          {sourceRanking.map((r, i) => (
+            <span
+              key={r.sourceId}
+              data-testid="source-switcher-cited"
+              data-source-id={r.sourceId}
+              data-count={r.count}
+              data-open={openSourceIds.includes(r.sourceId) ? "true" : "false"}
+              style={{ opacity: openSourceIds.includes(r.sourceId) ? 1 : 0.7 }}
+            >
+              {i > 0 ? " · " : ""}
+              {r.title} ({r.count})
+            </span>
+          ))}
+          {swapTargets.length > 0 && (
+            <span style={{ marginLeft: "0.5rem" }}>
+              Swap to:{" "}
+              {swapTargets.map((r) => (
+                <button
+                  key={r.sourceId}
+                  data-testid="source-switcher-swap"
+                  data-source-id={r.sourceId}
+                  data-count={r.count}
+                  className="ito-source-swap-btn"
+                  onClick={() => swapInSource(r.sourceId)}
+                >
+                  {r.title} ({r.count})
+                </button>
+              ))}
+            </span>
+          )}
+        </div>
+      )}
 
       {returnNotice && (
         <div data-testid="source-return-notice" role="alert" style={styles.returnNotice}>
@@ -202,35 +551,25 @@ export function Reader({
             data-testid="dismiss-return-notice"
             aria-label="Dismiss"
             onClick={() => setReturnNotice(null)}
-            style={{ marginLeft: "0.5rem" }}
+            className="ito-dismiss-inline"
           >
             ×
           </button>
         </div>
       )}
 
-      {saveError && (
-        <div data-testid="save-error-banner" role="alert" style={styles.saveError}>
-          Changes are not saved yet: {saveError.message}. They are kept in this
-          session — retry before closing the tab.
-          <button
-            data-testid="retry-save"
-            disabled={retrying}
-            style={{ marginLeft: "0.5rem" }}
-            onClick={() => {
-              setRetrying(true);
-              void wb
-                .retrySave()
-                .catch(() => undefined)
-                .finally(() => {
-                  setRetrying(false);
-                  bump();
-                });
-            }}
-          >
-            {retrying ? "Retrying…" : "Retry save"}
-          </button>
-        </div>
+      {offloadedPopover && (
+        <BinaryOffloadedPopover
+          wb={wb}
+          popover={offloadedPopover}
+          onClose={() => setOffloadedPopover(null)}
+          onAttached={() => {
+            setOffloadedPopover(null);
+            // Re-follow so the now-cached source resolves + scrolls to the quote.
+            followSource(offloadedPopover.evidenceId);
+            bump();
+          }}
+        />
       )}
 
       <div
@@ -239,27 +578,26 @@ export function Reader({
         data-subject-open={subjectOpen ? "true" : "false"}
         data-narrow={narrow ? "true" : "false"}
         data-pane-count={String(paneSlots.length)}
+        data-workspace-density={compactTwoPane ? "compact-2pane" : undefined}
         style={styles.body}
         ref={bodyRef}
       >
+        {leftSidebarOpen && !narrow && (
+          <LeftSidebar
+            doc={paneCommandsRef.current?.getDoc() ?? null}
+            pageCount={nav.pageCount}
+            currentPage={nav.page}
+            onJump={(n) => paneCommandsRef.current?.goToPage(n)}
+          />
+        )}
         <main
           data-testid="reader-main"
           data-together={together ? "true" : "false"}
           data-layout={narrow ? "stacked" : "panes"}
+          className="ito-reader-main"
           style={{
             ...styles.main,
             flexDirection: narrow ? "column" : "row",
-            flexWrap: "nowrap",
-            // Closed tab = centred + expanded reading column (only when a single
-            // source reads solo with no subject sharing the workspace).
-            maxWidth:
-              highlightsTabOpen || subjectOpen || paneSlots.length > 1
-                ? "none"
-                : "60rem",
-            margin:
-              highlightsTabOpen || subjectOpen || paneSlots.length > 1
-                ? "0"
-                : "0 auto",
           }}
         >
           {narrow && (
@@ -288,14 +626,28 @@ export function Reader({
                   wb={wb}
                   sourceId={slot.sourceId!}
                   suppressMotion={suppressMotion}
+                  onToggleMotion={onToggleMotion}
                   returnTarget={
                     returnTarget && returnTarget.sourceId === slot.sourceId
                       ? returnTarget
                       : null
                   }
                   openSourceIds={openSourceIds}
-                  onScroll={() => bump()}
                   registerScroll={(el) => registerPaneScroll(slot.slotId, el)}
+                  activeTool={activeTool}
+                  activeColor={activeColor}
+                  onClearTool={() => setActiveTool(null)}
+                  isPrimary={slot.sourceId === openSourceIds[0]}
+                  registerCommands={
+                    slot.sourceId === openSourceIds[0]
+                      ? (c) => {
+                          paneCommandsRef.current = c;
+                        }
+                      : undefined
+                  }
+                  onNavChange={
+                    slot.sourceId === openSourceIds[0] ? setNav : undefined
+                  }
                   bump={bump}
                 />
               ) : (
@@ -303,7 +655,7 @@ export function Reader({
                    pane; source-return never closes or replaces it (A17). It is
                    NEVER hidden behind a modal while composing (section 8.2). */
                 <div
-                  style={{ height: "100%" }}
+                  className="ito-subject-pane-fill"
                   ref={(el) => registerPaneScroll("subject", el)}
                 >
                   <SubjectEditor
@@ -336,1211 +688,16 @@ export function Reader({
 
         {/* Closed tab reserves ZERO width: the aside is not rendered at all. */}
         {highlightsTabOpen && (
-          <HighlightsTab wb={wb} openSourceIds={openSourceIds} bump={bump} />
+          <AnnotationSidebar
+            wb={wb}
+            openSourceIds={openSourceIds}
+            bump={bump}
+            currentPage={nav.page}
+            selectedAnnotationId={selectedAnnotationId}
+            onSelectAnnotation={selectAnnotation}
+          />
         )}
       </div>
     </div>
   );
 }
-
-/**
- * A pane wrapper that applies the pane's flex-grow WEIGHT (adjustable widths,
- * section 8.2) and renders a draggable divider after it (except the last pane).
- * The weight ratio is the durable-across-transitions pane configuration (R19);
- * dragging the divider calls back into the Workbench so the ratio survives
- * layout changes.
- */
-function PaneGroup({
-  children,
-  last,
-  narrow,
-  weight,
-  onResize,
-  slotId,
-}: {
-  children: React.ReactNode;
-  last: boolean;
-  narrow: boolean;
-  weight: number;
-  onResize: (weight: number) => void;
-  slotId: string;
-}): JSX.Element {
-  const ref = useRef<HTMLDivElement>(null);
-  const dragging = useRef(false);
-
-  const onPointerDown = useCallback(
-    (e: React.PointerEvent) => {
-      e.preventDefault();
-      dragging.current = true;
-      const startX = e.clientX;
-      const startWidth = ref.current?.getBoundingClientRect().width ?? 1;
-      const startWeight = weight;
-      const move = (ev: PointerEvent): void => {
-        if (!dragging.current) return;
-        const dx = ev.clientX - startX;
-        // Convert pixel delta into a proportional weight change.
-        const factor = (startWidth + dx) / Math.max(1, startWidth);
-        onResize(Math.max(0.15, startWeight * factor));
-      };
-      const up = (): void => {
-        dragging.current = false;
-        window.removeEventListener("pointermove", move);
-        window.removeEventListener("pointerup", up);
-      };
-      window.addEventListener("pointermove", move);
-      window.addEventListener("pointerup", up);
-    },
-    [weight, onResize],
-  );
-
-  return (
-    <>
-      <div
-        ref={ref}
-        data-testid="workspace-pane"
-        data-slot-id={slotId}
-        style={{
-          flex: narrow ? "1 1 auto" : `${weight} 1 0`,
-          minWidth: 0,
-          minHeight: narrow ? "60vh" : 0,
-          height: narrow ? "auto" : "100%",
-          overflow: "hidden",
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        {children}
-      </div>
-      {!last && !narrow && (
-        <div
-          data-testid="pane-divider"
-          data-slot-id={slotId}
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize pane"
-          onPointerDown={onPointerDown}
-          style={styles.divider}
-        />
-      )}
-    </>
-  );
-}
-
-interface ToolbarState {
-  readonly sourceId: SourceId;
-  readonly anchor: TextAnchor;
-  readonly x: number;
-  readonly y: number;
-}
-
-interface MenuState {
-  readonly annotationId: AnnotationId;
-  readonly sourceId: SourceId;
-  readonly x: number;
-  readonly y: number;
-}
-
-function SourcePane({
-  wb,
-  sourceId,
-  suppressMotion,
-  returnTarget,
-  openSourceIds,
-  onScroll,
-  registerScroll,
-  bump,
-}: {
-  wb: Workbench;
-  sourceId: SourceId;
-  suppressMotion: boolean;
-  returnTarget: ReturnTarget | null;
-  openSourceIds: readonly SourceId[];
-  onScroll: () => void;
-  registerScroll: (el: HTMLElement | null) => void;
-  bump: () => void;
-}): JSX.Element {
-  const mountRef = useRef<HTMLDivElement>(null);
-  const pagesRef = useRef<RenderedPage[]>([]);
-  const docRef = useRef<PDFDocumentProxy | null>(null);
-  const [ready, setReady] = useState(false);
-  const [toolbar, setToolbar] = useState<ToolbarState | null>(null);
-  const [menu, setMenu] = useState<MenuState | null>(null);
-  const [rangeMode, setRangeMode] = useState(false);
-  const [rangeStart, setRangeStart] = useState(0);
-  const [rangeEnd, setRangeEnd] = useState(0);
-  const [openComment, setOpenComment] = useState<AnnotationId | null>(null);
-
-  const source = wb.rawData().sources.find((s) => s.id === sourceId);
-
-  const redrawOverlays = useCallback(() => {
-    const views = wb.annotationsForSource(sourceId);
-    for (const page of pagesRef.current) {
-      page.textLayer
-        .querySelectorAll(".ito-highlight")
-        .forEach((el) => el.remove());
-    }
-    for (const view of views) {
-      drawAnnotation(view, pagesRef.current, suppressMotion, false);
-    }
-  }, [wb, sourceId, suppressMotion]);
-
-  // Render the document pages once.
-  useEffect(() => {
-    let cancelled = false;
-    const mount = mountRef.current;
-    if (!mount) return;
-    (async () => {
-      const bytes = await wb.readSourceBytes(sourceId);
-      if (!bytes || cancelled) return;
-      const doc = await loadDocument(bytes);
-      docRef.current = doc;
-      mount.replaceChildren();
-      const pages: RenderedPage[] = [];
-      for (let p = 1; p <= doc.numPages; p++) {
-        const rp = await renderPage(doc, p, mount, 1.3);
-        rp.container.dataset.pageIndex = String(p - 1);
-        pages.push(rp);
-      }
-      if (cancelled) return;
-      pagesRef.current = pages;
-      setRangeEnd(doc.numPages - 1);
-      setReady(true);
-    })().catch((err) => console.error("render failed", err));
-    return () => {
-      cancelled = true;
-    };
-  }, [wb, sourceId]);
-
-  // Draw overlays whenever annotations change / pages become ready.
-  useEffect(() => {
-    if (ready) redrawOverlays();
-  }, [ready, redrawOverlays]);
-
-  // Source-return: scroll this pane to the exact passage and flash a transient
-  // overlay re-derived from the live render (A17, spec section 8.2). For an
-  // unresolved/mismatched return we still scroll to the recorded page but draw
-  // NO fake highlight and leave the explicit notice (shown by the Reader) in
-  // place — never a silent navigation to unrelated content.
-  useEffect(() => {
-    if (!ready || !returnTarget) return;
-    const source = wb.rawData().sources.find((s) => s.id === sourceId);
-    if (!source) return;
-    const page = pagesRef.current.find(
-      (p) => Number(p.container.dataset.pageIndex ?? "-1") === returnTarget.pageIndex,
-    );
-    if (!page) return;
-    page.textLayer.querySelectorAll(".ito-return").forEach((el) => el.remove());
-    page.container.scrollIntoView({
-      behavior: suppressMotion ? "auto" : "smooth",
-      block: "center",
-    });
-    page.container.setAttribute("data-return-target", "true");
-
-    if (returnTarget.resolution.kind === "resolved" && returnTarget.anchor) {
-      const resolved = resolveAnchor({
-        anchor: returnTarget.anchor,
-        currentVersionHash: source.versionHash,
-        pageText: page.pageText,
-        pageBox: page.pageBox(),
-        rangeToClientRects: (s, e) => page.rangeToClientRects(s, e),
-      });
-      page.container.setAttribute("data-return-resolution", resolved.resolution.kind);
-      if (resolved.resolution.kind === "resolved") {
-        for (const r of resolved.rects) {
-          const el = document.createElement("div");
-          el.className = "ito-return";
-          Object.assign(el.style, {
-            position: "absolute",
-            left: `${r.x * 100}%`,
-            top: `${r.y * 100}%`,
-            width: `${r.width * 100}%`,
-            height: `${r.height * 100}%`,
-            background: "rgba(26,86,219,0.25)",
-            outline: "2px solid #1a56db",
-            borderRadius: "3px",
-            pointerEvents: "none",
-          } satisfies Partial<CSSStyleDeclaration>);
-          page.textLayer.appendChild(el);
-        }
-      }
-    } else {
-      page.container.setAttribute("data-return-resolution", returnTarget.resolution.kind);
-    }
-  }, [ready, returnTarget, wb, sourceId, suppressMotion]);
-
-  // Capture a text selection inside this pane's text layers → portable anchor.
-  const onMouseUp = useCallback(() => {
-    if (rangeMode) return;
-    const selection = window.getSelection();
-    if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
-      setToolbar(null);
-      return;
-    }
-    const range = selection.getRangeAt(0);
-    // Find which rendered page contains the selection.
-    const page = pagesRef.current.find((p) =>
-      p.textLayer.contains(range.commonAncestorContainer),
-    );
-    if (!page || !source) {
-      setToolbar(null);
-      return;
-    }
-    const pageIndex = Number(page.container.dataset.pageIndex ?? "0");
-    try {
-      const anchor = createAnchor({
-        docId: sourceId,
-        sourceVersionHash: source.versionHash,
-        pageIndex,
-        selection,
-        pageBox: page.pageBox(),
-        pageText: page.pageText,
-      });
-      const rect = range.getBoundingClientRect();
-      setToolbar({ sourceId, anchor, x: rect.left, y: rect.bottom });
-    } catch {
-      setToolbar(null);
-    }
-  }, [rangeMode, source, sourceId]);
-
-  const commitHighlight = useCallback(
-    async (style: AnnotationStyle) => {
-      if (!toolbar) return;
-      // A failed SAVE still leaves the annotation in memory (R12) and surfaces
-      // the save-error banner; the toolbar must close either way, otherwise a
-      // second click creates a duplicate annotation.
-      await wb
-        .commitTextAnnotation({ sourceId, anchor: toolbar.anchor, style })
-        .catch(() => undefined);
-      window.getSelection()?.removeAllRanges();
-      setToolbar(null);
-      redrawOverlays();
-      bump();
-    },
-    [toolbar, wb, sourceId, redrawOverlays, bump],
-  );
-
-  const commitRange = useCallback(async () => {
-    await wb
-      .commitRangeAnnotation({
-        sourceId,
-        startPageIndex: Math.min(rangeStart, rangeEnd),
-        endPageIndex: Math.max(rangeStart, rangeEnd),
-      })
-      .catch(() => undefined);
-    setRangeMode(false);
-    redrawOverlays();
-    bump();
-  }, [wb, sourceId, rangeStart, rangeEnd, redrawOverlays, bump]);
-
-  // Reveal a comment when an annotation overlay is clicked (quiet-by-default).
-  useEffect(() => {
-    if (!ready) return;
-    const mount = mountRef.current;
-    if (!mount) return;
-    const handler = (ev: Event) => {
-      const el = (ev.target as HTMLElement).closest(".ito-highlight") as HTMLElement | null;
-      if (!el) return;
-      const id = el.dataset.annotationId as AnnotationId | undefined;
-      if (id) setOpenComment(id);
-    };
-    const ctxHandler = (ev: MouseEvent) => {
-      const el = (ev.target as HTMLElement).closest(".ito-highlight") as HTMLElement | null;
-      if (!el) return;
-      ev.preventDefault();
-      const id = el.dataset.annotationId as AnnotationId | undefined;
-      if (id) setMenu({ annotationId: id, sourceId, x: ev.clientX, y: ev.clientY });
-    };
-    mount.addEventListener("click", handler);
-    mount.addEventListener("contextmenu", ctxHandler);
-    return () => {
-      mount.removeEventListener("click", handler);
-      mount.removeEventListener("contextmenu", ctxHandler);
-    };
-  }, [ready, sourceId]);
-
-  // Other sources (not currently open in any pane) the user can switch THIS
-  // pane to — keeps the same subject while a reader pane shows a third paper
-  // (section 8.2 note).
-  const switchable = wb
-    .rawData()
-    .sources.filter((s) => s.id !== sourceId && !openSourceIds.includes(s.id));
-
-  return (
-    <div
-      data-testid="source-pane"
-      data-source-id={sourceId}
-      data-ready={ready ? "true" : "false"}
-      style={styles.pane}
-    >
-      <div style={styles.paneHeader}>
-        <strong>{source?.title ?? "…"}</strong>
-        <span style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
-          {switchable.length > 0 && (
-            <select
-              data-testid="switch-paper"
-              aria-label="Switch this pane to another paper"
-              value=""
-              onChange={(e) => {
-                const to = e.target.value;
-                if (!to) return;
-                wb.switchReaderPane(sourceId, to as SourceId);
-                bump();
-              }}
-            >
-              <option value="">Switch paper…</option>
-              {switchable.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.title}
-                </option>
-              ))}
-            </select>
-          )}
-          <button
-            data-testid="start-range"
-            onClick={() => setRangeMode((v) => !v)}
-            aria-pressed={rangeMode}
-          >
-            Comment on page range
-          </button>
-        </span>
-      </div>
-
-      {rangeMode && source && (
-        <div data-testid="range-selector" style={styles.rangeSelector}>
-          <label>
-            Start page{" "}
-            <select
-              data-testid="range-start"
-              value={rangeStart}
-              onChange={(e) => setRangeStart(Number(e.target.value))}
-            >
-              {Array.from({ length: source.pageCount }, (_, i) => (
-                <option key={i} value={i}>
-                  {i + 1}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            End page{" "}
-            <select
-              data-testid="range-end"
-              value={rangeEnd}
-              onChange={(e) => setRangeEnd(Number(e.target.value))}
-            >
-              {Array.from({ length: source.pageCount }, (_, i) => (
-                <option key={i} value={i}>
-                  {i + 1}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button data-testid="commit-range" onClick={commitRange}>
-            Create range annotation
-          </button>
-        </div>
-      )}
-
-      <div
-        ref={(el) => registerScroll(el)}
-        data-testid="pane-scroll"
-        data-source-id={sourceId}
-        style={styles.paneScroll}
-        onScroll={onScroll}
-      >
-        <div
-          ref={mountRef}
-          data-testid="pdf-mount"
-          style={styles.mount}
-          onMouseUp={onMouseUp}
-        />
-      </div>
-
-      {toolbar && (
-        <SelectionToolbar
-          toolbar={toolbar}
-          onCommit={commitHighlight}
-          onDismiss={() => setToolbar(null)}
-        />
-      )}
-
-      {openComment && (
-        <CommentSurface
-          // Keyed so switching to another annotation starts from THAT
-          // annotation's comment, not the previous one's unsaved draft.
-          key={openComment}
-          wb={wb}
-          annotationId={openComment}
-          onClose={() => setOpenComment(null)}
-          bump={bump}
-        />
-      )}
-
-      {menu && (
-        <AssociationMenu
-          key={menu.annotationId}
-          wb={wb}
-          menu={menu}
-          onClose={() => setMenu(null)}
-          bump={bump}
-        />
-      )}
-    </div>
-  );
-}
-
-/**
- * Compact selection controls (R01). ONLY highlight/underline + color — no
- * comment editor, node picker, category selector, or subject page.
- */
-function SelectionToolbar({
-  toolbar,
-  onCommit,
-  onDismiss,
-}: {
-  toolbar: ToolbarState;
-  onCommit: (style: AnnotationStyle) => void;
-  onDismiss: () => void;
-}): JSX.Element {
-  const [color, setColor] = useState<HighlightColor>("yellow");
-  return (
-    <div
-      data-testid="selection-toolbar"
-      role="toolbar"
-      aria-label="Highlight controls"
-      style={{
-        ...styles.floating,
-        left: Math.max(8, toolbar.x),
-        top: toolbar.y + window.scrollY + 6,
-      }}
-    >
-      <button
-        data-testid="commit-highlight"
-        onClick={() => onCommit({ kind: "highlight", color })}
-      >
-        Highlight
-      </button>
-      <button
-        data-testid="commit-underline"
-        onClick={() => onCommit({ kind: "underline", color })}
-      >
-        Underline
-      </button>
-      <div data-testid="color-controls" style={{ display: "flex", gap: "0.25rem" }}>
-        {HIGHLIGHT_COLORS.map((c) => (
-          <button
-            key={c}
-            data-testid={`color-${c}`}
-            aria-label={`Color ${c}`}
-            aria-pressed={color === c}
-            onClick={() => setColor(c)}
-            style={{
-              width: 18,
-              height: 18,
-              borderRadius: "50%",
-              border: color === c ? "2px solid #333" : "1px solid #bbb",
-              background: swatch(c),
-            }}
-          />
-        ))}
-      </div>
-      <button data-testid="dismiss-toolbar" aria-label="Dismiss" onClick={onDismiss}>
-        ×
-      </button>
-    </div>
-  );
-}
-
-/**
- * Quiet comment surface (R02, R10). Comments are hidden in normal reading and
- * revealed here only on explicit access. It is an anchored temporary surface
- * that leaves no persistent obstruction: closing it returns focus toward the
- * passage. On a failed save the draft is retained and an error is shown (R12).
- */
-function CommentSurface({
-  wb,
-  annotationId,
-  onClose,
-  bump,
-}: {
-  wb: Workbench;
-  annotationId: AnnotationId;
-  onClose: () => void;
-  bump: () => void;
-}): JSX.Element {
-  const view = wb.viewFor(annotationId);
-  const [draft, setDraft] = useState(view?.annotation.comment ?? "");
-  const [error, setError] = useState<string | null>(null);
-
-  const save = async (): Promise<void> => {
-    try {
-      await wb.setComment(annotationId, draft);
-      setError(null);
-      bump();
-      onClose();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      bump();
-    }
-  };
-
-  return (
-    <div
-      data-testid="comment-surface"
-      data-annotation-id={annotationId}
-      role="dialog"
-      aria-label="Annotation comment"
-      style={styles.commentSurface}
-    >
-      {view?.rangeLabel && (
-        <div data-testid="range-label" style={{ fontWeight: 600 }}>
-          {view.rangeLabel}
-        </div>
-      )}
-      <textarea
-        data-testid="comment-input"
-        value={draft}
-        placeholder="Add a quiet comment (optional)"
-        onChange={(e) => setDraft(e.target.value)}
-        style={{ width: "100%", minHeight: "4rem" }}
-      />
-      {error && (
-        <p data-testid="comment-error" role="alert" style={{ color: "#c5221f" }}>
-          Could not save: {error}. Your draft is kept.
-        </p>
-      )}
-      <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
-        <button data-testid="comment-cancel" onClick={onClose}>
-          Close
-        </button>
-        <button data-testid="comment-save" onClick={save}>
-          Save
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/**
- * Right-click / keyboard-menu equivalent (R15). Offers "Associate with
- * subject..." (tentative dotted) and a separate "Insert into subject page...".
- */
-function AssociationMenu({
-  wb,
-  menu,
-  onClose,
-  bump,
-}: {
-  wb: Workbench;
-  menu: MenuState;
-  onClose: () => void;
-  bump: () => void;
-}): JSX.Element {
-  const [picking, setPicking] = useState<null | "associate" | "insert">(null);
-  const [creating, setCreating] = useState(false);
-  const [newTitle, setNewTitle] = useState("");
-  const [query, setQuery] = useState("");
-  const pages = wb.rawData().pages.filter((p) => p.kind === "subject");
-  const matches = pages.filter((p) =>
-    p.title.toLowerCase().includes(query.toLowerCase()),
-  );
-
-  // Save failures are reported by the Reader's save-error banner; the change
-  // itself is kept in memory, so the menu closes normally either way.
-  const doAssociate = async (pageId: PageId): Promise<void> => {
-    await wb.associateWithSubject(menu.annotationId, pageId).catch(() => undefined);
-    bump();
-    onClose();
-  };
-  const doInsert = async (pageId: PageId): Promise<void> => {
-    await wb
-      .insertEvidenceIntoPage(menu.annotationId, pageId, { pos: null })
-      .catch(() => undefined);
-    // Open the subject for composition so the quote is visible in context.
-    wb.openSubjectPage(pageId);
-    bump();
-    onClose();
-  };
-  // DELIBERATE subject creation from the selected evidence (spec section 4.2).
-  const doCreate = async (): Promise<void> => {
-    const title = newTitle.trim();
-    if (!title) return;
-    // createSubjectFromAnnotation is two persists; on a failed save the page
-    // still exists in memory, so find it by the latest subject page.
-    const created = await wb
-      .createSubjectFromAnnotation(title, menu.annotationId)
-      .then((r) => r.page)
-      .catch(() => wb.rawData().pages.filter((p) => p.title === title).at(-1));
-    if (created) wb.openSubjectPage(created.id);
-    bump();
-    onClose();
-  };
-
-  return (
-    <div
-      data-testid="association-menu"
-      role="menu"
-      aria-label="Annotation actions"
-      style={{ ...styles.floating, left: menu.x, top: menu.y + window.scrollY }}
-    >
-      {!picking && !creating && (
-        <>
-          <button
-            data-testid="menu-create-subject"
-            role="menuitem"
-            onClick={() => setCreating(true)}
-          >
-            Create new subject from this…
-          </button>
-          <button
-            data-testid="menu-associate"
-            role="menuitem"
-            onClick={() => setPicking("associate")}
-          >
-            Associate with subject…
-          </button>
-          <button
-            data-testid="menu-insert"
-            role="menuitem"
-            onClick={() => setPicking("insert")}
-          >
-            Insert into subject page…
-          </button>
-          <button data-testid="menu-close" role="menuitem" onClick={onClose}>
-            Cancel
-          </button>
-        </>
-      )}
-      {creating && (
-        <div data-testid="create-subject">
-          <input
-            data-testid="new-subject-title"
-            autoFocus
-            placeholder="New subject title…"
-            value={newTitle}
-            onChange={(e) => setNewTitle(e.target.value)}
-            aria-label="New subject title"
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void doCreate();
-            }}
-          />
-          <button data-testid="create-subject-confirm" onClick={() => void doCreate()}>
-            Create and cite
-          </button>
-        </div>
-      )}
-      {picking && (
-        <div data-testid="subject-picker">
-          <input
-            data-testid="subject-search"
-            autoFocus
-            placeholder="Search subjects…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            aria-label="Search subjects"
-          />
-          <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-            {matches.map((p) => (
-              <li key={p.id}>
-                <button
-                  data-testid="subject-option"
-                  data-page-id={p.id}
-                  onClick={() => (picking === "associate" ? doAssociate(p.id) : doInsert(p.id))}
-                >
-                  {p.title}
-                </button>
-              </li>
-            ))}
-            {matches.length === 0 && (
-              <li data-testid="subject-empty" style={{ color: "#888" }}>
-                No subjects
-              </li>
-            )}
-          </ul>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/**
- * The highlights tab (sidebar). Lists annotations, distinguishes range
- * annotations from micro-highlights, and provides the ACCESSIBLE (non
- * right-click) path to the association actions via a menu-button (R15).
- */
-function HighlightsTab({
-  wb,
-  openSourceIds,
-  bump,
-}: {
-  wb: Workbench;
-  openSourceIds: readonly SourceId[];
-  bump: () => void;
-}): JSX.Element {
-  const [filter, setFilter] = useState<"all" | "range" | "micro">("all");
-  const [menuFor, setMenuFor] = useState<MenuState | null>(null);
-
-  const views = openSourceIds.flatMap((id) => wb.annotationsForSource(id));
-  const filtered = views.filter((v) =>
-    filter === "all" ? true : filter === "range" ? v.isRange : !v.isRange,
-  );
-
-  return (
-    <aside
-      data-testid="highlights-tab"
-      aria-label="Highlights"
-      style={styles.sidebar}
-    >
-      <h3 style={{ marginTop: 0 }}>Highlights</h3>
-      <div data-testid="highlights-filter" style={{ marginBottom: "0.5rem" }}>
-        {(["all", "range", "micro"] as const).map((f) => (
-          <button
-            key={f}
-            data-testid={`filter-${f}`}
-            aria-pressed={filter === f}
-            onClick={() => setFilter(f)}
-          >
-            {f}
-          </button>
-        ))}
-      </div>
-      <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-        {filtered.map((v) => (
-          <HighlightRow
-            key={v.annotation.id}
-            view={v}
-            onMenu={(x, y) =>
-              setMenuFor({
-                annotationId: v.annotation.id,
-                sourceId: v.annotation.sourceId,
-                x,
-                y,
-              })
-            }
-          />
-        ))}
-        {filtered.length === 0 && (
-          <li data-testid="highlights-empty" style={{ color: "#888" }}>
-            No highlights
-          </li>
-        )}
-      </ul>
-      {menuFor && (
-        <AssociationMenu
-          key={menuFor.annotationId}
-          wb={wb}
-          menu={menuFor}
-          onClose={() => setMenuFor(null)}
-          bump={bump}
-        />
-      )}
-    </aside>
-  );
-}
-
-function HighlightRow({
-  view,
-  onMenu,
-}: {
-  view: AnnotationView;
-  onMenu: (x: number, y: number) => void;
-}): JSX.Element {
-  const label = view.isRange
-    ? view.rangeLabel
-    : view.annotation.scope.kind === "text"
-      ? view.annotation.scope.anchor.selectedText.slice(0, 40)
-      : "";
-  return (
-    <li
-      data-testid="highlight-row"
-      data-annotation-id={view.annotation.id}
-      data-range={view.isRange ? "true" : "false"}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "0.4rem",
-        padding: "0.3rem 0",
-        borderBottom: "1px solid #eee",
-      }}
-    >
-      {view.isRange && (
-        <span data-testid="range-badge" style={styles.rangeBadge}>
-          range
-        </span>
-      )}
-      {view.resolution.kind !== "resolved" && (
-        <span
-          data-testid="resolution-badge"
-          data-resolution={view.resolution.kind}
-          title={
-            view.resolution.kind === "mismatched"
-              ? "Source edition changed since this highlight was made"
-              : view.resolution.reason
-          }
-          style={{ color: "#c5221f", fontSize: "0.75rem" }}
-        >
-          ⚠ {view.resolution.kind}
-        </span>
-      )}
-      <span style={{ flex: 1, fontSize: "0.85rem" }}>{label}</span>
-      {view.references.some((r) => r.status === "tentative") && (
-        <span data-testid="dotted-indicator" title="Tentative association">
-          ┄
-        </span>
-      )}
-      {view.references.some((r) => r.status === "cited") && (
-        <span data-testid="solid-indicator" title="Cited">
-          ━
-        </span>
-      )}
-      <button
-        data-testid="row-actions"
-        aria-haspopup="menu"
-        aria-label="Annotation actions"
-        onClick={(e) => {
-          const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-          onMenu(r.left, r.bottom);
-        }}
-      >
-        ⋯
-      </button>
-    </li>
-  );
-}
-
-/** Draw one annotation's overlay(s) across the rendered pages. */
-export function drawAnnotation(
-  view: AnnotationView,
-  pages: readonly RenderedPage[],
-  suppressMotion: boolean,
-  animate: boolean,
-): void {
-  if (view.annotation.scope.kind === "text") {
-    const anchor = view.annotation.scope.anchor;
-    const page = pages.find(
-      (p) => Number(p.container.dataset.pageIndex ?? "-1") === anchor.pageIndex,
-    );
-    if (!page) return;
-    const el = renderHighlightOverlay(page.textLayer, {
-      kind: view.style.kind,
-      color: view.style.color,
-      rects: anchor.rects,
-      animate,
-      suppressMotion,
-      annotationId: view.annotation.id,
-    });
-    markResolution(el, view);
-  } else {
-    const { startPageIndex, endPageIndex } = view.annotation.scope.anchor;
-    for (let pi = startPageIndex; pi <= endPageIndex; pi++) {
-      const page = pages.find(
-        (p) => Number(p.container.dataset.pageIndex ?? "-1") === pi,
-      );
-      if (!page) continue;
-      const el = renderHighlightOverlay(page.textLayer, {
-        kind: view.style.kind,
-        color: view.style.color,
-        rects: [],
-        animate: false,
-        suppressMotion,
-        annotationId: view.annotation.id,
-        pageBorder: true,
-      });
-      markResolution(el, view);
-    }
-  }
-}
-
-/**
- * Make anchor health explicit on the overlay (never silently drawn as if it
- * were fine): a highlight whose source edition changed is drawn at its stored
- * position but visibly marked as possibly misplaced.
- */
-function markResolution(el: HTMLElement, view: AnnotationView): void {
-  el.dataset.resolution = view.resolution.kind;
-  if (view.resolution.kind === "resolved") return;
-  el.style.opacity = "0.45";
-  el.style.outline = "2px dashed #c5221f";
-  el.title =
-    view.resolution.kind === "mismatched"
-      ? "Source edition changed since this highlight was made — its position may be wrong."
-      : `Highlight could not be located: ${view.resolution.reason}`;
-}
-
-function swatch(c: HighlightColor): string {
-  return { yellow: "#ffdd57", green: "#82dc96", blue: "#82beff", pink: "#ff96c8" }[c];
-}
-
-/**
- * The passage-to-evidence line layer for the editing workspace (spec section
- * 10.2). It draws one SVG polyline per `passageEvidenceLine`, routing from the
- * source pane's edge toward the subject pane through the inter-pane margin so
- * it NEVER crosses over readable text. Lines recompute on source scroll, editor
- * scroll, zoom and pane resize via a live geometry pass over the registered
- * pane scroll containers + evidence chips. The visibility toggle controls only
- * whether this layer renders — the underlying line DATA is always present, so
- * hiding is non-destructive (A08/R08 foundation). There is NO camera motion:
- * the layer never scrolls or re-centres any pane.
- */
-function PassageEvidenceLines({
-  wb,
-  bodyRef,
-  paneScrollRefs,
-  visible,
-  bump,
-}: {
-  wb: Workbench;
-  bodyRef: React.RefObject<HTMLDivElement>;
-  paneScrollRefs: React.MutableRefObject<Map<string, HTMLElement>>;
-  visible: boolean;
-  bump: () => void;
-}): JSX.Element {
-  const [segments, setSegments] = useState<
-    { evidenceId: string; x1: number; y1: number; x2: number; y2: number }[]
-  >([]);
-  const frame = useRef<number>(0);
-
-  const recompute = useCallback(() => {
-    const body = bodyRef.current;
-    if (!body) return;
-    const bodyBox = body.getBoundingClientRect();
-    const lines = wb.passageEvidenceLines();
-    const subjectEl = paneScrollRefs.current.get("subject");
-    const next: typeof segments = [];
-    for (const line of lines) {
-      const sourceScroll = paneScrollRefs.current.get(line.sourceId);
-      if (!sourceScroll || !subjectEl) continue;
-      // Anchor the source end at the source passage's page container when it is
-      // on screen; otherwise at the pane's vertical centre (still no motion).
-      const pageEl = sourceScroll.querySelector(
-        `.pdf-page[data-page-index="${line.sourcePageIndex}"]`,
-      ) as HTMLElement | null;
-      const srcBox = (pageEl ?? sourceScroll).getBoundingClientRect();
-      const paneBox = sourceScroll.getBoundingClientRect();
-      // Clamp the source y into the visible pane band so a scrolled-away
-      // passage still yields a sensible margin endpoint (never off-canvas).
-      const srcY = Math.min(
-        Math.max(srcBox.top + srcBox.height / 2, paneBox.top + 6),
-        paneBox.bottom - 6,
-      );
-      // The subject end anchors at the matching evidence chip if present.
-      const chip = subjectEl.querySelector(
-        `[data-testid="evidence-chip"][data-evidence-id="${line.evidenceId}"]`,
-      ) as HTMLElement | null;
-      const subjBox = subjectEl.getBoundingClientRect();
-      const dstBox = chip ? chip.getBoundingClientRect() : subjBox;
-      const dstY = Math.min(
-        Math.max(dstBox.top + dstBox.height / 2, subjBox.top + 6),
-        subjBox.bottom - 6,
-      );
-      // Route from the source pane's INNER edge (toward the subject) to the
-      // subject pane's INNER edge — i.e. through the inter-pane gutter.
-      const sourceLeftOfSubject = paneBox.left < subjBox.left;
-      const x1 = (sourceLeftOfSubject ? paneBox.right : paneBox.left) - bodyBox.left;
-      const x2 = (sourceLeftOfSubject ? subjBox.left : subjBox.right) - bodyBox.left;
-      next.push({
-        evidenceId: line.evidenceId,
-        x1,
-        y1: srcY - bodyBox.top,
-        x2,
-        y2: dstY - bodyBox.top,
-      });
-    }
-    setSegments(next);
-  }, [wb, bodyRef, paneScrollRefs]);
-
-  // Recompute on any scroll (source or editor), resize, and after mount. We use
-  // rAF-coalesced passive listeners so dragging a divider or scrolling a pane
-  // updates lines smoothly without obstructing interaction, and without ever
-  // moving a pane (presentation only, no camera motion).
-  useEffect(() => {
-    const schedule = (): void => {
-      cancelAnimationFrame(frame.current);
-      frame.current = requestAnimationFrame(recompute);
-    };
-    schedule();
-    const scrolls = [...paneScrollRefs.current.values()];
-    // The subject editor's inner scroller (styles.doc) is the element that
-    // actually scrolls the composition, so listen there too (editor scroll).
-    const subjectWrapper = paneScrollRefs.current.get("subject");
-    const subjectDoc = subjectWrapper?.querySelector(
-      '[data-testid="subject-doc"]',
-    ) as HTMLElement | null;
-    const listenEls = subjectDoc ? [...scrolls, subjectDoc] : scrolls;
-    for (const el of listenEls) el.addEventListener("scroll", schedule, { passive: true });
-    window.addEventListener("resize", schedule);
-    const ro = new ResizeObserver(schedule);
-    if (bodyRef.current) ro.observe(bodyRef.current);
-    for (const el of scrolls) ro.observe(el);
-    return () => {
-      cancelAnimationFrame(frame.current);
-      for (const el of listenEls) el.removeEventListener("scroll", schedule);
-      window.removeEventListener("resize", schedule);
-      ro.disconnect();
-    };
-    // `bump` is intentionally not a dep; recompute closes over live refs.
-  }, [recompute, paneScrollRefs, bodyRef, bump]);
-
-  const count = segments.length;
-
-  return (
-    <svg
-      data-testid="passage-evidence-lines"
-      data-visible={visible ? "true" : "false"}
-      data-line-count={String(count)}
-      style={{
-        position: "absolute",
-        inset: 0,
-        width: "100%",
-        height: "100%",
-        pointerEvents: "none",
-        // The toggle changes PRESENTATION ONLY: hidden lines keep their data
-        // (data-line-count stays accurate) but are not painted.
-        visibility: visible ? "visible" : "hidden",
-        zIndex: 5,
-      }}
-      aria-hidden="true"
-    >
-      {segments.map((s) => {
-        const midX = (s.x1 + s.x2) / 2;
-        return (
-          <path
-            key={s.evidenceId}
-            data-testid="evidence-line"
-            data-evidence-id={s.evidenceId}
-            d={`M ${s.x1} ${s.y1} C ${midX} ${s.y1}, ${midX} ${s.y2}, ${s.x2} ${s.y2}`}
-            fill="none"
-            stroke="#1a56db"
-            strokeWidth={1.5}
-            strokeOpacity={0.55}
-            strokeDasharray="4 3"
-          />
-        );
-      })}
-    </svg>
-  );
-}
-
-const styles: Record<string, React.CSSProperties> = {
-  root: { display: "flex", flexDirection: "column", height: "100vh" },
-  toolbar: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: "1rem",
-    padding: "0.5rem 1rem",
-    borderBottom: "1px solid #ddd",
-    background: "#fafafa",
-  },
-  body: { display: "flex", flex: 1, overflow: "hidden" },
-  main: {
-    flex: 1,
-    position: "relative",
-    overflow: "hidden",
-    display: "flex",
-    alignItems: "stretch",
-  },
-  pane: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
-    minHeight: 0,
-    minWidth: 0,
-    borderRight: "1px solid #eee",
-  },
-  paneScroll: {
-    flex: 1,
-    minHeight: 0,
-    overflow: "auto",
-    padding: "1rem",
-  },
-  divider: {
-    flex: "0 0 8px",
-    cursor: "col-resize",
-    background: "#e6e6e6",
-    borderLeft: "1px solid #d4d4d4",
-    borderRight: "1px solid #d4d4d4",
-    alignSelf: "stretch",
-  },
-  responsiveStub: {
-    padding: "0.75rem 1rem",
-    margin: "0.5rem",
-    background: "#fff4e5",
-    border: "1px solid #f0c38a",
-    borderRadius: "6px",
-    color: "#7a4b00",
-    fontSize: "0.85rem",
-  },
-  paneHeader: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: "1rem",
-    marginBottom: "0.5rem",
-  },
-  rangeSelector: {
-    display: "flex",
-    gap: "0.75rem",
-    alignItems: "center",
-    padding: "0.5rem",
-    background: "#eef4ff",
-    borderRadius: "6px",
-    marginBottom: "0.5rem",
-  },
-  mount: { position: "relative" },
-  sidebar: {
-    width: "20rem",
-    minWidth: "20rem",
-    borderLeft: "1px solid #ddd",
-    padding: "1rem",
-    overflow: "auto",
-    background: "#fcfcfc",
-  },
-  floating: {
-    position: "absolute",
-    zIndex: 1000,
-    display: "flex",
-    gap: "0.4rem",
-    alignItems: "center",
-    padding: "0.35rem 0.5rem",
-    background: "#fff",
-    border: "1px solid #ccc",
-    borderRadius: "8px",
-    boxShadow: "0 4px 16px rgba(0,0,0,0.15)",
-    flexWrap: "wrap",
-  },
-  commentSurface: {
-    position: "absolute",
-    zIndex: 1001,
-    top: "20%",
-    left: "50%",
-    transform: "translateX(-50%)",
-    width: "22rem",
-    padding: "0.75rem",
-    background: "#fff",
-    border: "1px solid #ccc",
-    borderRadius: "8px",
-    boxShadow: "0 6px 24px rgba(0,0,0,0.2)",
-  },
-  rangeBadge: {
-    fontSize: "0.65rem",
-    background: "#1a56db",
-    color: "#fff",
-    borderRadius: "4px",
-    padding: "0 0.3rem",
-  },
-  saveError: {
-    padding: "0.5rem 1rem",
-    background: "#fdecea",
-    borderBottom: "1px solid #f5c2c0",
-    color: "#8a1c14",
-    fontSize: "0.85rem",
-  },
-  returnNotice: {
-    padding: "0.5rem 1rem",
-    background: "#fff4e5",
-    borderBottom: "1px solid #f0c38a",
-    color: "#7a4b00",
-    fontSize: "0.85rem",
-  },
-};

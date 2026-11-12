@@ -1,0 +1,16 @@
+{
+  // Type-check configuration for the EXPERIMENTAL research area that is kept
+  // out of the default production typecheck (tsconfig.json). Currently this is
+  // the FEAT-005C independent-renderer validation, whose bundled corpus and
+  // metrics are unfinished and do not yet satisfy the repo's strict checks.
+  //
+  // Run with: npm run research:independent:typecheck
+  //
+  // This is intentionally NOT part of `npm run typecheck` / `npm run build` so
+  // ongoing research never blocks the shippable product. It exists so the
+  // research code is preserved AND remains independently buildable as work
+  // continues.
+  "extends": "./tsconfig.json",
+  "include": ["src/science/research/skeleton/independent"],
+  "exclude": ["node_modules", "dist"]
+}

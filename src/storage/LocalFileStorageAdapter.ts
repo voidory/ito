@@ -1,5 +1,6 @@
 import { openDB, type IDBPDatabase } from "idb";
 import {
+  MIGRATIONS,
   SCHEMA_VERSION,
   type BrainData,
   type BrainId,
@@ -49,6 +50,10 @@ export class LocalFileStorageAdapter implements StorageAdapter {
   private readonly migrations: Map<number, Migration> = new Map();
 
   constructor(migrations?: Iterable<readonly [number, Migration]>) {
+    // Seed with the shared model-layer migration steps (the SAME registry the
+    // pure migrateBrainData runner uses) so a v1 brain read from IndexedDB and
+    // a restored backup migrate identically. Explicit overrides win.
+    for (const [from, fn] of MIGRATIONS) this.migrations.set(from, fn);
     if (migrations) {
       for (const [from, fn] of migrations) this.migrations.set(from, fn);
     }
@@ -113,7 +118,7 @@ export class LocalFileStorageAdapter implements StorageAdapter {
     const brainId = data.manifest.brainId;
 
     // (1) Write to a staged key, distinct from any live payload.
-    const stagedKey = `${brainId}:staged:${data.manifest.publicationRevision}`;
+    const stagedKey = stagedKeyFor(brainId, data.manifest.publicationRevision);
     const payload: StoredPayload = { key: stagedKey, data };
     {
       const tx = db.transaction(STORE_PAYLOAD, "readwrite");
@@ -152,14 +157,16 @@ export class LocalFileStorageAdapter implements StorageAdapter {
 
   private async collectSupersededPayloads(brainId: BrainId, liveRevision: number): Promise<void> {
     const db = await this.db();
-    const prefix = `${brainId}:staged:`;
+    const prefix = stagedKeyPrefix(brainId);
     const tx = db.transaction(STORE_PAYLOAD, "readwrite");
     const keys = (await tx.store.getAllKeys(
-      IDBKeyRange.bound(prefix, `${prefix}￿`),
+      IDBKeyRange.bound(prefix, `${prefix}\uffff`),
     )) as string[];
-    for (const key of keys) {
-      const rev = Number(key.slice(prefix.length));
-      if (Number.isFinite(rev) && rev < liveRevision) await tx.store.delete(key);
+    // Delegate the "which keys are strictly older than the live revision"
+    // decision to a pure, unit-tested helper so the deletion policy is pinned
+    // without an IndexedDB round-trip.
+    for (const key of supersededStagedKeys(keys, liveRevision, brainId)) {
+      await tx.store.delete(key);
     }
     await tx.done;
   }
@@ -167,10 +174,10 @@ export class LocalFileStorageAdapter implements StorageAdapter {
   /** Test/diagnostic helper: the payload keys currently stored for a brain. */
   async payloadKeysForTest(brainId: BrainId): Promise<string[]> {
     const db = await this.db();
-    const prefix = `${brainId}:staged:`;
+    const prefix = stagedKeyPrefix(brainId);
     return (await db.getAllKeys(
       STORE_PAYLOAD,
-      IDBKeyRange.bound(prefix, `${prefix}￿`),
+      IDBKeyRange.bound(prefix, `${prefix}\uffff`),
     )) as string[];
   }
 
@@ -195,6 +202,17 @@ export class LocalFileStorageAdapter implements StorageAdapter {
     if (!readBack || readBack.byteLength !== bytes.byteLength) {
       throw new WriteVerificationError(`asset ${key} read-back length mismatch`);
     }
+  }
+
+  /**
+   * Delete only the stored binary asset bytes (A17 offline eviction). No-op if
+   * the key is absent; never touches payloads/pointers (structured records).
+   */
+  async deletePdfBinary(brainId: BrainId, assetId: string): Promise<void> {
+    const db = await this.db();
+    const tx = db.transaction(STORE_ASSETS, "readwrite");
+    await tx.store.delete(assetKey(brainId, assetId));
+    await tx.done;
   }
 
   /**
@@ -225,6 +243,37 @@ export class LocalFileStorageAdapter implements StorageAdapter {
 
 function assetKey(brainId: BrainId, assetId: string): string {
   return `${brainId}/${assetId}`;
+}
+
+/** The shared staged-payload key prefix for a brain (`${brainId}:staged:`). */
+export function stagedKeyPrefix(brainId: BrainId): string {
+  return `${brainId}:staged:`;
+}
+
+/** The staged-payload key for a specific brain + publication revision. */
+export function stagedKeyFor(brainId: BrainId, revision: number): string {
+  return `${stagedKeyPrefix(brainId)}${revision}`;
+}
+
+/**
+ * Pure selection of the staged payload keys that are SUPERSEDED by the live
+ * revision and therefore safe to delete. A key is superseded only when its
+ * parsed revision is a finite number STRICTLY LESS than `liveRevision`; the
+ * live key (and anything newer, or anything unparseable) is always kept. This
+ * is the single source of truth for the cleanup-on-write deletion policy, kept
+ * pure so it can be unit-tested without an IndexedDB round-trip.
+ */
+export function supersededStagedKeys(
+  keys: readonly string[],
+  liveRevision: number,
+  brainId: BrainId,
+): string[] {
+  const prefix = stagedKeyPrefix(brainId);
+  return keys.filter((key) => {
+    if (!key.startsWith(prefix)) return false;
+    const rev = Number(key.slice(prefix.length));
+    return Number.isFinite(rev) && rev < liveRevision;
+  });
 }
 
 /**

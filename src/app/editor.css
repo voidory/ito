@@ -41,6 +41,56 @@
   padding: 0;
 }
 
+/*
+ * FEAT-002 (2.3a) dynamic on-theme watercolor text selection. The native
+ * ::selection paint over the transparent text layer uses a soft translucent
+ * tint matching the active highlight palette so selecting glyphs feels organic
+ * and on-theme rather than the stark browser-blue block. The live preview pills
+ * (rendered on the fixed layer during a drag) are soft-rounded + translucent.
+ */
+.textLayer ::selection {
+  background: rgba(255, 221, 87, 0.4);
+}
+.textLayer ::-moz-selection {
+  background: rgba(255, 221, 87, 0.4);
+}
+
+.ito-selection-live-preview {
+  /* A soft, organic watercolor pill; motion-free so it is always safe. */
+  box-shadow: 0 1px 4px rgba(44, 74, 111, 0.15);
+}
+
+/* FEAT-002 (2.4a) area-select mode shows a crosshair + disables text select. */
+.ito-area-select-active,
+.ito-area-select-active .pdf-page-stage {
+  cursor: crosshair;
+}
+.ito-area-select-active .textLayer {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* FEAT-002 (2.2a) the selected highlight's fragments get an accent outline. */
+.ito-highlight[data-selected="true"] .ito-highlight-fragment,
+.ito-highlight[data-selected="true"] .ito-highlight-area {
+  outline: 2px solid var(--ito-accent, #2c4a6f);
+  outline-offset: 1px;
+}
+
+/*
+ * FEAT-002 (2.2.1) keep highlight fragments pointer-transparent DURING a
+ * pointer drag so a text selection can always start or pass THROUGH already
+ * highlighted text. Outside a drag the fragments remain hit-testable so a
+ * direct click still lands on them; 1-click edit + right-click are resolved by
+ * coordinate hit-testing on the stage regardless.
+ */
+[data-pointer-dragging="true"] .ito-highlight-fragment {
+  pointer-events: none;
+}
+.ito-area-select-active .ito-highlight-fragment {
+  pointer-events: none;
+}
+
 /* A copied-in annotation comment: clearly marked, never ordinary writing. */
 p.copied-comment {
   border-left: 3px solid #1a56db;
@@ -56,4 +106,141 @@ p.copied-comment::before {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: #1a56db;
+}
+
+/*
+ * M14–M16 (FEAT-001/003) an informal BRIDGING NOTE: the user's own commentary
+ * paragraph inserted between two cited quotes to annotate their connection.
+ * Visually distinct from both ordinary writing and copied comments.
+ */
+p.bridging-note {
+  border-left: 3px dashed #b45309;
+  padding-left: 0.5rem;
+  color: #3a2f1e;
+  background: #fdf6ec;
+  font-style: italic;
+}
+
+p.bridging-note::before {
+  content: "bridging note · ";
+  font-size: 0.7rem;
+  font-style: normal;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #b45309;
+}
+
+/*
+ * M14–M16 (FEAT-003) a Synthesis / Observation Callout block inserted from the
+ * formatting toolbar: an emphasised band for the author's own synthesis.
+ */
+p.synthesis-callout {
+  border-left: 4px solid #0f766e;
+  padding: 0.4rem 0.6rem;
+  color: #134e4a;
+  background: #ecfdf5;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+p.synthesis-callout::before {
+  content: "synthesis · ";
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #0f766e;
+}
+
+/* M14–M16 (FEAT-002) the unstirred watercolour curl ribbons honour motion
+   suppression: when the canvas shell suppresses motion the marbling warp stays
+   static (the filter is still applied, only any future animation is paused). */
+[data-suppress-motion="true"] .ito-curl-ribbons {
+  animation: none;
+}
+
+/* M14–M16 (FEAT-002) 220ms camera-dive transition on the Nodes canvas shell. */
+.nodes-canvas-shell[data-camera-diving="true"] .nodes-canvas {
+  transition: transform 220ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/*
+ * FIX-HIGHLIGHT-OFFSET (spec 3.1): the essential pdfjs-dist v4 .textLayer CSS
+ * rules. Without these the text spans do NOT align 1:1 with the canvas glyphs
+ * (they drift on multi-column + rotated pages and float near the top), which
+ * is the root of the highlight-offset bug. The highlight overlays are measured
+ * relative to the STAGE / .textLayer, so once these rules keep the spans
+ * aligned, the overlays sit directly over the selected glyphs.
+ */
+.textLayer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  line-height: 1;
+  text-size-adjust: none;
+}
+
+.textLayer span,
+.textLayer br {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+
+/*
+ * M13 FEAT-001 — rotated-page text-layer alignment.
+ *
+ * pdf.js's `TextLayer` builder lays its spans out in the page's UNROTATED
+ * coordinate system (the container is sized to the raw `pageWidth x pageHeight`
+ * and the spans are positioned as percentages of that box). It then tags the
+ * container with `data-main-rotation` and expects the HOST to visually rotate
+ * the whole layer so it overlays the rotated canvas raster. The pdfjs-dist v4
+ * stylesheet ships the canvas rotation for the full viewer but NOT a
+ * standalone `.textLayer[data-main-rotation]` rule, so without this the text
+ * spans for a 90/180/270 page stay horizontal in the top-left corner while the
+ * canvas shows vertical glyphs — selection then misses the visible text.
+ *
+ * The exact rotate()+translate() is applied in `renderPage` (src/pdf/render.ts)
+ * using the live rotated viewport dimensions, because the translate distances
+ * depend on the page's scaled width/height (which CSS percentage translate
+ * cannot express for the cross-axis). `transform-origin: 0 0` keeps the pivot
+ * at the layer's top-left so the inline transform re-registers the box over the
+ * stage exactly.
+ */
+.textLayer[data-main-rotation] {
+  transform-origin: 0 0;
+}
+
+/*
+ * FIX-HIGHLIGHT-OFFSET (3.1) page structure. The outer `.pdf-page` wrapper
+ * stacks a page header ABOVE the inner stage; the stage is the exact viewport
+ * box that all overlays position against.
+ */
+.pdf-page {
+  margin: 0 auto 1rem;
+}
+
+.pdf-page-header {
+  font-size: 0.75rem;
+  color: #888;
+  padding: 0.15rem 0;
+  letter-spacing: 0.03em;
+}
+
+.pdf-page-stage {
+  position: relative;
+  /*
+   * FIX-HORIZONTAL-HIGHLIGHT-DRIFT (3.1): the stage, its <canvas>, its
+   * .textLayer and the highlight overlay stay locked at 1:1 pixel dimensions.
+   * NEVER apply `max-width: 100%` here (nor to the canvas independently): that
+   * shrinks the stage box while the canvas keeps its intrinsic pixel width, so
+   * the normalized overlay geometry drifts horizontally away from the glyphs.
+   * Narrow-pane auto-fit is instead applied by the Reader, which re-renders
+   * each page at a pane-fitted scale (`renderPage`/`rerender`) so canvas, text
+   * layer and overlays all shrink together and stay aligned. Anchor geometry is
+   * normalized strictly against `stage.getBoundingClientRect()`.
+   */
+  transform-origin: top left;
 }

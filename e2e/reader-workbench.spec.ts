@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { clickCenter } from "./helpers";
 
 /**
  * M1 READING WORKBENCH — runtime validation in real chromium (spec section 24,
@@ -43,10 +44,11 @@ async function openFirstDocument(page: Page, titleMatch?: RegExp): Promise<void>
 /** The fixture contains "quick brown fox" on each page. */
 const NEEDLE = "quick brown fox";
 
-test("library is the default view and lists imported PDFs by category", async ({ page }) => {
+test("library is the default view and lists imported PDFs in one flat table", async ({ page }) => {
   await bootLibrary(page);
   await expect(page.getByTestId("library")).toHaveAttribute("data-view", "library");
-  await expect(page.getByTestId("library-category").first()).toBeVisible();
+  await expect(page.getByTestId("library-table")).toBeVisible();
+  await expect(page.getByTestId("library-category")).toHaveCount(0);
   // Two real fixtures imported.
   expect(await page.getByTestId("library-item").count()).toBeGreaterThanOrEqual(2);
 });
@@ -131,12 +133,60 @@ test("R11: OS prefers-reduced-motion suppresses the commit animation but keeps t
   await expect(frag).toHaveAttribute("data-animated", "false");
 });
 
+test("reader overflow menu escapes the toolbar scroll container", async ({ page }) => {
+  await openFirstDocument(page);
+
+  const toolbar = page.getByTestId("reader-toolbar");
+  const button = page.getByTestId("pane-overflow-menu-btn");
+  await button.click();
+
+  const menu = page.getByTestId("pane-overflow-menu");
+  await expect(menu).toBeVisible();
+
+  const geometry = await page.evaluate(() => {
+    const toolbar = document.querySelector<HTMLElement>('[data-testid="reader-toolbar"]');
+    const menu = document.querySelector<HTMLElement>('[data-testid="pane-overflow-menu"]');
+    const layer = document.querySelector<HTMLElement>('[data-testid="ito-popover-layer"]');
+    if (!toolbar || !menu || !layer) return null;
+    const toolbarRect = toolbar.getBoundingClientRect();
+    const menuRect = menu.getBoundingClientRect();
+    return {
+      toolbar: { top: toolbarRect.top, bottom: toolbarRect.bottom, height: toolbarRect.height },
+      menu: { top: menuRect.top, bottom: menuRect.bottom, left: menuRect.left, right: menuRect.right },
+      layerPosition: getComputedStyle(layer).position,
+      menuParent: menu.parentElement?.parentElement?.tagName,
+      menuWithinToolbar: toolbar.contains(menu),
+    };
+  });
+
+  expect(geometry).not.toBeNull();
+  expect(geometry!.menuWithinToolbar).toBe(false);
+  expect(geometry!.layerPosition).toBe("fixed");
+  expect(geometry!.menu.top).toBeGreaterThanOrEqual(geometry!.toolbar.bottom);
+  expect(geometry!.menu.left).toBeGreaterThanOrEqual(0);
+  expect(geometry!.menu.right).toBeLessThanOrEqual(page.viewportSize()!.width);
+
+  // A wheel gesture over the reader must not vertically scroll the toolbar.
+  const toolbarBefore = await toolbar.evaluate((el) => el.scrollTop);
+  // The wheel must be over the reader's scrollable pane (the toolbar itself no
+  // longer scrolls), so the pane scrolls and the open menu dismisses.
+  const pane = await page.getByTestId("pane-scroll").first().boundingBox();
+  expect(pane).not.toBeNull();
+  await page.mouse.move(pane!.x + pane!.width / 2, pane!.y + pane!.height / 2);
+  await page.mouse.wheel(0, 500);
+  await expect.poll(() => toolbar.evaluate((el) => el.scrollTop)).toBe(toolbarBefore);
+  await expect(menu).toBeHidden();
+});
+
 test("R11: the in-app suppress-motion setting also removes the animation", async ({
   page,
 }) => {
-  // OS motion preference left at default; use the in-app toggle instead.
+  // OS motion preference left at default; use the in-app toggle instead. The
+  // suppress-motion control now lives in the reader toolbar's overflow menu
+  // (M9 single-toolbar rework).
   await openFirstDocument(page);
-  await page.getByTestId("suppress-motion").check();
+  await page.getByTestId("pane-overflow-menu-btn").click();
+  await page.getByTestId("overflow-suppress-motion").click();
   await page.evaluate((n) => window.__ito.selectText(n, 0), NEEDLE);
   await page.getByTestId("commit-highlight").click();
   const frag = page.locator(".ito-highlight-fragment").first();
@@ -156,16 +206,59 @@ test("R02: a highlight saves quiet; comment is hidden until explicit reveal, the
   await expect(page.getByTestId("comment-surface")).toHaveCount(0);
 
   // Explicit reveal: click the annotation overlay.
-  await page.locator(".ito-highlight-fragment").first().click();
+  await clickCenter(page, page.locator(".ito-highlight-fragment").first());
   const surface = page.getByTestId("comment-surface");
   await expect(surface).toBeVisible();
-  await page.getByTestId("comment-input").fill("a quiet thought");
+  const commentInput = page.getByTestId("comment-input");
+  const originalViewport = page.viewportSize() ?? { width: 1280, height: 720 };
+
+  for (const width of [originalViewport.width, 320]) {
+    await page.setViewportSize({ width, height: originalViewport.height });
+    const measureLayout = (): Promise<{
+      fitsWithinPopover: boolean;
+      fitsWithinViewport: boolean;
+      boxSizing: string;
+      maxWidth: string;
+    } | null> =>
+      page.evaluate(() => {
+      const popover = document.querySelector<HTMLElement>('[data-testid="highlight-edit-popover"]');
+      const textarea = document.querySelector<HTMLTextAreaElement>('[data-testid="comment-input"]');
+      if (!popover || !textarea) return null;
+      const popoverRect = popover.getBoundingClientRect();
+      const textareaRect = textarea.getBoundingClientRect();
+      const popoverStyle = getComputedStyle(popover);
+      const textareaStyle = getComputedStyle(textarea);
+      const innerLeft = popoverRect.left +
+        Number.parseFloat(popoverStyle.borderLeftWidth) +
+        Number.parseFloat(popoverStyle.paddingLeft);
+      const innerRight = popoverRect.right -
+        Number.parseFloat(popoverStyle.borderRightWidth) -
+        Number.parseFloat(popoverStyle.paddingRight);
+      return {
+        fitsWithinPopover: textareaRect.left >= innerLeft - 0.5 && textareaRect.right <= innerRight + 0.5,
+        fitsWithinViewport: popoverRect.left >= 0 && popoverRect.right <= window.innerWidth,
+        boxSizing: textareaStyle.boxSizing,
+        maxWidth: textareaStyle.maxWidth,
+      };
+    });
+    // The popover re-clamps to the viewport after the resize event is handled,
+    // so wait for the layout to settle instead of measuring in the same tick.
+    await expect.poll(async () => (await measureLayout())?.fitsWithinViewport).toBe(true);
+    const layout = await measureLayout();
+    expect(layout?.fitsWithinPopover).toBe(true);
+    expect(layout?.fitsWithinViewport).toBe(true);
+    expect(layout?.boxSizing).toBe("border-box");
+    expect(layout?.maxWidth).toBe("100%");
+  }
+
+  await page.setViewportSize(originalViewport);
+  await commentInput.fill("a quiet thought");
   await page.getByTestId("comment-save").click();
   // Returns toward the passage, leaving no persistent obstruction.
   await expect(surface).toHaveCount(0);
 
   // Reopen round-trip: the comment persists and re-reveals.
-  await page.locator(".ito-highlight-fragment").first().click();
+  await clickCenter(page, page.locator(".ito-highlight-fragment").first());
   await expect(page.getByTestId("comment-input")).toHaveValue("a quiet thought");
   await page.getByTestId("comment-cancel").click();
   await expect(page.getByTestId("comment-surface")).toHaveCount(0);
@@ -189,25 +282,42 @@ test("R03 + R04 + R16 + R17: a 3-page range annotation is one identity with bord
   const border = page.locator(".ito-highlight-border").first();
   await expect(border).toBeVisible();
 
-  // Also add a micro-highlight inside the range.
-  await page.evaluate((n) => window.__ito.selectText(n, 1), NEEDLE);
+  // Also add a micro-highlight inside the range. Scroll page 2 into view first:
+  // selectText drives the real mouseup but cannot scroll, and the selection
+  // popup anchors to the (otherwise off-screen) selection.
+  await page.evaluate(() =>
+    document
+      .querySelector('.pdf-page[data-page-index="1"]')
+      ?.scrollIntoView({ block: "start" }),
+  );
+  // Retry until page 2's text layer is rendered and the selection takes.
+  await expect
+    .poll(() => page.evaluate((n) => window.__ito.selectText(n, 1), NEEDLE))
+    .toBe(true);
   await page.getByTestId("commit-highlight").click();
 
   // R03/R04: one range identity + one independent micro-highlight = 2 records.
   expect(await page.evaluate(() => window.__ito.annotationCount())).toBe(2);
 
-  // R17: the range is filterable and shows "pp. 1-3" when opened.
+  // R17: both annotations list in the annotations-only sidebar; the range card
+  // carries a "pp. 1-3" badge. The text search isolates each by its quote.
   await page.getByTestId("toggle-highlights-tab").click();
-  await page.getByTestId("filter-range").click();
+  await expect(page.getByTestId("highlight-row")).toHaveCount(2);
+  await expect(page.getByTestId("range-badge").first()).toBeVisible();
+
+  // Search for the range label -> only the range card remains.
+  await page.getByTestId("annotation-search").fill("pp. 1-3");
   await expect(page.getByTestId("highlight-row")).toHaveCount(1);
   await expect(page.getByTestId("range-badge").first()).toBeVisible();
-  await page.getByTestId("filter-micro").click();
+
+  // Search for the micro-highlight needle -> only the micro card remains.
+  await page.getByTestId("annotation-search").fill(NEEDLE);
   await expect(page.getByTestId("highlight-row")).toHaveCount(1);
   await expect(page.getByTestId("range-badge")).toHaveCount(0);
+  await page.getByTestId("annotation-search").fill("");
 
   // Opening the range reveals the shared comment surface with the pp. label.
-  await page.getByTestId("filter-range").click();
-  await page.locator('.ito-highlight-border').first().click();
+  await clickCenter(page, page.locator(".ito-highlight-border").first());
   await expect(page.getByTestId("range-label")).toHaveText("pp. 1-3");
 });
 
@@ -288,7 +398,7 @@ test("R12: a failed local save retains the draft and shows an actionable error",
   await openFirstDocument(page);
   await page.evaluate((n) => window.__ito.selectText(n, 0), NEEDLE);
   await page.getByTestId("commit-highlight").click();
-  await page.locator(".ito-highlight-fragment").first().click();
+  await clickCenter(page, page.locator(".ito-highlight-fragment").first());
 
   // Force the next persist to fail, then try to save the comment.
   await page.evaluate(() => window.__ito.forceNextSaveFailures(1));
@@ -306,7 +416,7 @@ test("R14: annotations + comments persist across close and reopen", async ({ pag
   await openFirstDocument(page);
   await page.evaluate((n) => window.__ito.selectText(n, 0), NEEDLE);
   await page.getByTestId("commit-highlight").click();
-  await page.locator(".ito-highlight-fragment").first().click();
+  await clickCenter(page, page.locator(".ito-highlight-fragment").first());
   await page.getByTestId("comment-input").fill("persist me");
   await page.getByTestId("comment-save").click();
   // The surface closes ONLY after the save+persist resolves, so waiting for it
@@ -326,6 +436,6 @@ test("R14: annotations + comments persist across close and reopen", async ({ pag
   await expect(page.locator(".ito-highlight-fragment").first()).toBeVisible({ timeout: 20_000 });
   const diag = await page.evaluate(() => window.__ito.counts());
   expect(diag.annotations, JSON.stringify(diag)).toBe(1);
-  await page.locator(".ito-highlight-fragment").first().click();
+  await clickCenter(page, page.locator(".ito-highlight-fragment").first());
   await expect(page.getByTestId("comment-input")).toHaveValue("persist me");
 });

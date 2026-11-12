@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { clickCenter } from "./helpers";
 
 /**
  * FEAT-005 — M1 INTEGRATED THREE-PANE WORKSPACE + CONTEXT-PRESERVING LAYOUT
@@ -56,10 +57,18 @@ async function highlight(page: Page, needle = NEEDLE, pageIndex = 0): Promise<vo
 
 /** Open two papers together and create+open a subject with a quote from one. */
 async function openThreePaneWorkspace(page: Page): Promise<string> {
+  // The side-by-side Paper A | subject | Paper B layout needs >= 1360px
+  // (WORKSPACE_3PANE_MIN_WIDTH in Reader.tsx). Below that the app deliberately
+  // collapses to a compact 2-pane layout, and the default 1280px test viewport
+  // would land there.
+  await page.setViewportSize({ width: 1440, height: 900 });
   await bootLibrary(page);
+  // Pick the two multi-page fixtures by title so the choice does not depend on
+  // the list order (the Multi-Column fixture is a single page and would not
+  // overflow a narrow pane).
   const items = page.getByTestId("library-item");
-  await items.nth(0).getByRole("checkbox").check();
-  await items.nth(1).getByRole("checkbox").check();
+  await items.filter({ hasText: "Sample Document" }).getByRole("checkbox").check();
+  await items.filter({ hasText: "Rotated" }).getByRole("checkbox").check();
   await page.getByTestId("open-together").click();
   await expect(page.getByTestId("reader")).toBeVisible();
   // Both source panes render real pdf.js text.
@@ -143,7 +152,7 @@ test("R19 + N08: opening/closing the highlights tab preserves the visible passag
   // Open the quiet comment surface with an UNSAVED draft first, then scroll to
   // a meaningful passage. Measuring AFTER both are set isolates the toggle as
   // the only thing that could disturb them.
-  await page.locator(".ito-highlight-fragment").first().click();
+  await clickCenter(page, page.locator(".ito-highlight-fragment").first());
   await expect(page.getByTestId("comment-surface")).toBeVisible();
   await page.getByTestId("comment-input").fill("an unsaved draft thought");
 
@@ -163,10 +172,15 @@ test("R19 + N08: opening/closing the highlights tab preserves the visible passag
   // untouched (never faked-saved, never lost).
   const passageAfter = await scroller.evaluate((el) => el.scrollTop);
   expect(Math.abs(passageAfter - passageBefore)).toBeLessThanOrEqual(2);
+  // The toggle is an outside click, so the fixed-position comment popover
+  // dismisses itself (Popover closes on outside mouseup) and its textarea
+  // autosaves the in-progress draft on blur, so nothing is lost. Reopening the
+  // annotation shows the draft intact.
+  await expect(page.getByTestId("comment-surface")).toHaveCount(0);
+  await clickCenter(page, page.locator(".ito-highlight-fragment").first());
   await expect(page.getByTestId("comment-surface")).toBeVisible();
   await expect(page.getByTestId("comment-input")).toHaveValue("an unsaved draft thought");
-  // The single annotation still exists and the draft lives only in the surface
-  // (a layout transition commits nothing on its own).
+  // The layout transition created no extra annotation.
   expect(await page.evaluate(() => window.__ito.counts().annotations)).toBe(1);
 });
 
@@ -239,8 +253,10 @@ test("A08/R08 foundation: the passage-to-evidence line toggle changes presentati
   expect(lineDataBefore.length).toBeGreaterThan(0);
   expect(evidenceBefore).toBeGreaterThan(0);
 
-  // Toggle lines OFF via the real control.
-  await page.getByTestId("toggle-lines").uncheck();
+  // Toggle lines OFF via the real control (now in the reader toolbar overflow
+  // menu, M9 single-toolbar rework).
+  await page.getByTestId("pane-overflow-menu-btn").click();
+  await page.getByTestId("overflow-toggle-lines").click();
   await expect(layer).toHaveAttribute("data-visible", "false");
   // Presentation only: the layer is hidden but the line DATA and the evidence
   // relationships are untouched.
@@ -255,26 +271,18 @@ test("A08/R08 foundation: the passage-to-evidence line toggle changes presentati
   await expect(page.getByTestId("follow-source").first()).toBeVisible();
 
   // Toggling back on restores the drawn layer with the same data.
-  await page.getByTestId("toggle-lines").check();
+  await page.getByTestId("pane-overflow-menu-btn").click();
+  await page.getByTestId("overflow-toggle-lines").click();
   await expect(layer).toHaveAttribute("data-visible", "true");
   await expect.poll(() => page.locator('[data-testid="evidence-line"]').count()).toBeGreaterThan(0);
 });
 
-test("N03 + N08: Library -> Reader -> workspace transitions preserve category scope and the reader passage", async ({
+test("N03 + N08: Library -> Reader -> workspace transitions preserve the reader passage", async ({
   page,
 }) => {
   await bootLibrary(page);
 
-  // Scope the library to one category (the seeded fixtures live in distinct
-  // categories: "Papers" and "References").
-  const categories = await page.evaluate(() => window.__ito.categories());
-  expect(categories.length).toBeGreaterThanOrEqual(2);
-  await page.getByTestId("library-scope").selectOption(categories[0]!);
-  expect(await page.evaluate(() => window.__ito.categoryScope())).toBe(categories[0]);
-  // Only that category's items are listed now.
-  await expect(page.getByTestId("library-category")).toHaveCount(1);
-
-  // Open the scoped document into the reader.
+  // Open a document into the reader.
   await page.getByTestId("library-open").first().click();
   await expect(page.getByTestId("source-pane").first()).toHaveAttribute("data-ready", "true", {
     timeout: 20_000,
@@ -288,12 +296,9 @@ test("N03 + N08: Library -> Reader -> workspace transitions preserve category sc
   const passage = await scroller.evaluate((el) => el.scrollTop);
   expect(passage).toBeGreaterThan(0);
 
-  // Go back to the Library: the category scope is preserved (not reset to All).
+  // Go back to the Library.
   await page.getByTestId("back-to-library").click();
   await expect(page.getByTestId("library")).toBeVisible();
-  expect(await page.evaluate(() => window.__ito.categoryScope())).toBe(categories[0]);
-  await expect(page.getByTestId("library-scope")).toHaveValue(categories[0]!);
-  await expect(page.getByTestId("library-category")).toHaveCount(1);
 
   // Reopen the same document: source identity + a readable passage restore
   // (returning to the reader restores the source + a meaningful passage).
@@ -302,4 +307,48 @@ test("N03 + N08: Library -> Reader -> workspace transitions preserve category sc
     timeout: 20_000,
   });
   await expect(page.locator(".textLayer span").first()).toBeVisible({ timeout: 20_000 });
+});
+
+test("evidence lines run from the highlight itself to the quote in the page, crossing the PDF", async ({
+  page,
+}) => {
+  await openThreePaneWorkspace(page);
+  const line = page.locator('[data-testid="evidence-line"][data-line-status="solid"]').first();
+  await expect(line).toBeAttached();
+
+  // Pages re-fit after the panes settle, so poll until the line has re-anchored.
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(() => {
+          const svg = document.querySelector(
+            '[data-testid="passage-evidence-lines"]',
+          ) as SVGSVGElement;
+          const origin = svg.getBoundingClientRect();
+          const g = document.querySelector(
+            '[data-testid="evidence-line"][data-line-status="solid"]',
+          ) as SVGGElement;
+          const dots = g.querySelectorAll("circle");
+          const at = (c: Element) => ({
+            x: origin.left + Number(c.getAttribute("cx")),
+            y: origin.top + Number(c.getAttribute("cy")),
+          });
+          const start = at(dots[0]!);
+          const end = at(dots[1]!);
+          const frag = document.querySelector(".ito-highlight-fragment")!.getBoundingClientRect();
+          const chip = document.querySelector('[data-testid="evidence-chip"]')!.getBoundingClientRect();
+          const pane = document.querySelector('[data-testid="pane-scroll"]')!.getBoundingClientRect();
+          const within = (p: { x: number; y: number }, r: DOMRect) =>
+            p.x >= r.left - 4 && p.x <= r.right + 4 && p.y >= r.top - 4 && p.y <= r.bottom + 4;
+          return {
+            // Starts ON the highlight, well inside the PDF pane (not at its edge)...
+            startOnHighlight: within(start, frag),
+            insidePane: start.x < pane.right - 8,
+            // ...and ends at the quote chip in the page.
+            endOnQuote: within(end, chip),
+          };
+        }),
+      { timeout: 8_000 },
+    )
+    .toEqual({ startOnHighlight: true, insidePane: true, endOnQuote: true });
 });

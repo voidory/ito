@@ -1,0 +1,690 @@
+{
+  "ethane": {
+    "description": "2-carbon chain",
+    "category": "straight-chain",
+    "vertices": 2,
+    "edges": [
+      [
+        0,
+        1
+      ]
+    ],
+    "expectedCycleRank": 0
+  },
+  "butane": {
+    "description": "4-carbon zig-zag chain",
+    "category": "straight-chain",
+    "vertices": 4,
+    "edges": [
+      [
+        0,
+        1
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        2,
+        3
+      ]
+    ],
+    "expectedCycleRank": 0
+  },
+  "hexane": {
+    "description": "6-carbon zig-zag chain",
+    "category": "bent-chain",
+    "vertices": 6,
+    "edges": [
+      [
+        0,
+        1
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        2,
+        3
+      ],
+      [
+        3,
+        4
+      ],
+      [
+        4,
+        5
+      ]
+    ],
+    "expectedCycleRank": 0
+  },
+  "octane": {
+    "description": "8-carbon zig-zag chain",
+    "category": "bent-chain",
+    "vertices": 8,
+    "edges": [
+      [
+        0,
+        1
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        2,
+        3
+      ],
+      [
+        3,
+        4
+      ],
+      [
+        4,
+        5
+      ],
+      [
+        5,
+        6
+      ],
+      [
+        6,
+        7
+      ]
+    ],
+    "expectedCycleRank": 0
+  },
+  "pentane-bent": {
+    "description": "5-carbon chain, 2 interior bends",
+    "category": "bent-chain",
+    "vertices": 5,
+    "edges": [
+      [
+        0,
+        1
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        2,
+        3
+      ],
+      [
+        3,
+        4
+      ]
+    ],
+    "expectedCycleRank": 0
+  },
+  "isobutane": {
+    "description": "central carbon, three methyl branches",
+    "category": "branched-chain",
+    "vertices": 4,
+    "edges": [
+      [
+        0,
+        1
+      ],
+      [
+        0,
+        2
+      ],
+      [
+        0,
+        3
+      ]
+    ],
+    "expectedCycleRank": 0
+  },
+  "isopentane": {
+    "description": "4-chain with one methyl branch",
+    "category": "branched-chain",
+    "vertices": 5,
+    "edges": [
+      [
+        0,
+        1
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        2,
+        3
+      ],
+      [
+        1,
+        4
+      ]
+    ],
+    "expectedCycleRank": 0
+  },
+  "neopentane": {
+    "description": "quaternary carbon, four branches (degree-4)",
+    "category": "branched-chain",
+    "vertices": 5,
+    "edges": [
+      [
+        0,
+        1
+      ],
+      [
+        0,
+        2
+      ],
+      [
+        0,
+        3
+      ],
+      [
+        0,
+        4
+      ]
+    ],
+    "expectedCycleRank": 0
+  },
+  "dimethylbutane": {
+    "description": "4-chain with two methyl branches",
+    "category": "branched-chain",
+    "vertices": 6,
+    "edges": [
+      [
+        0,
+        1
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        2,
+        3
+      ],
+      [
+        1,
+        4
+      ],
+      [
+        2,
+        5
+      ]
+    ],
+    "expectedCycleRank": 0
+  },
+  "ethylpentane": {
+    "description": "5-chain with an ethyl branch",
+    "category": "branched-chain",
+    "vertices": 7,
+    "edges": [
+      [
+        0,
+        1
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        2,
+        3
+      ],
+      [
+        3,
+        4
+      ],
+      [
+        2,
+        5
+      ],
+      [
+        5,
+        6
+      ]
+    ],
+    "expectedCycleRank": 0
+  },
+  "cyclopropane": {
+    "description": "3-membered ring",
+    "category": "cycloalkane",
+    "vertices": 3,
+    "edges": [
+      [
+        0,
+        1
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        2,
+        0
+      ]
+    ],
+    "expectedCycleRank": 1
+  },
+  "cyclobutane": {
+    "description": "4-membered ring",
+    "category": "cycloalkane",
+    "vertices": 4,
+    "edges": [
+      [
+        0,
+        1
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        2,
+        3
+      ],
+      [
+        3,
+        0
+      ]
+    ],
+    "expectedCycleRank": 1
+  },
+  "cyclopentane": {
+    "description": "5-membered ring",
+    "category": "cycloalkane",
+    "vertices": 5,
+    "edges": [
+      [
+        0,
+        1
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        2,
+        3
+      ],
+      [
+        3,
+        4
+      ],
+      [
+        4,
+        0
+      ]
+    ],
+    "expectedCycleRank": 1
+  },
+  "cyclohexane": {
+    "description": "6-membered ring",
+    "category": "cycloalkane",
+    "vertices": 6,
+    "edges": [
+      [
+        0,
+        1
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        2,
+        3
+      ],
+      [
+        3,
+        4
+      ],
+      [
+        4,
+        5
+      ],
+      [
+        5,
+        0
+      ]
+    ],
+    "expectedCycleRank": 1
+  },
+  "methylcyclohexane": {
+    "description": "cyclohexane with one methyl",
+    "category": "ring-substituent",
+    "vertices": 7,
+    "edges": [
+      [
+        0,
+        1
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        2,
+        3
+      ],
+      [
+        3,
+        4
+      ],
+      [
+        4,
+        5
+      ],
+      [
+        5,
+        0
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "expectedCycleRank": 1
+  },
+  "dimethylcyclohexane": {
+    "description": "cyclohexane with two methyls",
+    "category": "ring-substituent",
+    "vertices": 8,
+    "edges": [
+      [
+        0,
+        1
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        2,
+        3
+      ],
+      [
+        3,
+        4
+      ],
+      [
+        4,
+        5
+      ],
+      [
+        5,
+        0
+      ],
+      [
+        0,
+        6
+      ],
+      [
+        3,
+        7
+      ]
+    ],
+    "expectedCycleRank": 1
+  },
+  "ethylcyclopentane": {
+    "description": "cyclopentane with an ethyl chain",
+    "category": "ring-substituent",
+    "vertices": 7,
+    "edges": [
+      [
+        0,
+        1
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        2,
+        3
+      ],
+      [
+        3,
+        4
+      ],
+      [
+        4,
+        0
+      ],
+      [
+        0,
+        5
+      ],
+      [
+        5,
+        6
+      ]
+    ],
+    "expectedCycleRank": 1
+  },
+  "decalin": {
+    "description": "two fused 6-rings (bicyclic)",
+    "category": "fused-ring",
+    "vertices": 10,
+    "edges": [
+      [
+        0,
+        1
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        2,
+        3
+      ],
+      [
+        3,
+        4
+      ],
+      [
+        4,
+        5
+      ],
+      [
+        5,
+        0
+      ],
+      [
+        1,
+        6
+      ],
+      [
+        6,
+        7
+      ],
+      [
+        7,
+        8
+      ],
+      [
+        8,
+        9
+      ],
+      [
+        9,
+        0
+      ]
+    ],
+    "expectedCycleRank": 2
+  },
+  "biphenyl": {
+    "description": "two 6-rings joined by a single bond",
+    "category": "fused-ring",
+    "vertices": 12,
+    "edges": [
+      [
+        0,
+        1
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        2,
+        3
+      ],
+      [
+        3,
+        4
+      ],
+      [
+        4,
+        5
+      ],
+      [
+        5,
+        0
+      ],
+      [
+        6,
+        7
+      ],
+      [
+        7,
+        8
+      ],
+      [
+        8,
+        9
+      ],
+      [
+        9,
+        10
+      ],
+      [
+        10,
+        11
+      ],
+      [
+        11,
+        6
+      ],
+      [
+        0,
+        9
+      ]
+    ],
+    "expectedCycleRank": 2
+  },
+  "spiropentane": {
+    "description": "two 5-rings sharing one carbon (spiro)",
+    "category": "fused-ring",
+    "vertices": 9,
+    "edges": [
+      [
+        0,
+        1
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        2,
+        3
+      ],
+      [
+        3,
+        4
+      ],
+      [
+        4,
+        0
+      ],
+      [
+        0,
+        5
+      ],
+      [
+        5,
+        6
+      ],
+      [
+        6,
+        7
+      ],
+      [
+        7,
+        8
+      ],
+      [
+        8,
+        0
+      ]
+    ],
+    "expectedCycleRank": 2
+  },
+  "propane": {
+    "description": "3-carbon chain, one bend",
+    "category": "straight-chain",
+    "vertices": 3,
+    "edges": [
+      [
+        0,
+        1
+      ],
+      [
+        1,
+        2
+      ]
+    ],
+    "expectedCycleRank": 0
+  },
+  "tbutylcyclohexane": {
+    "description": "cyclohexane with a tert-butyl group",
+    "category": "ring-substituent",
+    "vertices": 10,
+    "edges": [
+      [
+        0,
+        1
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        2,
+        3
+      ],
+      [
+        3,
+        4
+      ],
+      [
+        4,
+        5
+      ],
+      [
+        5,
+        0
+      ],
+      [
+        0,
+        6
+      ],
+      [
+        6,
+        7
+      ],
+      [
+        6,
+        8
+      ],
+      [
+        6,
+        9
+      ]
+    ],
+    "expectedCycleRank": 1
+  }
+}

@@ -24,6 +24,8 @@ export type RevisionId = Branded<Id, "Revision">;
 export type AssetId = Branded<Id, "Asset">;
 export type TentativeAssociationId = Branded<Id, "TentativeAssociation">;
 export type SubjectAssociationId = Branded<Id, "SubjectAssociation">;
+export type CheckpointId = Branded<Id, "Checkpoint">;
+export type ReflectionId = Branded<Id, "Reflection">;
 
 type Prefix =
   | "brain"
@@ -37,7 +39,9 @@ type Prefix =
   | "rev"
   | "asset"
   | "tent"
-  | "sassoc";
+  | "sassoc"
+  | "ckpt"
+  | "refl";
 
 /**
  * Generate a new durable id with the given prefix. Uses crypto.randomUUID when
@@ -67,3 +71,5 @@ export const newTentativeAssociationId = (): TentativeAssociationId =>
   newId<TentativeAssociationId>("tent");
 export const newSubjectAssociationId = (): SubjectAssociationId =>
   newId<SubjectAssociationId>("sassoc");
+export const newCheckpointId = (): CheckpointId => newId<CheckpointId>("ckpt");
+export const newReflectionId = (): ReflectionId => newId<ReflectionId>("refl");

@@ -1,6 +1,6 @@
 /**
  * Regressions for domain bugs found while playtesting the running app
- * (FEAT-005 follow-up). Each test reproduces a confirmed failure at the
+ * (m8 data-integrity merge). Each test reproduces a confirmed failure at the
  * headless level so it cannot silently return.
  */
 import { describe, expect, it } from "vitest";
@@ -66,7 +66,7 @@ function stripEvidence(json: DocumentJson): DocumentJson {
   return strip(json as never) as DocumentJson;
 }
 
-describe("playtest regressions — persistence", () => {
+describe("playtest regressions - persistence", () => {
   it("concurrent mutations are never lost when writes complete out of order", async () => {
     const storage = new InMemoryStorageAdapter();
     const { wb, a, b } = await setup(storage);
@@ -125,8 +125,8 @@ describe("playtest regressions — persistence", () => {
   });
 });
 
-describe("playtest regressions — evidence ↔ composition consistency", () => {
-  it("deleting a quote node in the editor drops its EvidenceInstance (solid → none)", async () => {
+describe("playtest regressions - evidence <-> composition consistency", () => {
+  it("deleting a quote node in the editor drops its EvidenceInstance (solid -> none)", async () => {
     const { wb, a } = await setup();
     const { page } = await wb.createSubjectFromAnnotation("S", a);
     expect(wb.referenceStatus(a, page.id)).toBe("cited");
@@ -194,11 +194,16 @@ describe("playtest regressions — evidence ↔ composition consistency", () => 
     expect(r.sourceId).toBeNull();
   });
 
-  it("annotation views expose a live mismatched resolution after source drift", async () => {
+  it("source-return exposes a live mismatched resolution after source drift", async () => {
+    // The current branch derives resolution live from the source version hash
+    // via resolveEvidenceSource (there is no stored per-annotation resolution
+    // to go stale), so drift must surface as an explicit mismatched state.
     const { wb, src, a } = await setup();
-    expect(wb.viewFor(a)!.resolution.kind).toBe("resolved");
+    await wb.createSubjectFromAnnotation("S", a);
+    const ev = wb.rawData().evidenceInstances.find((e) => e.annotationId === a)!;
+    expect(wb.resolveEvidenceSource(ev.id)!.resolution.kind).toBe("resolved");
     await wb.forceSourceVersionDrift(src.id);
-    expect(wb.viewFor(a)!.resolution.kind).toBe("mismatched");
+    expect(wb.resolveEvidenceSource(ev.id)!.resolution.kind).toBe("mismatched");
   });
 
   it("source-return into a closed source adds it without closing other panes", async () => {

@@ -1,0 +1,1676 @@
+/*
+ * Warm Archival Research Design System (§3.4, FEAT-003).
+ *
+ * A cohesive, tactile theme layered across the whole shell (App, Library,
+ * Reader, SubjectEditor, HistoryReflectionPanel). It defines the design tokens
+ * as CSS custom properties and styles the raw browser controls (buttons,
+ * segmented view-switch pills, inputs, selects, checkboxes, cards, modals) so
+ * every surface shares one warm-paper identity with crisp local click/panel
+ * feedback.
+ *
+ * STRICT MOTION GATE (R19, A09-M2): all transitions + keyframes are disabled
+ * when [data-suppress-motion="true"] is set on an ancestor OR when the user
+ * prefers reduced motion. The graph camera is never animated unprompted — the
+ * only motion here is LOCAL control/panel feedback.
+ */
+
+:root {
+  /* Core palette (the exact tokens the plan specifies). */
+  --ito-bg-paper: #f8f5ee;
+  --ito-bg-elevated: #ffffff;
+  --ito-ink: #1e232a;
+  --ito-accent: #2c4a6f;
+  --ito-border: #dcd6c8;
+
+  /* Derived accents. */
+  --ito-accent-ink: #ffffff;
+  --ito-accent-soft: rgba(44, 74, 111, 0.12);
+  --ito-muted: #6b6356;
+
+  /* Radii. */
+  --ito-radius-sm: 6px;
+  --ito-radius-md: 10px;
+  --ito-radius-lg: 14px;
+  --ito-radius-pill: 999px;
+
+  /* Shadows (soft, paper-elevation). */
+  --ito-shadow-sm: 0 1px 2px rgba(30, 35, 42, 0.08);
+  --ito-shadow-md: 0 4px 14px rgba(30, 35, 42, 0.12);
+  --ito-shadow-lg: 0 12px 40px rgba(30, 35, 42, 0.22);
+
+  /* Motion: a single crisp local-feedback curve + duration. */
+  --ito-motion-fast: 160ms;
+  --ito-motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* M9 (FEAT-001 B): the floating-surface stacking layer token so menus,
+   * popovers and the selection popup share ONE z-index above the reader. */
+  --ito-z-popover: 1000;
+
+  /* M9 annotation colour tokens (swatch fills reused by the reader overlays
+   * and the UI-kit colour dots). */
+  --ito-annot-yellow: #ffdd57;
+  --ito-annot-green: #7ad67a;
+  --ito-annot-blue: #6fb7ff;
+  --ito-annot-pink: #ff9bd0;
+}
+
+/*
+ * M9 (FEAT-001 B): fix the global serif-font bug once, for every native control
+ * including the ones rendered inside popovers/menus/the comment box. The theme
+ * already set `font:inherit` on `button` and `input,select,textarea` blocks
+ * individually; this consolidated rule is the canonical statement the handoff
+ * requires and guarantees no control falls back to the browser serif default.
+ */
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+/* The warm paper backdrop + ink text applied app-wide. */
+body {
+  /* Set on <body> (not only the app root) so portaled surfaces — popovers,
+     menus, the comment box — inherit the same sans stack instead of falling
+     back to the browser serif default. */
+  font-family: var(--ito-font, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
+  font-size: 14px;
+  background: var(--ito-bg-paper);
+  color: var(--ito-ink);
+}
+
+/* --- Buttons ------------------------------------------------------------ */
+button {
+  font: inherit;
+  color: var(--ito-ink);
+  background: var(--ito-bg-elevated);
+  border: 1px solid var(--ito-border);
+  border-radius: var(--ito-radius-sm);
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+  box-shadow: var(--ito-shadow-sm);
+  transition:
+    transform var(--ito-motion-fast) var(--ito-motion-ease),
+    box-shadow var(--ito-motion-fast) var(--ito-motion-ease),
+    background var(--ito-motion-fast) var(--ito-motion-ease),
+    border-color var(--ito-motion-fast) var(--ito-motion-ease);
+}
+
+button:hover {
+  box-shadow: var(--ito-shadow-md);
+  border-color: var(--ito-accent);
+}
+
+/* Subtle tactile press: the control dips slightly on :active. */
+button:active {
+  transform: scale(0.97);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+/* --- Segmented view-switch pills (App view-switch) --------------------- */
+[data-testid="view-switch"] {
+  gap: 0.25rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--ito-bg-paper);
+  border-radius: var(--ito-radius-pill);
+}
+
+[data-testid="view-switch"] button {
+  border-radius: var(--ito-radius-pill);
+  box-shadow: none;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--ito-muted);
+}
+
+[data-testid="view-switch"] button[data-active="true"],
+[data-testid="view-switch"] button[aria-selected="true"] {
+  background: var(--ito-accent);
+  color: var(--ito-accent-ink);
+  border-color: var(--ito-accent);
+  box-shadow: var(--ito-shadow-sm);
+}
+
+/* --- Inputs / selects / textareas -------------------------------------- */
+input,
+select,
+textarea {
+  font: inherit;
+  color: var(--ito-ink);
+  background: var(--ito-bg-elevated);
+  border: 1px solid var(--ito-border);
+  border-radius: var(--ito-radius-sm);
+  padding: 0.35rem 0.5rem;
+  transition:
+    border-color var(--ito-motion-fast) var(--ito-motion-ease),
+    box-shadow var(--ito-motion-fast) var(--ito-motion-ease);
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--ito-accent);
+  box-shadow: 0 0 0 3px var(--ito-accent-soft);
+}
+
+/* Checkboxes pick up the accent tint. */
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--ito-accent);
+}
+
+/* --- Cards + modals ----------------------------------------------------- */
+.ito-card,
+[data-testid$="-modal"],
+[data-testid$="-panel"] {
+  background: var(--ito-bg-elevated);
+  border: 1px solid var(--ito-border);
+  border-radius: var(--ito-radius-md);
+  box-shadow: var(--ito-shadow-md);
+}
+
+/* Modal / drawer / popover fade-and-slide entry. */
+@keyframes ito-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+[data-testid$="-modal"] {
+  animation: ito-pop-in var(--ito-motion-fast) var(--ito-motion-ease);
+}
+
+/* Highlight creation pulse (applied to a freshly committed overlay). */
+@keyframes ito-highlight-pulse {
+  0% {
+    box-shadow: 0 0 0 0 var(--ito-accent-soft);
+  }
+  100% {
+    box-shadow: 0 0 0 10px rgba(44, 74, 111, 0);
+  }
+}
+
+.ito-highlight-pulse {
+  animation: ito-highlight-pulse var(--ito-motion-fast) var(--ito-motion-ease);
+}
+
+/* FEAT-002: sidebar "flash" applied when a card is clicked (scroll + flash). */
+@keyframes ito-highlight-flash {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(44, 74, 111, 0);
+  }
+  35% {
+    box-shadow: 0 0 0 6px rgba(44, 74, 111, 0.45);
+  }
+}
+.ito-highlight-flash {
+  animation: ito-highlight-flash 1.2s ease;
+}
+
+/* FEAT-002: annotations-only right panel. */
+.ito-annotation-sidebar-title {
+  margin: 0 0 0.6rem;
+  font-size: 0.95rem;
+}
+.ito-annotation-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+.ito-annotation-color-chips,
+.ito-annotation-scope {
+  display: flex;
+  gap: 0.3rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.ito-annotation-chip,
+.ito-annotation-scope button {
+  font-size: 0.78rem;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--ito-border, #ccc);
+  border-radius: 999px;
+  background: #fff;
+  cursor: pointer;
+}
+.ito-annotation-chip[data-selected="true"],
+.ito-annotation-scope button[data-selected="true"] {
+  background: var(--ito-accent-soft, #e6eefc);
+  border-color: var(--ito-accent, #2c4a6f);
+  font-weight: 600;
+}
+.ito-annotation-search {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--ito-border, #ccc);
+  border-radius: 6px;
+}
+.ito-annotation-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.ito-annotation-empty {
+  color: #888;
+  font-size: 0.85rem;
+}
+.ito-annotation-card {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  border: 1px solid var(--ito-border, #e3e0d6);
+  border-radius: 8px;
+  background: #fff;
+}
+.ito-annotation-card[data-selected="true"] {
+  border-color: var(--ito-accent, #2c4a6f);
+  box-shadow: 0 0 0 2px var(--ito-accent-soft, #e6eefc);
+}
+.ito-annotation-color-bar {
+  flex: 0 0 4px;
+  border-radius: 3px;
+}
+.ito-annotation-card-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.ito-annotation-card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.ito-annotation-card-spacer {
+  flex: 1;
+}
+.ito-annotation-page {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--ito-accent, #2c4a6f);
+  cursor: pointer;
+}
+.ito-annotation-range-badge {
+  font-size: 0.7rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 4px;
+  background: #eef;
+  color: #556;
+}
+.ito-annotation-actions {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 0.2rem;
+}
+.ito-annotation-thumb {
+  width: 100%;
+  max-height: 120px;
+  object-fit: contain;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+.ito-annotation-quote {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-align: left;
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.3;
+  color: #222;
+  cursor: pointer;
+}
+.ito-annotation-comment {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 2.2rem;
+  resize: vertical;
+  border: 1px solid var(--ito-border, #ddd);
+  border-radius: 6px;
+  padding: 0.3rem 0.4rem;
+  font-size: 0.82rem;
+}
+
+/* FEAT-002: left reader sidebar (Thumbnails / Outline). */
+.ito-left-sidebar {
+  flex: 0 0 160px;
+  width: 160px;
+  border-right: 1px solid var(--ito-border, #ddd);
+  background: #fafafa;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.ito-left-sidebar-tabs {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.4rem;
+  border-bottom: 1px solid var(--ito-border, #eee);
+}
+.ito-thumbnail-strip,
+.ito-outline-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.5rem;
+  overflow: auto;
+  flex: 1;
+}
+.ito-thumbnail-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: center;
+}
+.ito-page-thumbnail {
+  position: relative;
+  display: block;
+  width: 120px;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  background: #fff;
+  padding: 2px;
+  cursor: pointer;
+}
+.ito-page-thumbnail[data-current="true"] {
+  border-color: var(--ito-accent, #2c4a6f);
+}
+.ito-page-thumbnail-canvas {
+  display: block;
+  width: 120px;
+  height: auto;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+}
+.ito-page-thumbnail-label {
+  display: block;
+  text-align: center;
+  font-size: 0.72rem;
+  color: #666;
+  margin-top: 2px;
+}
+.ito-outline-entry {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: none;
+  padding: 0.25rem 0.3rem;
+  font-size: 0.82rem;
+  color: #222;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.ito-outline-entry:hover {
+  background: var(--ito-accent-soft, #e6eefc);
+}
+
+/* Node / hub selection ring transition. */
+.graph-node circle,
+.graph-hub {
+  transition:
+    stroke var(--ito-motion-fast) var(--ito-motion-ease),
+    stroke-width var(--ito-motion-fast) var(--ito-motion-ease),
+    filter var(--ito-motion-fast) var(--ito-motion-ease);
+}
+
+/*
+ * STRICT MOTION GATE (R19, A09-M2). Disable EVERY transition, animation and
+ * scroll-behavior under an explicit suppress-motion root or the OS
+ * reduced-motion preference. `!important` guarantees it wins over the local
+ * rules above. The graph camera already never auto-animates; this makes the
+ * whole tactile layer honor the gate app-wide.
+ */
+[data-suppress-motion="true"],
+[data-suppress-motion="true"] * {
+  animation: none !important;
+  transition: none !important;
+  scroll-behavior: auto !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* --- FIX-TOP-BAR-CLIPPING (§3.5) app shell layout ---------------------- */
+/*
+ * The root app shell is a strict flex column so the header can never be
+ * overdrawn / clipped by the Nodes or 3D canvas. The header stays a fixed-size
+ * row above its own stacking context; the view body takes the remaining height
+ * and is the positioning context for the (absolutely-filled) view canvases.
+ */
+/* The app is a fixed-viewport shell: the document itself must never scroll
+   (inner views scroll where they need to). Zero the default body margin that
+   made the 100vh shell overflow the window by 16px. */
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  /* `clip` also blocks PROGRAMMATIC scrolling (scrollIntoView), which would
+     otherwise nudge the fixed shell off-screen despite overflow:hidden. */
+  overflow: clip;
+}
+
+.app-shell {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.shell-header {
+  flex-shrink: 0;
+  position: relative;
+  z-index: 30;
+}
+
+.view-body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+/* --- FIX-RESTORE-BUTTON-STYLE (§3.5) --------------------------------- */
+/*
+ * The Restore control is a <label> wrapping a hidden file input. Style it (and
+ * the generic .ito-btn helper) exactly like the default button so "Restore"
+ * visually matches the adjacent "Backup" button.
+ */
+.ito-btn,
+label[data-testid="open-restore-input"] {
+  display: inline-flex;
+  align-items: center;
+  font: inherit;
+  color: var(--ito-ink);
+  background: var(--ito-bg-elevated);
+  border: 1px solid var(--ito-border);
+  border-radius: var(--ito-radius-sm);
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+  box-shadow: var(--ito-shadow-sm);
+  transition:
+    transform var(--ito-motion-fast) var(--ito-motion-ease),
+    box-shadow var(--ito-motion-fast) var(--ito-motion-ease),
+    background var(--ito-motion-fast) var(--ito-motion-ease),
+    border-color var(--ito-motion-fast) var(--ito-motion-ease);
+}
+
+.ito-btn:hover,
+label[data-testid="open-restore-input"]:hover {
+  box-shadow: var(--ito-shadow-md);
+  border-color: var(--ito-accent);
+}
+
+.ito-btn:active,
+label[data-testid="open-restore-input"]:active {
+  transform: scale(0.97);
+}
+
+/* --- FIX-NARROW-PANE-TOOLBARS (§3.3) pane headers --------------------- */
+/*
+ * Reader document headers and the SubjectEditor toolbar are single-row bars
+ * that never wrap in narrow 2/3-pane layouts: the title ellipsizes, the action
+ * buttons stay compact on one line, and the close "x" is pinned to the right.
+ */
+.ito-pane-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 6px;
+  overflow-x: auto;
+}
+
+.ito-pane-title {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ito-pane-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.ito-pane-header button,
+.ito-pane-actions button,
+.ito-pane-actions select {
+  white-space: nowrap;
+  padding: 3px 8px;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.ito-pane-close {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* --- FIX-HISTORY-FULL-LAYOUT (§3.4) ----------------------------------- */
+/*
+ * The History & Reflection surface is a full-width two-column workspace rather
+ * than a narrow card pinned top-left: a wide timeline column beside a reflection
+ * column, centered with a comfortable max width.
+ */
+[data-testid="daily-review-panel"] {
+  max-width: 1140px;
+  width: 100%;
+  margin: 20px auto;
+  padding: 0 24px;
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(380px, 1.25fr);
+  gap: 20px;
+  align-items: start;
+}
+
+/* The header + empty-state message span the full two-column width. */
+[data-testid="daily-review-panel"] .daily-review-header,
+[data-testid="daily-review-panel"] .daily-review-empty {
+  grid-column: 1 / -1;
+}
+
+.daily-review-empty {
+  margin: 0;
+  padding: 16px 18px;
+  color: var(--ito-muted);
+  background: var(--ito-bg-paper);
+  border: 1px dashed var(--ito-border);
+  border-radius: var(--ito-radius-sm);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.daily-review-left,
+.daily-review-right {
+  min-width: 0;
+}
+
+/* ====================================================================== */
+/* M9 (FEAT-001) UI KIT + READER CHROME                                   */
+/* ====================================================================== */
+
+/* --- UI kit: Button / IconButton -------------------------------------- */
+.ito-ui-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 6px;
+  line-height: 1;
+}
+
+.ito-ui-icon-btn[aria-pressed="true"] {
+  background: var(--ito-accent);
+  color: var(--ito-accent-ink);
+  border-color: var(--ito-accent);
+}
+
+.ito-ui-icon-btn svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+/* --- UI kit: Menu ------------------------------------------------------ */
+.ito-ui-menu {
+  display: flex;
+  flex-direction: column;
+  min-width: 13rem;
+  padding: 4px;
+  background: var(--ito-bg-elevated);
+  border: 1px solid var(--ito-border);
+  border-radius: var(--ito-radius-md);
+  box-shadow: var(--ito-shadow-md);
+}
+
+/* Menu items are full-width LEFT-aligned rows (no centred outlined buttons). */
+.ito-ui-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  box-shadow: none;
+  padding: 6px 8px;
+  border-radius: var(--ito-radius-sm);
+}
+
+.ito-ui-menu-item:hover:not(:disabled),
+.ito-ui-menu-item:focus-visible {
+  background: var(--ito-accent-soft);
+  border-color: transparent;
+  box-shadow: none;
+  outline: none;
+}
+
+.ito-ui-menu-item-icon {
+  display: inline-flex;
+  width: 16px;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--ito-muted);
+}
+
+.ito-ui-menu-item-label {
+  flex: 1;
+  white-space: nowrap;
+}
+
+.ito-ui-menu-item-shortcut {
+  margin-left: auto;
+  color: var(--ito-muted);
+  font-size: 0.8em;
+  padding-left: 12px;
+}
+
+/* --- UI kit: Popover + the shared fixed layer ------------------------- */
+.ito-ui-popover-layer {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  z-index: var(--ito-z-popover);
+}
+
+.ito-ui-popover {
+  position: fixed;
+  z-index: var(--ito-z-popover);
+  box-sizing: border-box;
+  max-width: calc(100vw - 24px);
+  background: var(--ito-bg-elevated);
+  border: 1px solid var(--ito-border);
+  border-radius: var(--ito-radius-md);
+  box-shadow: var(--ito-shadow-lg);
+  padding: 8px;
+}
+
+/* --- Reader: the single toolbar (<= 44px) ----------------------------- */
+.ito-reader-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--ito-border);
+  background: var(--ito-bg-elevated);
+  overflow-x: auto;
+}
+
+.ito-reader-toolbar .ito-toolbar-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 6px 2px;
+  background: var(--ito-border);
+  flex-shrink: 0;
+}
+
+.ito-reader-toolbar .ito-toolbar-title {
+  flex: 1;
+  min-width: 40px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+
+.ito-reader-toolbar .ito-toolbar-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.ito-reader-toolbar .ito-page-input {
+  width: 3.2rem;
+  text-align: center;
+  padding: 2px 4px;
+}
+
+/* FEAT-002 toolbar statics lifted out of ReaderToolbar.tsx inline styles. */
+.ito-reader-toolbar .ito-page-indicator {
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.ito-reader-toolbar .ito-overflow-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+/* The overflow menu is portaled to the shared fixed layer. Keeping it out of
+   the toolbar's scroll container prevents clipping and accidental toolbar scroll. */
+
+/* FEAT-002 reader-shell statics lifted out of Reader.tsx inline styles. */
+.ito-open-together {
+  padding: 2px 10px;
+  font-size: 0.78rem;
+  color: var(--ito-muted);
+  border-bottom: 1px solid var(--ito-border);
+  background: var(--ito-bg-paper);
+}
+
+.ito-dismiss-inline {
+  margin-left: 0.5rem;
+}
+
+.ito-reader-main {
+  flex-wrap: nowrap;
+  /* The reading area always fills the space left by whichever side panels are
+     open; pages re-fit to it (see the fit-to-pane effect). */
+  max-width: none;
+  margin: 0;
+}
+
+.ito-subject-pane-fill {
+  height: 100%;
+}
+
+.ito-visually-hidden-input {
+  display: none;
+}
+
+/* --- App header: a <= 36px strip while reading ------------------------ */
+.ito-shell-strip {
+  min-height: 0;
+  padding: 2px 8px;
+}
+
+/* --- Reader page canvas: centred, soft shadow, 12px gaps -------------- */
+.ito-page-canvas {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding-top: 12px;
+}
+
+.ito-page-canvas .ito-page-stage,
+.ito-page-canvas [data-page-index] {
+  box-shadow: var(--ito-shadow-md);
+  background: var(--ito-bg-elevated);
+}
+
+/* --- Annotation colour dots (shared by popup + popover + sidebar) ----- */
+.ito-color-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid var(--ito-border);
+  padding: 0;
+  box-shadow: none;
+}
+
+.ito-color-dot[aria-pressed="true"],
+.ito-color-dot[data-selected="true"] {
+  border: 2px solid var(--ito-ink);
+}
+
+/* --- Reader find: match highlighting in the text layer ---------------- */
+.ito-find-match {
+  background: rgba(255, 221, 87, 0.5);
+  border-radius: 2px;
+}
+
+.ito-find-active {
+  background: rgba(255, 150, 0, 0.7);
+  outline: 1px solid #ff7a00;
+}
+
+/* --- Reader: fill the available space, drop the per-page caption ------ */
+/* The page number lives in the toolbar; the per-page caption is redundant. */
+.pdf-page-header {
+  display: none;
+}
+
+.pdf-page {
+  margin: 0 auto;
+}
+
+/* Single-document reading: the toolbar already shows the title, so the pane
+   header collapses to a slim, right-aligned control strip. */
+[data-pane-count="1"] .ito-pane-title {
+  display: none;
+}
+
+[data-pane-count="1"] .ito-pane-header {
+  justify-content: flex-end;
+  min-height: 0;
+}
+
+.ito-page-canvas {
+  padding-top: 0;
+}
+
+/* --- Reader context menu ---------------------------------------------- */
+.ito-ctx-menu {
+  z-index: var(--ito-z-popover);
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  background: var(--ito-bg-elevated);
+  border: 1px solid var(--ito-border);
+  border-radius: var(--ito-radius-md);
+  box-shadow: var(--ito-shadow-lg);
+  font-size: 13px;
+  animation: ito-pop-in var(--ito-motion-fast) var(--ito-motion-ease);
+}
+
+.ito-ctx-menu-picker {
+  padding: 10px;
+}
+
+.ito-ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  text-align: left;
+  color: var(--ito-ink);
+  background: transparent;
+  border: 0;
+  border-radius: var(--ito-radius-sm);
+  box-shadow: none;
+  transform: none;
+  cursor: pointer;
+}
+
+.ito-ctx-item:hover,
+.ito-ctx-item:focus-visible {
+  background: var(--ito-accent-soft);
+  box-shadow: none;
+  transform: none;
+  outline: none;
+}
+
+.ito-ctx-item-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--ito-muted);
+}
+
+.ito-ctx-item-label {
+  flex: 1;
+  white-space: nowrap;
+}
+
+.ito-ctx-item-kbd {
+  font: inherit;
+  font-size: 11px;
+  color: var(--ito-muted);
+  padding: 1px 6px;
+  border: 1px solid var(--ito-border);
+  border-radius: 4px;
+  background: var(--ito-bg-paper);
+}
+
+.ito-ctx-item-danger,
+.ito-ctx-item-danger .ito-ctx-item-icon {
+  color: #b3261e;
+}
+
+.ito-ctx-item-danger:hover {
+  background: rgba(179, 38, 30, 0.1);
+}
+
+.ito-ctx-sep {
+  height: 1px;
+  margin: 5px 4px;
+  background: var(--ito-border);
+}
+
+.ito-ctx-colors {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+}
+
+.ito-ctx-section-label {
+  color: var(--ito-muted);
+  font-size: 12px;
+}
+
+/* --- Selection popup + annotation popover: one visual language -------- */
+[data-testid="selection-toolbar"] {
+  flex-wrap: nowrap !important;
+  animation: ito-pop-in var(--ito-motion-fast) var(--ito-motion-ease);
+}
+
+[data-testid="selection-toolbar"] button:not(.ito-color-dot) {
+  padding: 4px 10px;
+  font-size: 13px;
+  box-shadow: none;
+  border-color: transparent;
+  background: transparent;
+}
+
+[data-testid="selection-toolbar"] button:not(.ito-color-dot):hover {
+  background: var(--ito-accent-soft);
+  transform: none;
+}
+
+[data-testid="highlight-edit-popover"] {
+  padding: 10px !important;
+  gap: 8px;
+  animation: ito-pop-in var(--ito-motion-fast) var(--ito-motion-ease);
+}
+
+[data-testid="highlight-edit-popover"] textarea {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 64px;
+  box-sizing: border-box;
+  resize: vertical;
+  padding: 8px;
+  border: 1px solid var(--ito-border);
+  border-radius: var(--ito-radius-sm);
+  background: var(--ito-bg-paper);
+}
+
+/* --- Annotation popover: one panel, no stacked surfaces --------------- */
+.ito-annot-popover {
+  display: flex !important;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ito-annot-popover-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ito-annot-popover-colors {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+}
+
+.ito-annot-popover-kind {
+  padding: 3px 10px;
+  font-size: 12px;
+  border-radius: var(--ito-radius-pill);
+  box-shadow: none;
+}
+
+.ito-annot-popover-x {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  line-height: 1;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ito-muted);
+}
+
+.ito-comment-embedded {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ito-comment-embedded [data-testid="range-label"] {
+  font-size: 12px;
+  color: var(--ito-muted);
+}
+
+.ito-comment-embedded > div:last-child {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.ito-comment-embedded button {
+  padding: 3px 12px;
+  font-size: 12px;
+  box-shadow: none;
+}
+
+.ito-comment-embedded [data-testid="comment-save"] {
+  background: var(--ito-accent);
+  border-color: var(--ito-accent);
+  color: var(--ito-accent-ink);
+}
+
+.ito-annot-popover-actions {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--ito-border);
+  padding-top: 6px;
+}
+
+.ito-annot-popover-foot {
+  display: flex;
+  gap: 12px;
+  border-top: 1px solid var(--ito-border);
+  padding-top: 8px;
+}
+
+/* M19 — the "Scientific tools" secondary view inside the highlight popover.
+   A compact stack that replaces the first-level menu body; the back row
+   returns to the first-level menu. Reuses the existing .ito-ctx-item chrome. */
+.ito-annot-popover-submenu {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ito-annot-popover-submenu-back {
+  font-weight: 600;
+  border-bottom: 1px solid var(--ito-border);
+  border-radius: 0;
+  padding-bottom: 6px;
+  margin-bottom: 2px;
+}
+
+/* Right-aligned disclosure chevron on a submenu-opening row. */
+.ito-ctx-item-chevron {
+  flex-shrink: 0;
+  color: var(--ito-muted);
+}
+
+.ito-annot-danger {
+  padding: 0;
+  font-size: 12px;
+  color: #b3261e;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.ito-annot-danger:hover {
+  text-decoration: underline;
+  transform: none;
+  box-shadow: none;
+}
+
+/* --- M10: overlay surfaces migrated off the legacy inline `styles` ----- */
+/* The selection toolbar + highlight edit popover + offloaded citation popover
+   now mount the shared <Popover> primitive (.ito-ui-popover supplies the panel
+   chrome: background, border, radius, shadow, z-index). These classes add only
+   the per-surface layout; dynamic left/top/width and colour swatches stay as
+   inline style on the elements themselves. */
+
+/* The compact no-tool selection toolbar: a single non-wrapping control row. */
+.ito-selection-toolbar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: nowrap;
+}
+
+.ito-selection-toolbar .ito-color-controls {
+  display: flex;
+  gap: 0.25rem;
+}
+
+/* The highlight edit popover panel flows as a single vertical stack. */
+.ito-highlight-popover {
+  display: block;
+  box-sizing: border-box;
+  align-items: stretch;
+}
+
+/* The captured area/figure preview thumbnail inside the edit popover. */
+.ito-area-figure-preview {
+  display: block;
+  max-width: 100%;
+  max-height: 8rem;
+  margin-bottom: 0.4rem;
+  border: 1px solid var(--ito-border, #ddd);
+  border-radius: 4px;
+}
+
+/* ── Carbon-skeleton MVP result (analysis preview) ──────────────────────── */
+
+.ito-cs-result {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* The crop + aligned graph overlay share one positioned box. The <img> sets
+   the box size; the SVG is stretched over it and scales with it. */
+.ito-cs-figure {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  line-height: 0;
+  border: 1px solid var(--ito-border, #ddd);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.ito-cs-figure-img {
+  display: block;
+  max-width: 100%;
+  max-height: 12rem;
+  height: auto;
+}
+
+/* preserveAspectRatio="none" means the SVG's viewBox (image pixel space) maps
+   onto the full displayed image box, so graph and image scale identically. */
+.ito-cs-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.ito-cs-bond {
+  stroke: #e0245e;
+  stroke-width: 2;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.ito-cs-carbon {
+  fill: #ffffff;
+  stroke: #e0245e;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Branch vertices (degree >= 3) are emphasised; ring vertices tinted. */
+.ito-cs-carbon--branch {
+  fill: #e0245e;
+}
+
+.ito-cs-carbon--ring {
+  fill: #1d9bf0;
+  stroke: #1d9bf0;
+}
+
+.ito-cs-carbon--endpoint {
+  fill: #ffffff;
+}
+
+.ito-cs-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.85rem;
+}
+
+.ito-cs-summary-title {
+  font-weight: 600;
+  color: var(--ito-text, #111);
+}
+
+.ito-cs-summary-counts {
+  color: var(--ito-text, #111);
+}
+
+.ito-cs-summary-topology {
+  color: var(--ito-text-muted, #555);
+}
+
+.ito-cs-summary-confidence {
+  font-size: 0.78rem;
+  color: var(--ito-text-muted, #666);
+}
+
+.ito-cs-summary-note {
+  margin: 0.2rem 0 0;
+  font-size: 0.72rem;
+  color: var(--ito-text-muted, #888);
+}
+
+.ito-cs-failure-title {
+  font-weight: 600;
+}
+
+.ito-cs-failure-reason {
+  margin-top: 0.2rem;
+  font-size: 0.78rem;
+  opacity: 0.85;
+}
+
+/* The live watercolor comment surface when it floats standalone (R02/R10). */
+.ito-comment-surface-floating {
+  position: fixed;
+  z-index: 1001;
+  top: 20%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 22rem;
+  max-width: calc(100vw - 24px);
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 0.75rem;
+  background: var(--ito-bg-elevated, #fff);
+  border: 1px solid var(--ito-border, #ccc);
+  border-radius: 8px;
+  box-shadow: var(--ito-shadow-lg, 0 6px 24px rgba(0, 0, 0, 0.2));
+}
+
+.ito-comment-surface-floating textarea {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 4rem;
+  box-sizing: border-box;
+  resize: vertical;
+}
+
+.ito-comment-surface-foot {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+/* The standalone association/subject-picker menu floated at a pointer rect. */
+.ito-association-menu {
+  position: absolute;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  align-items: stretch;
+  padding: 0.35rem 0.5rem;
+  background: var(--ito-bg-elevated, #fff);
+  border: 1px solid var(--ito-border, #ccc);
+  border-radius: 8px;
+  box-shadow: var(--ito-shadow-lg, 0 4px 16px rgba(0, 0, 0, 0.15));
+  flex-wrap: wrap;
+}
+
+.ito-association-menu-embedded {
+  position: static;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+/* "Show in Nodes" multi-destination picker anchored under its trigger. */
+.ito-nodes-destination-picker {
+  position: absolute;
+  z-index: 1002;
+  top: 100%;
+  right: 0;
+  min-width: 12rem;
+  padding: 0.25rem;
+  background: var(--ito-bg-elevated, #fff);
+  border: 1px solid var(--ito-border, #ccc);
+  border-radius: 6px;
+  box-shadow: var(--ito-shadow-lg, 0 6px 24px rgba(0, 0, 0, 0.2));
+}
+
+.ito-nodes-destination-picker button {
+  display: block;
+  width: 100%;
+  text-align: left;
+}
+
+/* The binary-offloaded citation popover (A17). */
+.ito-offloaded-popover {
+  max-width: 90vw;
+  width: 24rem;
+  padding: 0.9rem 1rem;
+  border-color: #f0c38a;
+}
+
+/* Centred-modal placement when it opens standalone (not anchored). */
+.ito-offloaded-popover-floating {
+  position: absolute;
+  z-index: 1003;
+  top: 20%;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.ito-offloaded-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.35rem;
+}
+
+.ito-offloaded-reason {
+  font-size: 0.8rem;
+  color: #7a4b00;
+  margin: 0 0 0.5rem;
+}
+
+.ito-offloaded-quote {
+  margin: 0 0 0.5rem;
+  padding: 0.35rem 0.6rem;
+  border-left: 3px solid #1a56db;
+  background: #f6f8ff;
+  font-size: 0.9rem;
+}
+
+.ito-offloaded-comment {
+  font-size: 0.82rem;
+  color: #555;
+}
+
+.ito-offloaded-page {
+  font-size: 0.78rem;
+  color: #777;
+}
+
+.ito-offloaded-error {
+  color: #c5221f;
+  font-size: 0.8rem;
+}
+
+.ito-attach-pdf-label {
+  display: inline-block;
+  margin-top: 0.4rem;
+  padding: 0.35rem 0.75rem;
+  background: #1a56db;
+  color: #fff;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.ito-comment-error {
+  color: #c5221f;
+}
+
+/* --- Reader chrome polish --------------------------------------------- */
+[data-testid="source-pane"] {
+  position: relative;
+}
+
+/* Single document: the page-range control floats over the page's top-right
+   margin instead of costing a whole row; Switch paper lives in the ⋯ menu. */
+[data-pane-count="1"] .ito-pane-header {
+  position: absolute;
+  top: 6px;
+  right: 22px;
+  z-index: 4;
+  padding: 0;
+  overflow: visible;
+}
+
+[data-pane-count="1"] [data-testid="switch-paper"] {
+  display: none;
+}
+
+[data-pane-count="1"] [data-testid="start-range"] {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: var(--ito-radius-pill);
+  color: var(--ito-muted);
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: var(--ito-shadow-sm);
+}
+
+[data-pane-count="1"] [data-testid="start-range"][aria-pressed="true"] {
+  background: var(--ito-accent);
+  color: var(--ito-accent-ink);
+}
+
+/* Reading canvas reads as a desk the page sits on. */
+[data-testid="pane-scroll"] {
+  background: #ebe7dd;
+  padding: 12px 16px 40px !important;
+}
+
+[data-testid="view-switch"] {
+  background: rgba(30, 35, 42, 0.05);
+  padding: 3px;
+}
+
+/* --- Library: delete confirmation ------------------------------------- */
+.ito-confirm-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  background: rgba(179, 38, 30, 0.07);
+  border: 1px solid rgba(179, 38, 30, 0.35);
+  border-radius: var(--ito-radius-md);
+  font-size: 13px;
+}
+
+.ito-confirm-actions {
+  display: inline-flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.ito-confirm-danger {
+  background: #b3261e;
+  border-color: #b3261e;
+  color: #fff;
+}
+
+/* --- Nodes view: page editor docked beside the map -------------------- */
+.ito-nodes-dock {
+  flex: 0 0 min(46%, 680px);
+  min-width: 320px;
+  height: 100%;
+  overflow: auto;
+  background: var(--ito-bg-elevated);
+  border-left: 1px solid var(--ito-border);
+  box-shadow: -8px 0 24px rgba(30, 35, 42, 0.08);
+}
+
+/* Context-menu extras */
+.ito-ctx-item[data-active="true"]:not(:disabled) {
+  background: var(--ito-accent-soft);
+}
+
+.ito-ctx-item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.ito-ctx-heading {
+  padding: 4px 10px 2px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ito-muted);
+}
+
+/* --- History: horizontal timeline of sheets --------------------------- */
+[data-testid="daily-review-panel"] .ito-history-timeline-row {
+  grid-column: 1 / -1;
+}
+
+.ito-timeline-wrap {
+  background: var(--ito-bg-elevated);
+  border: 1px solid var(--ito-border);
+  border-radius: var(--ito-radius-md);
+  box-shadow: var(--ito-shadow-sm);
+}
+
+.ito-timeline {
+  position: relative;
+  overflow-x: auto;
+  overflow-y: hidden;
+  user-select: none;
+  touch-action: pan-x;
+  cursor: crosshair;
+}
+
+.ito-timeline-inner {
+  position: relative;
+  height: 128px;
+}
+
+.ito-timeline-axis {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  top: 74px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--ito-border), var(--ito-accent), var(--ito-border));
+  opacity: 0.7;
+}
+
+.ito-timeline-tick {
+  position: absolute;
+  top: 70px;
+  width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: none;
+}
+
+.ito-timeline-tick::before {
+  content: "";
+  width: 1px;
+  height: 10px;
+  background: var(--ito-border);
+}
+
+.ito-timeline-daynum {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--ito-muted);
+}
+
+.ito-timeline-month {
+  margin-top: 2px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ito-ink);
+  white-space: nowrap;
+}
+
+.ito-timeline-sheet {
+  position: absolute;
+  top: 18px;
+  width: 52px;
+  margin-left: -26px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  cursor: pointer;
+  transition: transform var(--ito-motion-fast) var(--ito-motion-ease);
+}
+
+.ito-timeline-sheet:hover {
+  transform: translateY(-3px) rotate(-1.5deg);
+  box-shadow: none;
+}
+
+.ito-timeline-sheet:focus-visible {
+  outline: 2px solid var(--ito-accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.ito-sheet {
+  overflow: visible;
+  filter: drop-shadow(0 2px 3px rgba(30, 35, 42, 0.18));
+}
+
+.ito-sheet-body {
+  fill: #fffdf7;
+  stroke: var(--ito-border);
+  stroke-width: 1.2;
+}
+
+.ito-sheet-body[data-selected="true"] {
+  fill: var(--ito-accent-soft);
+  stroke: var(--ito-accent);
+  stroke-width: 1.6;
+}
+
+.ito-sheet-fold {
+  fill: none;
+  stroke: var(--ito-border);
+  stroke-width: 1.2;
+}
+
+.ito-sheet-lines {
+  fill: none;
+  stroke: var(--ito-muted);
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  opacity: 0.55;
+}
+
+.ito-timeline-count {
+  position: absolute;
+  top: -4px;
+  right: 2px;
+  min-width: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+  color: var(--ito-accent-ink);
+  background: var(--ito-accent);
+  border-radius: 8px;
+}
+
+.ito-timeline-band {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  background: var(--ito-accent-soft);
+  border: 1px dashed var(--ito-accent);
+  border-radius: var(--ito-radius-md);
+  pointer-events: none;
+}

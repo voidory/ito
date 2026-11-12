@@ -32,6 +32,15 @@ export interface StorageAdapter {
   writeAsset(brainId: BrainId, assetId: string, bytes: Uint8Array): Promise<void>;
 
   /**
+   * Delete ONLY the stored binary asset bytes for an asset id (offline-first
+   * eviction, A17). It is a no-op when the asset is already absent. Structured
+   * records (Source / Annotation / EvidenceInstance) are NEVER touched here;
+   * this reclaims local space while leaving every citation functional from its
+   * stored metadata.
+   */
+  deletePdfBinary(brainId: BrainId, assetId: string): Promise<void>;
+
+  /**
    * Hook invoked to migrate a stored manifest from an older schema version to
    * the current one. Implementations register migrations keyed by source
    * version; the default is identity + version bump when no migration is

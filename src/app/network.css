@@ -1,0 +1,578 @@
+/*
+ * Concept-network (Nodes view) styling — FEAT-004, spec §3.
+ *
+ * The watercolor squircle fill uses a MULTIPLY blend so overlapping category
+ * areas pool darker in their intersections (§3.2), plus a turbulence-displaced
+ * edge filter so boundaries look hand-painted rather than vector-crisp. The
+ * border is a dotted-dashed stroke so the area reads as a soft region, not a
+ * hard container.
+ */
+
+.nodes-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  background: #fbfaf7;
+  touch-action: none;
+}
+
+/* §3.3 interactive-canvas shell: hosts the SVG + the floating zoom controls. */
+.nodes-canvas-shell {
+  width: 100%;
+  height: 100%;
+}
+
+/*
+ * FEAT-003 (3.1) floating creation bar: lets the user build the whole concept
+ * network with the mouse (+ Subject, + Category, Connect Nodes). It floats over
+ * the canvas top-left so it never obscures the zoom controls (bottom-right).
+ */
+.nodes-create-bar {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.45rem;
+  border-radius: 10px;
+  background: rgba(251, 250, 247, 0.94);
+  border: 1px solid rgba(138, 127, 112, 0.35);
+  box-shadow: 0 1px 6px rgba(40, 40, 40, 0.12);
+}
+
+.nodes-create-bar button {
+  font: 600 12px system-ui, sans-serif;
+  padding: 0.3rem 0.6rem;
+  border-radius: 7px;
+  border: 1px solid rgba(138, 127, 112, 0.45);
+  background: #ffffff;
+  color: #3a3733;
+  cursor: pointer;
+}
+
+.nodes-create-bar button:hover {
+  background: #f1ede4;
+}
+
+.nodes-create-bar button[data-active="true"] {
+  background: #4b5578;
+  border-color: #4b5578;
+  color: #fbfaf7;
+}
+
+/* §3.1 category creation + membership popover. */
+.nodes-category-modal {
+  position: absolute;
+  top: 3.6rem;
+  left: 1rem;
+  z-index: 4;
+  width: 20rem;
+  max-height: 70%;
+  overflow: auto;
+  padding: 0.85rem;
+  border-radius: 12px;
+  background: #fbfaf7;
+  border: 1px solid rgba(138, 127, 112, 0.5);
+  box-shadow: 0 6px 24px rgba(40, 40, 40, 0.2);
+  font: 400 13px system-ui, sans-serif;
+  color: #3a3733;
+}
+
+.nodes-category-modal h3 {
+  margin: 0 0 0.5rem;
+  font: 700 13px system-ui, sans-serif;
+}
+
+.nodes-category-modal input[type="text"] {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.35rem 0.5rem;
+  margin-bottom: 0.5rem;
+  border-radius: 6px;
+  border: 1px solid rgba(138, 127, 112, 0.5);
+}
+
+.nodes-swatch-row {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.6rem;
+}
+
+.nodes-swatch {
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+}
+
+.nodes-swatch[data-selected="true"] {
+  border-color: #3a3733;
+}
+
+.nodes-category-members {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0.4rem 0 0.6rem;
+}
+
+.nodes-category-member {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+/* §3.1 Create Hub popover, shown once >=2 nodes are selected in connect mode. */
+.nodes-hub-modal {
+  position: absolute;
+  top: 3.6rem;
+  left: 1rem;
+  z-index: 4;
+  width: 18rem;
+  padding: 0.85rem;
+  border-radius: 12px;
+  background: #fbfaf7;
+  border: 1px solid rgba(138, 127, 112, 0.5);
+  box-shadow: 0 6px 24px rgba(40, 40, 40, 0.2);
+  font: 400 13px system-ui, sans-serif;
+  color: #3a3733;
+}
+
+.nodes-hub-modal select,
+.nodes-hub-modal input[type="text"] {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.35rem 0.5rem;
+  margin-bottom: 0.5rem;
+  border-radius: 6px;
+  border: 1px solid rgba(138, 127, 112, 0.5);
+}
+
+/* Selected-in-connect-mode node emphasis. */
+.graph-node[data-selected="true"] circle {
+  fill: #b5653f;
+  stroke: #b5653f;
+  stroke-width: 3;
+}
+
+/* Floating zoom controls (§3.3): pan/zoom affordances over the canvas. */
+.canvas-zoom-controls {
+  position: absolute;
+  bottom: 1rem;
+  right: 1rem;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.canvas-zoom-controls button {
+  min-width: 2rem;
+  min-height: 2rem;
+}
+
+/* Watercolor fill: a radial wash (light centre, pigment pooled at the edge)
+   whose boundary is bled by turbulence; multiplies where areas overlap. */
+.category-squircle-fill {
+  mix-blend-mode: multiply;
+  opacity: 1;
+  filter: url(#watercolor-turbulent-edge);
+}
+
+/* Dotted-dashed soft boundary (not a hard rectangle). */
+.category-squircle-border {
+  fill: none;
+  stroke-width: 1.5;
+  stroke-dasharray: 2 6;
+  stroke-linecap: round;
+  opacity: 0.55;
+}
+
+.category-squircle-label {
+  font: 600 13px system-ui, sans-serif;
+  fill: #55504a;
+  opacity: 0.8;
+  pointer-events: none;
+  /*
+   * FIX-NODES-LABEL-OVERLAP (§3.2): render the label with a clean readable halo
+   * so node dots never visually overdraw the category name. The label sits at
+   * the top arch of the squircle (y = cy - ry - 8, set in NodesCanvas.tsx).
+   */
+  paint-order: stroke fill;
+  stroke: #f8f5ee;
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+
+/* Category-to-category boundary connection (A14-M2). */
+.category-link {
+  fill: none;
+  stroke: #8a7f70;
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+  opacity: 0.7;
+}
+
+/* Relationship hubs ("The Bump"): translucent, centered on the connection. */
+.graph-hub {
+  opacity: 0.4;
+  cursor: pointer;
+  stroke: rgba(40, 40, 40, 0.3);
+  stroke-width: 0.75;
+}
+
+.graph-hub:hover {
+  opacity: 0.6;
+}
+
+/* Circular dot nodes. */
+.graph-node {
+  cursor: pointer;
+}
+
+.graph-node circle {
+  fill: #3a3733;
+  stroke: #fbfaf7;
+  stroke-width: 1.5;
+}
+
+/*
+  Explicit locate focus (N04/N05): the matching node is visually emphasized
+  with a ring + slightly larger dot. This is a STATIC emphasis derived from the
+  explicit focusedPageId — there is NO camera motion on idle (A09-M2).
+*/
+.graph-node-focused circle {
+  fill: #1a56db;
+  stroke: #1a56db;
+  stroke-width: 3;
+}
+
+.graph-node-focused .graph-node-label {
+  opacity: 1;
+  font-weight: 700;
+}
+
+/* Relationship labels are shown only while their hub is hovered or selected. */
+.hub-label {
+  font: 600 10px system-ui, sans-serif;
+  fill: #2a2825;
+  paint-order: stroke fill;
+  stroke: #fbfaf7;
+  stroke-width: 3px;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+/* The hub's "open connecting page" affordance (A13-M2). */
+.open-connecting-page {
+  font: 500 9px system-ui, sans-serif;
+  fill: #2a2825;
+  cursor: pointer;
+  opacity: 0.75;
+}
+
+.open-connecting-page:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+.graph-node-label {
+  font: 500 11px system-ui, sans-serif;
+  fill: #2a2825;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.graph-node:hover .graph-node-label {
+  opacity: 1;
+}
+
+/* Honor reduced motion / suppress-motion: no label transition. */
+.nodes-canvas[data-suppress-motion="true"] .graph-node-label {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .graph-node-label {
+    transition: none;
+  }
+}
+
+.nodes-empty {
+  font: 500 14px system-ui, sans-serif;
+  fill: #8a847c;
+}
+
+/*
+ * §3.4 density reward: the subtle glowing "Enter 3D" transition prompt. It is
+ * only mounted once is3DUnlocked() (35+ active nodes). The glow is a soft,
+ * slow pulse; it DEGRADES to a static control when motion is suppressed or the
+ * OS prefers reduced motion (the .enter-3d-glow animation is simply removed).
+ */
+.enter-3d {
+  position: absolute;
+  bottom: 1.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  padding: 0.55rem 1.3rem;
+  border-radius: 999px;
+  border: 1px solid rgba(75, 85, 120, 0.5);
+  background: rgba(251, 250, 247, 0.92);
+  color: #3a3733;
+  font: 600 13px system-ui, sans-serif;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.enter-3d-glow {
+  animation: ito-enter-3d-glow 2.8s ease-in-out infinite;
+}
+
+@keyframes ito-enter-3d-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 6px 1px rgba(75, 85, 120, 0.25);
+  }
+  50% {
+    box-shadow: 0 0 18px 4px rgba(75, 85, 120, 0.55);
+  }
+}
+
+/* Smooth scale-out from the 2D canvas into the 3D space (§3.4). */
+@keyframes ito-3d-enter {
+  from {
+    transform: scale(0.82);
+    opacity: 0.2;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Honor reduced motion / suppress-motion: no glow pulse, no scale transition. */
+@media (prefers-reduced-motion: reduce) {
+  .enter-3d-glow {
+    animation: none;
+  }
+}
+
+/*
+ * N06 transient "Not connected yet" placeholder: a faint, dashed ghost node so
+ * it is visibly NOT a real network node. It persists nothing — clicking is a
+ * no-op (ephemeral UI only).
+ */
+.node-placeholder {
+  cursor: default;
+}
+
+.node-placeholder-dot {
+  fill: none;
+  stroke: #b7afa3;
+  stroke-width: 1.5;
+  stroke-dasharray: 3 3;
+}
+
+.node-placeholder-label {
+  font: 600 13px system-ui, sans-serif;
+  fill: #8a847c;
+}
+
+.node-placeholder-title {
+  font: 500 11px system-ui, sans-serif;
+  fill: #a39d94;
+}
+
+
+/* --- Living water: gentle ambient motion ------------------------------ */
+/* The backdrop is a few huge, heavily blurred pigment pools drifting slowly. */
+.ito-water-blob {
+  opacity: 0.16;
+  animation: ito-water-drift 26s ease-in-out infinite alternate;
+}
+
+@keyframes ito-water-drift {
+  from {
+    transform: translate(-60px, -30px) scale(1);
+  }
+  to {
+    transform: translate(70px, 40px) scale(1.12);
+  }
+}
+
+/* Overlap zones: the two blooms swirl slowly into and through each other. */
+.ito-overlap {
+  /* Normal blending (not multiply): the meeting zone shows the MIXED HUE, so
+     overlaps stay colourful instead of stacking toward black. */
+  mix-blend-mode: normal;
+  opacity: 0.5;
+}
+
+.ito-overlap-blooms {
+  opacity: 0.38;
+}
+
+.ito-overlap-blooms[data-animated="true"] .ito-bloom-a {
+  animation: ito-bloom-a 12s ease-in-out infinite alternate;
+}
+
+.ito-overlap-blooms[data-animated="true"] .ito-bloom-b {
+  animation: ito-bloom-b 15s ease-in-out infinite alternate;
+}
+
+@keyframes ito-bloom-a {
+  to {
+    transform: translate(26px, 10px) scale(1.18);
+  }
+}
+
+@keyframes ito-bloom-b {
+  to {
+    transform: translate(-24px, -12px) scale(1.22);
+  }
+}
+
+/* The reflection: a soft light band sliding across each wash. */
+.ito-sheen {
+  /* No filter here: an animated gradient under a displacement filter would be
+     re-rasterised every frame. */
+  mix-blend-mode: soft-light;
+  opacity: 0.5;
+}
+
+/* Dots bob very slightly; hubs breathe. Decoration only: the layout data and
+   camera never move on idle. */
+.graph-node .graph-node-dot {
+  animation: ito-dot-bob 7s ease-in-out infinite;
+}
+
+/* M13 FEAT-001: a promoted single-highlight "memory" node renders as a HOLLOW
+   ring — an unfilled circle with a visible ink stroke — until it graduates to
+   a full Observation Node (a 2nd cited evidence quote or added synthesis). The
+   inline fill/stroke in NodesCanvas is authoritative; this rule is the CSS
+   fallback so the variant stays hollow even without inline attrs. */
+.graph-node .graph-node-dot--memory {
+  fill: var(--ito-bg-canvas, #faf6ef);
+  stroke: var(--ito-ink, #2b2b2b);
+  stroke-width: 2.2px;
+}
+
+@keyframes ito-dot-bob {
+  50% {
+    transform: translateY(-1.6px);
+  }
+}
+
+.graph-hub {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: ito-hub-breathe 6.5s ease-in-out infinite;
+}
+
+@keyframes ito-hub-breathe {
+  50% {
+    transform: scale(1.035);
+  }
+}
+
+.nodes-canvas[data-suppress-motion="true"] .ito-water-blob,
+.nodes-canvas[data-suppress-motion="true"] .ito-bloom,
+.nodes-canvas[data-suppress-motion="true"] .graph-node-dot,
+.nodes-canvas[data-suppress-motion="true"] .graph-hub {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ito-water-blob,
+  .ito-bloom,
+  .graph-node .graph-node-dot,
+  .graph-hub {
+    animation: none !important;
+  }
+}
+
+/* Decorative layers never take the pointer: clicks fall through to the map and
+   to the controls floating above it. */
+.ito-water,
+.ito-water *,
+.ito-overlap,
+.ito-overlap *,
+.ito-sheen {
+  pointer-events: none;
+}
+
+
+/* M20: keep exploration in the graph itself; selection persists after hover. */
+.graph-node[data-dimmed="true"],
+[data-testid="hub-group"][data-dimmed="true"],
+[data-testid="category-squircle"][data-dimmed="true"] {
+  opacity: 0.2;
+  transition: opacity 120ms ease;
+}
+
+.graph-node[data-active="true"] circle,
+.graph-node[data-selected="true"] circle {
+  fill: #b5653f;
+  stroke: #fbfaf7;
+  stroke-width: 2.5;
+  r: 9;
+}
+
+.graph-node[data-related="true"] circle {
+  stroke: #b5653f;
+  stroke-width: 2;
+}
+
+.graph-node[data-active="true"] .graph-node-label,
+.graph-node[data-selected="true"] .graph-node-label {
+  opacity: 1;
+  font-weight: 700;
+}
+
+[data-testid="hub-group"][data-selected="true"] .graph-hub,
+[data-testid="hub-group"]:hover .graph-hub {
+  opacity: 0.82;
+  stroke: #8f4f35;
+  stroke-width: 2;
+}
+
+[data-testid="hub-group"][data-related="true"] .graph-hub {
+  opacity: 0.68;
+}
+
+[data-testid="category-squircle"][data-active="true"] .category-squircle-border {
+  opacity: 0.95;
+  stroke-width: 2.5;
+}
+
+[data-testid="category-squircle"][data-dimmed="true"] {
+  opacity: 0.32;
+}
+
+.node-open-page {
+  font: 600 9px system-ui, sans-serif;
+  fill: #8f4f35;
+  opacity: 0.85;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.node-open-page:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+[data-testid="category-link-layer"][data-dimmed="true"],
+[data-testid="hub-curl"][data-dimmed="true"] {
+  opacity: 0.16;
+  transition: opacity 120ms ease;
+}
+
+[data-testid="category-link-layer"] {
+  transition: opacity 120ms ease;
+}

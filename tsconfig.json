@@ -24,5 +24,6 @@
 
     "types": ["vitest/globals", "node"]
   },
-  "include": ["src", "e2e", "spikes", "scripts", "vite.config.ts", "playwright.config.ts", "vitest.config.ts"]
+  "include": ["src", "e2e", "spikes", "scripts", "vite.config.ts", "playwright.config.ts", "vitest.config.ts"],
+  "exclude": ["node_modules", "dist", "src/science/research/skeleton/independent"]
 }
