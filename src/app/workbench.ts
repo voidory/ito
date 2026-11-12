@@ -40,6 +40,9 @@ import {
   type AreaAnchor,
   type ChemicalMechanismSpec,
   type PreParsedPageLayout,
+  type AnnotationIndexes,
+  annotationsOnPage,
+  buildAnnotationIndexes,
   type AssetIndexEntry,
   type BrainData,
   type BrainId,
@@ -732,6 +735,19 @@ export class Workbench {
    * the adapter at `open()` so offloaded status survives a reopen.
    */
   private offloadedAssetIds = new Set<string>();
+  /**
+   * Phase 1 (STRUCTURAL INDEXING) lazily-memoized structural indexes over
+   * `this.data.annotations` (id -> annotation; 0-based pageIndex -> annotations
+   * on that page). They are a DERIVED view, never a second source of truth: the
+   * cache is keyed by the identity of the annotations array it was built from
+   * (`annotationIndexSource`), so any mutation — which always replaces the
+   * array via the immutable `this.data = { ...this.data, annotations }` idiom —
+   * invalidates it in O(1) and the next read rebuilds once. This keeps writes
+   * O(1) (no index bookkeeping at the write site, so divergence is impossible)
+   * and reads amortized O(1). Access ONLY through `annotationIndexes()`.
+   */
+  private annotationIndexCache: AnnotationIndexes | null = null;
+  private annotationIndexSource: readonly Annotation[] | null = null;
   /** See enableAutoHistory(). */
   private autoHistory = false;
   /**
@@ -2577,9 +2593,11 @@ export class Workbench {
     const pageId = this.openSubjectPageId;
     if (!pageId) return [];
     const lines: PassageEvidenceLine[] = [];
+    const byId = this.annotationIndexes().byId;
     for (const ev of this.data.evidenceInstances) {
       if (ev.destinationPageId !== pageId) continue;
-      const annotation = this.data.annotations.find((a) => a.id === ev.annotationId);
+      // Phase 1: O(1) id-index resolve instead of a linear `annotations.find`.
+      const annotation = byId.get(ev.annotationId);
       if (!annotation) continue;
       if (!this.openSourceIds.includes(annotation.sourceId)) continue;
       const sourcePageIndex =
@@ -2619,7 +2637,8 @@ export class Workbench {
         (e) => e.annotationId === assoc.annotationId && e.destinationPageId === pageId,
       );
       if (quoted) continue;
-      const annotation = this.data.annotations.find((a) => a.id === assoc.annotationId);
+      // Phase 1: O(1) id-index resolve instead of a linear `annotations.find`.
+      const annotation = this.annotationIndexes().byId.get(assoc.annotationId);
       if (!annotation || !this.openSourceIds.includes(annotation.sourceId)) continue;
       out.push({
         associationId: assoc.id,
@@ -2747,7 +2766,8 @@ export class Workbench {
 
   /** Change an annotation's highlight style (compact color/kind controls). */
   async setAnnotationStyle(id: AnnotationId, style: AnnotationStyle): Promise<void> {
-    if (!this.data.annotations.some((a) => a.id === id)) return;
+    // Phase 1: O(1) existence check via the id index (was `annotations.some`).
+    if (!this.annotationIndexes().byId.has(id)) return;
     this.data = this.writeStyle(this.data, id, style);
     await this.persist();
   }
@@ -2820,7 +2840,8 @@ export class Workbench {
    * annotation), but NO evidence is deleted. A no-op for an unknown id.
    */
   async deleteAnnotationOnly(id: AnnotationId): Promise<void> {
-    if (!this.data.annotations.some((a) => a.id === id)) return;
+    // Phase 1: O(1) existence check via the id index (was `annotations.some`).
+    if (!this.annotationIndexes().byId.has(id)) return;
     const { [id]: _removed, ...remainingStyles } =
       this.data.presentation.annotationStyles ?? {};
     this.data = {
@@ -2846,7 +2867,8 @@ export class Workbench {
    * preserved exactly. Persists once. A no-op for an unknown id.
    */
   async deleteAnnotationAndQuotes(id: AnnotationId): Promise<void> {
-    if (!this.data.annotations.some((a) => a.id === id)) return;
+    // Phase 1: O(1) existence check via the id index (was `annotations.some`).
+    if (!this.annotationIndexes().byId.has(id)) return;
 
     // Evidence instances that quote this annotation, grouped by their page.
     const doomedEvidence = this.data.evidenceInstances.filter(
@@ -2979,7 +3001,8 @@ export class Workbench {
     annotationId: AnnotationId,
     opts: { title?: string; includeComment?: boolean } = {},
   ): Promise<{ page: Page; evidence: EvidenceInstance }> {
-    const annotation = this.data.annotations.find((a) => a.id === annotationId);
+    // Phase 1: O(1) id-index resolve instead of a linear `annotations.find`.
+    const annotation = this.annotationIndexes().byId.get(annotationId);
     if (!annotation) throw new Error("promoteAnnotationToNode: unknown annotation");
     // Seed a readable node title from the promoted Memory's quoted text.
     const snippet = quotedTextForScope(annotation).trim().slice(0, 60);
@@ -3029,8 +3052,10 @@ export class Workbench {
     toAnnotationId: AnnotationId,
     opts: { title?: string } = {},
   ): Promise<PageId> {
-    const from = this.data.annotations.find((a) => a.id === fromAnnotationId);
-    const to = this.data.annotations.find((a) => a.id === toAnnotationId);
+    // Phase 1: O(1) id-index resolves instead of linear `annotations.find`.
+    const byId = this.annotationIndexes().byId;
+    const from = byId.get(fromAnnotationId);
+    const to = byId.get(toAnnotationId);
     if (!from) throw new Error("linkHighlightsToObservation: unknown from-annotation");
     if (!to) throw new Error("linkHighlightsToObservation: unknown to-annotation");
 
@@ -3282,7 +3307,8 @@ export class Workbench {
     destinationPageId: PageId,
     opts: { pos?: number | null; includeComment?: boolean; mode?: "live" | "copy" } = {},
   ): Promise<EvidenceInstance> {
-    const annotation = this.data.annotations.find((a) => a.id === annotationId);
+    // Phase 1: O(1) id-index resolve instead of a linear `annotations.find`.
+    const annotation = this.annotationIndexes().byId.get(annotationId);
     if (!annotation) throw new Error("insertEvidenceIntoPage: unknown annotation");
     // Fold any live unsaved editor content for this page into stored JSON first
     // so the inserted quote lands in the user's current doc, not a stale one.
@@ -3360,7 +3386,8 @@ export class Workbench {
     | null {
     const evidence = this.data.evidenceInstances.find((e) => e.id === evidenceId);
     if (!evidence) return null;
-    const annotation = this.data.annotations.find((a) => a.id === evidence.annotationId);
+    // Phase 1: O(1) id-index resolve instead of a linear `annotations.find`.
+    const annotation = this.annotationIndexes().byId.get(evidence.annotationId);
     if (!annotation) {
       return {
         // The annotation record is gone, so there is no real source to point
@@ -3565,6 +3592,53 @@ export class Workbench {
     );
   }
 
+  /**
+   * Phase 1 (STRUCTURAL INDEXING) the lazily-memoized structural indexes over
+   * the current `this.data.annotations`. Rebuilt ONLY when the annotations
+   * array reference changed since the last build (every mutation replaces it),
+   * so repeated reads within an unchanged state are O(1). The returned Maps are
+   * owned by the cache — callers must NOT mutate them (reads go through the
+   * accessors below). This is the single bridge from the canonical array to the
+   * id/page indexes; it can never diverge because it is always rebuilt FROM the
+   * array it is keyed on.
+   */
+  private annotationIndexes(): AnnotationIndexes {
+    if (this.annotationIndexCache && this.annotationIndexSource === this.data.annotations) {
+      return this.annotationIndexCache;
+    }
+    const indexes = buildAnnotationIndexes(this.data.annotations);
+    this.annotationIndexCache = indexes;
+    this.annotationIndexSource = this.data.annotations;
+    return indexes;
+  }
+
+  /**
+   * Phase 1 resolve an annotation by id in O(1) average via the id index (the
+   * indexed replacement for `annotations.find(a => a.id === id)`). Returns the
+   * canonical annotation object (identical to the array entry) or undefined.
+   */
+  annotationByIdOrUndefined(id: AnnotationId): Annotation | undefined {
+    return this.annotationIndexes().byId.get(id);
+  }
+
+  /**
+   * Phase 1 the annotations occupying a 0-based page index, O(1 + Aₚ) via the
+   * page-bucket index (the indexed replacement for scanning all annotations and
+   * resolving each one's scope). Returns a fresh array in canonical order; a
+   * "pages"-range annotation appears on every page of its range. Reader-facing
+   * denormalized views for one page.
+   */
+  annotationsForPage(sourceId: SourceId, pageIndex: number): AnnotationView[] {
+    const onPage = annotationsOnPage(this.annotationIndexes().byPage, pageIndex);
+    const out: AnnotationView[] = [];
+    for (const a of onPage) {
+      if (a.sourceId !== sourceId) continue;
+      const view = this.viewFor(a.id);
+      if (view) out.push(view);
+    }
+    return out;
+  }
+
   /** All annotations for a source as denormalized views (for the reader). */
   annotationsForSource(sourceId: SourceId): AnnotationView[] {
     return this.data.annotations
@@ -3574,7 +3648,8 @@ export class Workbench {
   }
 
   viewFor(id: AnnotationId): AnnotationView | null {
-    const annotation = this.data.annotations.find((a) => a.id === id);
+    // Phase 1: O(1) id-index resolve instead of a linear `annotations.find`.
+    const annotation = this.annotationIndexes().byId.get(id);
     if (!annotation) return null;
     const style = this.readStyle(id);
     const isRange = annotation.scope.kind === "pages";
@@ -4012,9 +4087,11 @@ export class Workbench {
    */
   private citedSourceCountsForPage(pageId: PageId): Map<SourceId, number> {
     const counts = new Map<SourceId, number>();
+    const byId = this.annotationIndexes().byId;
     for (const ev of this.data.evidenceInstances) {
       if (ev.destinationPageId !== pageId) continue;
-      const annotation = this.data.annotations.find((a) => a.id === ev.annotationId);
+      // Phase 1: O(1) id-index resolve instead of a linear `annotations.find`.
+      const annotation = byId.get(ev.annotationId);
       if (!annotation) continue;
       counts.set(annotation.sourceId, (counts.get(annotation.sourceId) ?? 0) + 1);
     }
