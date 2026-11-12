@@ -19,6 +19,7 @@ export const SCHEMA_VERSION = 2 as const;
 
 export * from "./ids";
 export * from "./types";
+export * from "./annotationIndex";
 export * from "./citation";
 export * from "./relationship";
 export * from "./brain";

@@ -97,6 +97,13 @@ export function SourcePane({
   const mountRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLElement | null>(null);
   const pagesRef = useRef<RenderedPage[]>([]);
+  // Phase 1 (STRUCTURAL INDEXING) a 0-based pageIndex -> RenderedPage index so
+  // resolving a page by its `data-page-index` is O(1) instead of a linear
+  // `pagesRef.current.find(...)`. It is a DERIVED mirror of `pagesRef.current`,
+  // rebuilt in lockstep whenever that array is (re)assigned (source switch /
+  // initial render), so it can never point at a page from a previous document.
+  // A `useRef` (not state): it mirrors runtime DOM, must not trigger renders.
+  const pageByIndexRef = useRef<Map<number, RenderedPage>>(new Map());
   const docRef = useRef<PDFDocumentProxy | null>(null);
   // M14–M16 (FEAT-001) the live windowed-virtualization observer (large PDFs).
   const virtualizationObserverRef = useRef<IntersectionObserver | null>(null);
@@ -140,6 +147,15 @@ export function SourcePane({
   const isWebsite = source?.kind === "website" || source?.type === "website";
 
   const selectedRef = useRef<AnnotationId | null>(null);
+  // Phase 1 (STRUCTURAL INDEXING) resolve a RenderedPage by its 0-based page
+  // index in O(1) via `pageByIndexRef`, replacing the linear
+  // `pagesRef.current.find(p => Number(p.container.dataset.pageIndex) === i)`
+  // that was duplicated across ~16 call sites. Stable identity (reads the ref),
+  // so it never needs to appear in a dependency array.
+  const resolvePageByIndex = useCallback(
+    (pageIndex: number): RenderedPage | undefined => pageByIndexRef.current.get(pageIndex),
+    [],
+  );
   // Live on-screen box of an annotation (union of its drawn fragments), so the
   // edit popover can follow its highlight while the page scrolls.
   const resolvePopoverAnchor = useCallback((id: AnnotationId): AnchorRect | null => {
@@ -176,7 +192,9 @@ export function SourcePane({
         .forEach((el) => el.remove());
     }
     for (const view of views) {
-      drawAnnotation(view, pagesRef.current, suppressMotion, false);
+      // Phase 1: pass the O(1) page resolver so a "pages"-range annotation no
+      // longer does a linear pages.find per page of its range.
+      drawAnnotation(view, pagesRef.current, suppressMotion, false, resolvePageByIndex);
     }
     // FEAT-002 (2.2a) re-apply the active accent outline after a redraw removed
     // and recreated the fragments.
@@ -187,7 +205,7 @@ export function SourcePane({
         .querySelectorAll(`.ito-highlight[data-annotation-id="${cssEscapeId(sel)}"]`)
         .forEach((el) => el.setAttribute("data-selected", "true"));
     }
-  }, [wb, sourceId, suppressMotion]);
+  }, [wb, sourceId, suppressMotion, resolvePageByIndex]);
 
   // M13 (§1.2) recompute the live selection preview pills + the selection
   // toolbar anchor from the CURRENT browser selection, clipped to the
@@ -334,14 +352,21 @@ export function SourcePane({
       const supportsIO = typeof IntersectionObserver !== "undefined";
       const virtualize = doc.numPages > 8 && supportsIO;
       const pages: RenderedPage[] = [];
+      // Phase 1: build the 0-based pageIndex -> RenderedPage map as pages are
+      // created, keyed by the SAME `data-page-index` every resolver reads.
+      const pageByIndex = new Map<number, RenderedPage>();
       for (let p = 1; p <= doc.numPages; p++) {
         const rp = await renderPage(doc, p, mount, 1.3, { lazy: virtualize });
         rp.container.dataset.pageIndex = String(p - 1);
         rp.stage.dataset.pageIndex = String(p - 1);
         pages.push(rp);
+        pageByIndex.set(p - 1, rp);
       }
       if (cancelled) return;
       pagesRef.current = pages;
+      // Replace (never merge) the index so a re-render for a NEW document cannot
+      // retain pages from the previous one (§ document switching invariant).
+      pageByIndexRef.current = pageByIndex;
       // Install the virtualization observer once the shells are mounted. The
       // observer root is the `.pane-scroll` container (the mount's parent) and
       // its 150% vertical rootMargin pre-renders a page ~1.5 viewports before it
@@ -483,6 +508,9 @@ export function SourcePane({
       // source switch does not keep analysing the old document (§20 case 15).
       ingestionControllerRef.current?.cancel();
       ingestionControllerRef.current = null;
+      // Phase 1: drop the page index so a source switch never exposes a page
+      // from the previous document before the new render repopulates it.
+      pageByIndexRef.current = new Map();
     };
   }, [wb, sourceId]);
 
@@ -557,9 +585,7 @@ export function SourcePane({
         if (ann.scope.kind !== "text") continue;
         if (ann.rectsStale !== true) continue;
         const anchor = ann.scope.anchor;
-        const page = pagesRef.current.find(
-          (p) => Number(p.container.dataset.pageIndex ?? "-1") === anchor.pageIndex,
-        );
+        const page = resolvePageByIndex(anchor.pageIndex); // Phase 1 O(1) lookup
         if (!page) continue;
         const rects = recomputeRectsFromQuote(page.stage, anchor.selectedText);
         if (rects.length === 0) continue;
@@ -649,9 +675,7 @@ export function SourcePane({
     if (!ready || !returnTarget) return;
     const source = wb.rawData().sources.find((s) => s.id === sourceId);
     if (!source) return;
-    const page = pagesRef.current.find(
-      (p) => Number(p.container.dataset.pageIndex ?? "-1") === returnTarget.pageIndex,
-    );
+    const page = resolvePageByIndex(returnTarget.pageIndex); // Phase 1 O(1) lookup
     if (!page) return;
     page.stage.querySelectorAll(".ito-return").forEach((el) => el.remove());
     page.container.scrollIntoView({
@@ -802,19 +826,20 @@ export function SourcePane({
   // page (so a right-click anywhere on a ranged page targets it).
   const hitTargetsForPage = useCallback(
     (pageIndex: number): HitTestTarget[] => {
-      const views = wb.annotationsForSource(sourceId);
+      // Phase 1: fetch ONLY this page's annotations via the page-bucket index
+      // (O(1 + Aₚ)) instead of scanning every annotation of the source. The
+      // index uses the same scope->page resolver, so membership is identical;
+      // the per-scope rect shaping below is unchanged.
+      const views = wb.annotationsForPage(sourceId, pageIndex);
       const targets: HitTestTarget[] = [];
       for (const view of views) {
         const scope = view.annotation.scope;
-        if (scope.kind === "text" && scope.anchor.pageIndex === pageIndex) {
+        if (scope.kind === "text") {
           targets.push({ id: view.annotation.id, rects: scope.anchor.rects });
-        } else if (scope.kind === "area" && scope.anchor.pageIndex === pageIndex) {
+        } else if (scope.kind === "area") {
           targets.push({ id: view.annotation.id, rects: [scope.anchor.rect] });
-        } else if (
-          scope.kind === "pages" &&
-          pageIndex >= scope.anchor.startPageIndex &&
-          pageIndex <= scope.anchor.endPageIndex
-        ) {
+        } else {
+          // "pages" range: a right-click anywhere on a ranged page targets it.
           targets.push({
             id: view.annotation.id,
             rects: [{ x: 0, y: 0, width: 1, height: 1 }],
@@ -934,9 +959,7 @@ export function SourcePane({
   // cropping the exact page-canvas region into a PNG (SVG fallback in jsdom).
   const commitAreaFromDrag = useCallback(
     async (pageIndex: number, rect: NormalizedRect) => {
-      const page = pagesRef.current.find(
-        (p) => Number(p.container.dataset.pageIndex ?? "-1") === pageIndex,
-      );
+      const page = resolvePageByIndex(pageIndex); // Phase 1 O(1) lookup
       const imageDataUrl = cropCanvasRegionToDataUrl(page?.canvas ?? null, rect);
       await wb.commitAreaAnnotation(sourceId, pageIndex, rect, undefined, imageDataUrl);
       // The Area tool stays active until toggled off (FEAT-002 2.4); just clear
@@ -994,9 +1017,7 @@ export function SourcePane({
     (e: React.PointerEvent) => {
       const start = areaDragRef.current;
       if (!areaSelectActive || !start) return;
-      const page = pagesRef.current.find(
-        (p) => Number(p.container.dataset.pageIndex ?? "-1") === start.pageIndex,
-      );
+      const page = resolvePageByIndex(start.pageIndex); // Phase 1 O(1) lookup
       if (!page) return;
       const box = page.stage.getBoundingClientRect();
       const nx = box.width > 0 ? (e.clientX - box.left) / box.width : start.startX;
@@ -1014,9 +1035,7 @@ export function SourcePane({
     (e: React.PointerEvent) => {
       const start = areaDragRef.current;
       if (!areaSelectActive || !start) return;
-      const page = pagesRef.current.find(
-        (p) => Number(p.container.dataset.pageIndex ?? "-1") === start.pageIndex,
-      );
+      const page = resolvePageByIndex(start.pageIndex); // Phase 1 O(1) lookup
       const box = page?.stage.getBoundingClientRect();
       const nx = box && box.width > 0 ? (e.clientX - box.left) / box.width : start.startX;
       const ny = box && box.height > 0 ? (e.clientY - box.top) / box.height : start.startY;
@@ -1238,11 +1257,10 @@ export function SourcePane({
   });
 
   const goToPage = useCallback((pageNumber: number) => {
-    const page = pagesRef.current.find(
-      (p) => Number(p.container.dataset.pageIndex ?? "-1") === pageNumber - 1,
-    );
+    // Phase 1 O(1) lookup: data-page-index is 0-based, pageNumber is 1-based.
+    const page = resolvePageByIndex(pageNumber - 1);
     page?.container.scrollIntoView({ behavior: "auto", block: "start" });
-  }, []);
+  }, [resolvePageByIndex]);
 
   useEffect(() => {
     if (!isPrimary || !registerCommands) return;
@@ -1505,7 +1523,7 @@ export function SourcePane({
           {/* FEAT-002 (2.4b) the live rubber-band area-select box. Positioned
               over the originating page stage via normalized percentages. */}
           {areaDrag && (
-            <AreaDragPreview areaDrag={areaDrag} pagesRef={pagesRef} mountRef={mountRef} />
+            <AreaDragPreview areaDrag={areaDrag} pageByIndexRef={pageByIndexRef} mountRef={mountRef} />
           )}
         </div>
       </div>
@@ -1724,16 +1742,15 @@ function ReaderFixedLayer({ children }: { children: React.ReactNode }): JSX.Elem
  */
 function AreaDragPreview({
   areaDrag,
-  pagesRef,
+  pageByIndexRef,
   mountRef,
 }: {
   areaDrag: AreaDragState;
-  pagesRef: React.MutableRefObject<RenderedPage[]>;
+  pageByIndexRef: React.MutableRefObject<Map<number, RenderedPage>>;
   mountRef: React.RefObject<HTMLDivElement>;
 }): JSX.Element {
-  const page = pagesRef.current.find(
-    (p) => Number(p.container.dataset.pageIndex ?? "-1") === areaDrag.pageIndex,
-  );
+  // Phase 1 O(1) lookup of the originating page by its 0-based index.
+  const page = pageByIndexRef.current.get(areaDrag.pageIndex);
   const mount = mountRef.current;
   let left = 0;
   let top = 0;

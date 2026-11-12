@@ -135,18 +135,29 @@ export function cssEscapeId(value: string): string {
   return value.replace(/["\\]/g, "\\$&");
 }
 
-/** Draw one annotation's overlay(s) across the rendered pages. */
+/**
+ * Draw one annotation's overlay(s) across the rendered pages.
+ *
+ * Phase 1 (STRUCTURAL INDEXING): callers may pass an O(1) `resolvePage` lookup
+ * (backed by the reader's `pageByIndex` map) to avoid the linear `pages.find`
+ * per page. The signature is otherwise preserved — when `resolvePage` is
+ * omitted the original `pages.find` is used, so existing callers/tests that
+ * pass only the array keep working unchanged.
+ */
 export function drawAnnotation(
   view: AnnotationView,
   pages: readonly RenderedPage[],
   suppressMotion: boolean,
   animate: boolean,
+  resolvePage?: (pageIndex: number) => RenderedPage | undefined,
 ): void {
+  const pageAt = (pageIndex: number): RenderedPage | undefined =>
+    resolvePage
+      ? resolvePage(pageIndex)
+      : pages.find((p) => Number(p.container.dataset.pageIndex ?? "-1") === pageIndex);
   if (view.annotation.scope.kind === "text") {
     const anchor = view.annotation.scope.anchor;
-    const page = pages.find(
-      (p) => Number(p.container.dataset.pageIndex ?? "-1") === anchor.pageIndex,
-    );
+    const page = pageAt(anchor.pageIndex);
     if (!page) return;
     renderHighlightOverlay(page.stage, {
       kind: view.style.kind,
@@ -158,9 +169,7 @@ export function drawAnnotation(
     });
   } else if (view.annotation.scope.kind === "area") {
     const anchor = view.annotation.scope.anchor;
-    const page = pages.find(
-      (p) => Number(p.container.dataset.pageIndex ?? "-1") === anchor.pageIndex,
-    );
+    const page = pageAt(anchor.pageIndex);
     if (!page) return;
     renderHighlightOverlay(page.stage, {
       kind: view.style.kind,
@@ -175,7 +184,7 @@ export function drawAnnotation(
   } else {
     const { startPageIndex, endPageIndex } = view.annotation.scope.anchor;
     for (let pi = startPageIndex; pi <= endPageIndex; pi++) {
-      const page = pages.find((p) => Number(p.container.dataset.pageIndex ?? "-1") === pi);
+      const page = pageAt(pi);
       if (!page) continue;
       renderHighlightOverlay(page.stage, {
         kind: view.style.kind,
