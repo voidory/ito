@@ -118,19 +118,19 @@ export function App(): JSX.Element {
     };
   }, []);
 
-  // Seed the library with the two real fixtures on first run.
-  useEffect(() => {
+  // Sample data is opt-in. It is deliberately not tied to an empty library:
+  // an empty persisted library must remain empty across reloads.
+  const loadSampleWorkspace = useCallback(async (): Promise<void> => {
     if (!wb || importing) return;
-    if (wb.rawData().sources.length > 0) return;
     setImporting(true);
-    void (async () => {
+    try {
       await importFixture(wb, fixture3, "Sample Document (3 pages)");
       await importFixture(wb, fixtureMulti, "Multi-Column Fixture");
-      // A third paper so a reader pane can be switched to a third source while
-      // the same subject stays open (spec section 8.2 note).
       await importFixture(wb, fixtureRotated, "Rotated Fixture");
       bump();
-    })();
+    } finally {
+      setImporting(false);
+    }
   }, [wb, importing, bump]);
 
   // Expose the imperative test API for Playwright once the workbench is ready.
@@ -310,6 +310,7 @@ export function App(): JSX.Element {
                 bump();
               }}
               onImported={() => bump()}
+              onLoadSampleWorkspace={() => void loadSampleWorkspace()}
             />
           ) : mobileMode && state.openSourceIds.length === 1 ? (
             // M4/M5 (A21) Phone Reading: a single-document reader whose scroll +
