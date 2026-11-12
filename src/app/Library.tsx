@@ -454,17 +454,6 @@ export function Library({
       style={styles.dropRoot}
     >
     <section data-testid="library" data-view="library" style={styles.root}>
-      <header style={styles.header}>
-        <h2 style={{ margin: 0 }}>Library</h2>
-        {sources.length > 0 && (
-          <div>
-          <button
-            data-testid="import-pdf-btn"
-            style={{ marginLeft: "0.75rem", fontWeight: 600 }}
-            onClick={() => pdfInputRef.current?.click()}
-          >
-            + Import PDF
-          </button>
           <input
             ref={pdfInputRef}
             data-testid="import-pdf-input"
@@ -477,6 +466,17 @@ export function Library({
               e.target.value = "";
             }}
           />
+      <header style={styles.header}>
+        <h2 style={{ margin: 0 }}>Library</h2>
+        {sources.length > 0 && (
+          <div>
+          <button
+            data-testid="import-pdf-btn"
+            style={{ marginLeft: "0.75rem", fontWeight: 600 }}
+            onClick={() => pdfInputRef.current?.click()}
+          >
+            + Import PDF
+          </button>
           {/* M14–M16 (FEAT-003) Local Folder Inbox: link a local directory and
               auto-import its new PDFs (dedup via the identity engine). */}
           <button
