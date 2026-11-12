@@ -20,8 +20,10 @@ import {
  *    spell-check), which a custom list cannot replicate;
  *  - everywhere else: view-specific actions, then "Go to…" navigation.
  *
- * Actions are routed through the SAME visible controls (by data-testid) so a
- * menu item can never drift from what the button does or bypass its guards.
+ * Graph actions call the same underlying Workbench command functions as the
+ * selected-node/hub controls. DOM-control simulation is intentionally avoided
+ * for graph operations; legacy shell/library navigation continues to reuse the
+ * existing visible controls.
  */
 
 function press(testId: string): void {
