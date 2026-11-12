@@ -1,13 +1,22 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { LocalFileStorageAdapter } from "../storage";
 import type { StorageAdapter } from "../storage";
 import { Workbench, type WorkbenchState } from "./workbench";
 
 /**
- * React binding for the headless Workbench. It owns a single Workbench instance
- * and republishes an immutable snapshot whenever a mutation completes. A
- * `bump()` callback is passed to child components so they can force a re-render
- * after awaiting a Workbench method.
+ * React binding for the headless Workbench.
+ *
+ * P4 (observable store): the Workbench is now observable. The binding subscribes
+ * to it with `useSyncExternalStore(wb.subscribe, wb.snapshot)`, so React tracks
+ * state through the subscription and re-renders on EVERY committed mutation —
+ * durable writes (which funnel through `persist()`) and transient view setters
+ * both call `notify()`. A forgotten manual refresh can no longer leave the UI
+ * showing stale data.
+ *
+ * `bump()` is retained for backward compatibility (dozens of call sites pass it
+ * down), but it is now just a manual nudge that re-notifies subscribers. It is
+ * no longer the sole re-render trigger, so mis-timed or missing `bump()` calls
+ * are a non-issue: the store drives the UI.
  */
 export interface UseWorkbench {
   readonly wb: Workbench | null;
@@ -35,23 +44,21 @@ function openDefaultWorkbench(): Promise<Workbench> {
   return defaultWorkbench;
 }
 
-export function useWorkbench(adapter?: StorageAdapter): UseWorkbench {
-  const wbRef = useRef<Workbench | null>(null);
-  const [state, setState] = useState<WorkbenchState | null>(null);
-  const [error, setError] = useState<string | null>(null);
+/** A stable no-op store used before the Workbench has opened. */
+const EMPTY_SUBSCRIBE = (): (() => void) => () => undefined;
+const EMPTY_SNAPSHOT = (): WorkbenchState | null => null;
 
-  const bump = useCallback(() => {
-    if (wbRef.current) setState(wbRef.current.snapshot());
-  }, []);
+export function useWorkbench(adapter?: StorageAdapter): UseWorkbench {
+  const [wb, setWb] = useState<Workbench | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (adapter ? Workbench.open(adapter) : openDefaultWorkbench())
-      .then((wb) => {
+      .then((opened) => {
         if (cancelled) return;
-        wb.enableAutoHistory();
-        wbRef.current = wb;
-        setState(wb.snapshot());
+        opened.enableAutoHistory();
+        setWb(opened);
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
@@ -61,5 +68,19 @@ export function useWorkbench(adapter?: StorageAdapter): UseWorkbench {
     };
   }, [adapter]);
 
-  return { wb: wbRef.current, state, bump, error };
+  // Track the Workbench's observable state. Before it opens, a stable no-op
+  // store yields null; once `wb` is set, React re-subscribes to the real store.
+  const state = useSyncExternalStore(
+    wb ? wb.subscribe : EMPTY_SUBSCRIBE,
+    wb ? wb.snapshot : EMPTY_SNAPSHOT,
+    wb ? wb.snapshot : EMPTY_SNAPSHOT,
+  );
+
+  // Backward-compatible manual nudge. Mutations already notify on their own;
+  // this simply re-notifies, which is harmless (React coalesces).
+  const bump = useCallback(() => {
+    wb?.notify();
+  }, [wb]);
+
+  return { wb, state, bump, error };
 }

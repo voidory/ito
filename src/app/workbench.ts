@@ -773,6 +773,23 @@ export class Workbench {
   private lastSyncedRevision: number | null = null;
   private syncReason: string | undefined = undefined;
 
+  /**
+   * P4 (observable store) subscribers. The React binding (useWorkbench) calls
+   * {@link subscribe} and re-reads {@link snapshot} whenever we {@link notify}.
+   * Every committed mutation funnels through persist() (durable writes) or a
+   * transient view setter, and BOTH call notify(), so a missed/forgotten manual
+   * refresh can no longer leave the UI showing stale data.
+   */
+  private readonly listeners = new Set<() => void>();
+  /**
+   * Cached immutable snapshot. useSyncExternalStore requires getSnapshot() to
+   * return a STABLE reference between notifications (returning a fresh object
+   * every call makes React loop forever). We rebuild this lazily on the first
+   * read after a notify() invalidates it (set to null), and hand back the same
+   * reference until the next mutation.
+   */
+  private snapshotCache: WorkbenchState | null = null;
+
   private constructor(
     private readonly storage: StorageAdapter,
     data: BrainData,
@@ -896,10 +913,43 @@ export class Workbench {
     await this.persist();
   }
 
+  // -- observable store (P4) ------------------------------------------------
+
+  /**
+   * Subscribe to state changes. Returns an unsubscribe function. Designed for
+   * React's useSyncExternalStore: paired with {@link snapshot} as getSnapshot.
+   * Bound so it can be passed directly as `wb.subscribe` without losing `this`.
+   */
+  subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  };
+
+  /**
+   * Invalidate the cached snapshot and notify every subscriber. Called by
+   * persist() (all durable mutations) and by the transient view setters, so the
+   * UI refreshes on every committed change without a hand-propagated bump().
+   * Public so the React binding's backward-compat `bump()` can re-notify; it is
+   * safe/idempotent to call redundantly (React coalesces the resulting renders).
+   */
+  notify(): void {
+    this.snapshotCache = null;
+    for (const listener of this.listeners) listener();
+  }
+
   // -- snapshot -------------------------------------------------------------
 
-  snapshot(): WorkbenchState {
-    return {
+  /**
+   * An immutable view of the current state. The reference is STABLE between
+   * mutations (cached) so it is safe as a useSyncExternalStore getSnapshot;
+   * notify() invalidates the cache so the next read reflects the change.
+   * Bound so it can be passed directly as `wb.snapshot`.
+   */
+  snapshot = (): WorkbenchState => {
+    if (this.snapshotCache) return this.snapshotCache;
+    this.snapshotCache = {
       brainId: this.data.manifest.brainId,
       sources: this.data.sources,
       pages: this.data.pages,
@@ -916,7 +966,8 @@ export class Workbench {
       openPageKind: this.openPageKind(),
       intersectionAspects: this.intersectionAspects(),
     };
-  }
+    return this.snapshotCache;
+  };
 
   /** Raw underlying data (read-only use — tests assert invariants on it). */
   rawData(): BrainData {
@@ -2117,6 +2168,7 @@ export class Workbench {
   async stageImport(bundle: Uint8Array | string): Promise<StagedImport> {
     const staged = await stageImportCodec(bundle);
     this.stagedImport = staged;
+    this.notify();
     return staged;
   }
 
@@ -2128,6 +2180,7 @@ export class Workbench {
   /** Discard any held staged import without committing (Cancel). */
   clearStagedImport(): void {
     this.stagedImport = null;
+    this.notify();
   }
 
   /**
@@ -2172,6 +2225,10 @@ export class Workbench {
     }
     await this.refreshBinaryAvailability();
     this.stagedImport = null;
+    // P4: this path swaps `this.data` directly (it does NOT go through
+    // persist()), so notify subscribers itself — otherwise the UI would only
+    // refresh via a call-site bump(), the fragility P4 removes.
+    this.notify();
     return { committed: true };
   }
 
@@ -2303,6 +2360,7 @@ export class Workbench {
   /** Open one document in the reading workspace (double-click/tap). */
   openSource(sourceId: SourceId): void {
     this.openSourceIds = [sourceId];
+    this.notify();
   }
 
   /**
@@ -2311,6 +2369,7 @@ export class Workbench {
    */
   openTogether(sourceIds: readonly SourceId[]): void {
     this.openSourceIds = [...sourceIds];
+    this.notify();
   }
 
   /**
@@ -2322,21 +2381,25 @@ export class Workbench {
   ensureSourceOpen(sourceId: SourceId): void {
     if (this.openSourceIds.includes(sourceId)) return;
     this.openSourceIds = [...this.openSourceIds, sourceId];
+    this.notify();
   }
 
   closeWorkspace(): void {
     this.openSourceIds = [];
     this.openSubjectPageId = null;
+    this.notify();
   }
 
   /** Open a subject page for composition. Does NOT close any open source. */
   openSubjectPage(pageId: PageId): void {
     this.openSubjectPageId = pageId;
+    this.notify();
   }
 
   /** Close the open subject page, leaving any open source reader in place. */
   closeSubjectPage(): void {
     this.openSubjectPageId = null;
+    this.notify();
   }
 
   // -- highlights tab / motion ---------------------------------------------
@@ -2344,10 +2407,12 @@ export class Workbench {
   /** Open/close the highlights tab. Closed reserves ZERO sidebar width (R18). */
   setHighlightsTabOpen(open: boolean): void {
     this.highlightsTabOpen = open;
+    this.notify();
   }
 
   setSuppressMotion(suppress: boolean): void {
     this.suppressMotion = suppress;
+    this.notify();
   }
 
   /**
@@ -2362,6 +2427,7 @@ export class Workbench {
   /** Switch the top-level Files/Nodes view. View state only — no record write. */
   setViewMode(mode: ViewMode): void {
     this.view = mode;
+    this.notify();
   }
 
   /**
@@ -2381,6 +2447,7 @@ export class Workbench {
    */
   setFocusedPageId(pageId: PageId | null): void {
     this.focusedPage = pageId;
+    this.notify();
   }
 
   /**
@@ -2396,6 +2463,7 @@ export class Workbench {
   /** Toggle the Nodes view by setting the formal viewMode (view state only). */
   setNodesViewActive(active: boolean): void {
     this.view = active ? "nodes" : "files";
+    this.notify();
   }
 
   /**
@@ -2502,6 +2570,7 @@ export class Workbench {
       ...this.workspaceLayout,
       paneWidths: { ...this.workspaceLayout.paneWidths, [slotId]: clamped },
     };
+    this.notify();
   }
 
   /** The flex-grow weight for a pane slot (defaults to 1). */
@@ -2517,6 +2586,7 @@ export class Workbench {
    */
   setLinesVisible(visible: boolean): void {
     this.workspaceLayout = { ...this.workspaceLayout, linesVisible: visible };
+    this.notify();
   }
 
   linesVisible(): boolean {
@@ -2545,6 +2615,7 @@ export class Workbench {
     // configuration is preserved across the swap (R19).
     const prevWeight = this.workspaceLayout.paneWidths[fromSourceId];
     if (prevWeight != null) this.setPaneWidth(toSourceId, prevWeight);
+    this.notify();
   }
 
   /**
@@ -2562,6 +2633,7 @@ export class Workbench {
     const [moved] = next.splice(idx, 1);
     next.unshift(moved!);
     this.openSourceIds = next;
+    this.notify();
   }
 
   // -- library category scope ----------------------------------------------
@@ -2573,6 +2645,7 @@ export class Workbench {
    */
   setCategoryScope(category: string | null): void {
     this.activeCategoryScope = category;
+    this.notify();
   }
 
   categoryScope(): string | null {
@@ -4294,6 +4367,7 @@ export class Workbench {
     kind: IntersectionRelationshipKind,
   ): void {
     this.intersectionRelationshipKinds.set(pageId, kind);
+    this.notify();
   }
 
   /**
@@ -5349,12 +5423,16 @@ export class Workbench {
       this.syncState = "up-to-date";
       this.lastSyncedRevision = publicationRevision;
       this.syncReason = undefined;
+      // P4: the sync badge reads syncStatus(); notify so it reflects the new
+      // state without a call-site bump().
+      this.notify();
       return this.syncStatus();
     } catch (err) {
       // A failure BEFORE step 3 leaves the prior remote pointer intact (we never
       // touched it). Surface the failure without advancing lastSyncedRevision.
       this.syncState = "offline";
       this.syncReason = err instanceof Error ? err.message : String(err);
+      this.notify();
       return this.syncStatus();
     }
   }
@@ -5376,6 +5454,7 @@ export class Workbench {
       if (!pointer) {
         this.syncState = "offline";
         this.syncReason = "no remote pointer (current-revision.json absent)";
+        this.notify();
         return this.syncStatus();
       }
 
@@ -5383,6 +5462,7 @@ export class Workbench {
       if (snapshotJson === null) {
         this.syncState = "stale";
         this.syncReason = `remote snapshot rev-${pointer.publicationRevision} missing`;
+        this.notify();
         return this.syncStatus();
       }
 
@@ -5391,6 +5471,7 @@ export class Workbench {
       if (actualHash !== pointer.snapshotHash) {
         this.syncState = "stale";
         this.syncReason = "remote snapshot failed integrity verification";
+        this.notify();
         return this.syncStatus();
       }
 
@@ -5402,6 +5483,7 @@ export class Workbench {
         this.clearStagedImport();
         this.syncState = "stale";
         this.syncReason = `remote snapshot rejected: ${staged.reason}`;
+        this.notify();
         return this.syncStatus();
       }
 
@@ -5412,12 +5494,18 @@ export class Workbench {
       this.syncState = "up-to-date";
       this.lastSyncedRevision = pointer.publicationRevision;
       this.syncReason = undefined;
+      // P4: this success path swaps `this.data` directly (NOT via persist), and
+      // clearStagedImport() above notified BEFORE the swap. Notify now, after
+      // the swap + sync-state update, so subscribers rebuild from the new brain
+      // and the refreshed syncStatus — without relying on a call-site bump().
+      this.notify();
       return this.syncStatus();
     } catch (err) {
       // A20: any interruption/corruption leaves this.data untouched.
       this.clearStagedImport();
       this.syncState = "offline";
       this.syncReason = err instanceof Error ? err.message : String(err);
+      this.notify();
       return this.syncStatus();
     }
   }
@@ -5665,10 +5753,21 @@ export class Workbench {
     // second write and clobber it with a stale snapshot. Each queued task reads
     // the LATEST `this.data` at execution time so writes compose instead of
     // racing. A rejection does not break the chain for subsequent saves.
+    // P4: the in-memory mutation that led here is already applied to
+    // `this.data`, so refresh subscribers immediately — the UI reflects the
+    // change without waiting for the (async) write to land.
+    this.notify();
     const run = this.saveQueue.then(() => this.persistNow());
     // Swallow rejections on the chain tail so one failed save cannot reject the
     // next caller's queued promise; the real error is still surfaced via `run`.
     this.saveQueue = run.catch(() => undefined);
+    // P4: notify again once the write settles so saveError (set/cleared in
+    // persistNow) and the advanced revision are reflected. Fires on both
+    // success and failure; never rejects this tail.
+    void run.then(
+      () => this.notify(),
+      () => this.notify(),
+    );
     return run;
   }
 

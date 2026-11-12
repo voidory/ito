@@ -17,7 +17,13 @@ each with a concrete plan to fix. Items are ordered by severity.
   never installed in production. e2e opts in with `VITE_ITO_TEST_API=1`.
 - **P3 — DONE**: startup no longer claims a non-existent in-memory fallback; a missing
   IndexedDB now surfaces an honest error instead of a passing READY note.
-- **P4–P8**: still open (see below).
+- **P4 — DONE**: `Workbench` is now an observable store (`subscribe`/`notify` + a cached,
+  reference-stable `snapshot`); `useWorkbench` consumes it via `useSyncExternalStore`.
+  Every durable mutation (through `persist()`) and every transient view setter — plus the
+  two paths that swap the live brain outside `persist()` (`commitStagedImport`,
+  `refreshFromRemote`) — now `notify()`, so a forgotten/mis-timed `bump()` can no longer
+  leave the UI stale. `bump()` is kept as a backward-compatible re-notify shim.
+- **P5–P8**: still open (see below).
 
 ---
 
