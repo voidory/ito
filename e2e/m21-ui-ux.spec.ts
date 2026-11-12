@@ -104,6 +104,10 @@ test.describe("M21 UI/UX priorities", () => {
     await node.click({ button: "right" });
 
     await expect(page.getByTestId("ctx-node-open")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("app-context-menu")).toHaveCount(0);
+
+    await node.click({ button: "right" });
     await page.getByTestId("ctx-node-open").click();
     await expect(page.getByTestId("view-files")).toHaveAttribute("aria-selected", "true");
   });
