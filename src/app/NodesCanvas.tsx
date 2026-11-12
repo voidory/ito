@@ -1288,6 +1288,16 @@ export function NodesCanvas({
               fill={hub.blendColor}
               onClick={() => openHubWorkspace(hub.relationshipId)}
             />
+            <text
+              className="hub-label"
+              x={round(hub.center.x)}
+              y={round(hub.center.y) - 12}
+              textAnchor="middle"
+              style={{ opacity: pillVisible ? 1 : 0 }}
+              pointerEvents="none"
+            >
+              {hub.label}
+            </text>
             {/*
               A13-M2: develop/open the hub's FULL Connecting Page in the
               SubjectEditor. Distinct from the inline short-label edit (the
