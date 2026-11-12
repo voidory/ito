@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - release/v1.0
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  # Typecheck, full unit/integration suite, and production build. These are
+  # fast and must pass on every push/PR. (Previously CI ran only ONE unit file,
+  # which let real failures and a build-breaking syntax error reach the branch.)
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit + integration tests (Vitest)
+        run: npm test
+      - name: Production build
+        run: npm run build
+
+  # Real-browser Playwright suite against the production build. Runs in its own
+  # job so a chromium install failure does not mask unit results, and vice
+  # versa. The webServer in playwright.config.ts builds with
+  # VITE_ITO_TEST_API=1 so the gated window.__ito test API is available.
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Install Playwright chromium
+        run: npx playwright install --with-deps chromium
+      - name: Playwright e2e tests
+        run: npm run test:e2e

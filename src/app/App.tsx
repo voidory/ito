@@ -17,7 +17,6 @@ import type { KoofrStorageAdapter as KoofrAdapter } from "../storage";
 import { MobileReaderSheet } from "./MobileReaderSheet";
 import { CaptureProcessingQueue } from "./CaptureProcessingQueue";
 import { revealPresentation } from "./threeScene.map";
-import { installTestApi } from "./testApi";
 import type { KoofrStorageAdapter, StagedImport } from "../storage";
 import type { PageId, SourceId } from "../model";
 import { loadDocument, hashBytes } from "../pdf";
@@ -33,6 +32,28 @@ type Boot =
   | { kind: "booting" }
   | { kind: "ready"; detail: string }
   | { kind: "error"; detail: string };
+
+/**
+ * P2: the privileged `window.__ito` test API must never ship in a normal
+ * production bundle (it exposes destructive, unauthenticated mutators). It is
+ * installed only when:
+ *   - running under the Vite dev server (`import.meta.env.DEV`), or
+ *   - an e2e build explicitly opts in with `VITE_ITO_TEST_API=1`.
+ * Playwright serves a PRODUCTION build (`vite build && vite preview`), where
+ * `DEV` is false, so its webServer sets `VITE_ITO_TEST_API=1` to keep the e2e
+ * suite working while a real `npm run build` leaves the API out. The access is
+ * wrapped so it is safe under Node/jsdom where `import.meta.env` may be absent.
+ */
+export function testApiEnabled(): boolean {
+  try {
+    const env = (import.meta as unknown as {
+      env?: { DEV?: boolean; VITE_ITO_TEST_API?: string };
+    }).env;
+    return env?.DEV === true || env?.VITE_ITO_TEST_API === "1";
+  } catch {
+    return false;
+  }
+}
 
 /**
  * App shell for the M1 reading workbench. The Library is the DEFAULT entry
@@ -135,8 +156,20 @@ export function App(): JSX.Element {
   }, [wb, importing, bump]);
 
   // Expose the imperative test API for Playwright once the workbench is ready.
+  // P2: it is NOT installed in a normal production build — only under the Vite
+  // dev server or an e2e build that explicitly opts in (see testApiEnabled).
+  // The module is loaded via dynamic import() so Vite code-splits it into a
+  // separate chunk that is never fetched (and whose test-only fakes/credentials
+  // never load) in a normal production build.
   useEffect(() => {
-    if (wb) installTestApi(wb, bump);
+    if (!wb || !testApiEnabled()) return;
+    let cancelled = false;
+    void import("./testApi").then(({ installTestApi }) => {
+      if (!cancelled) installTestApi(wb, bump);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [wb, bump]);
 
   if (boot.kind !== "ready") {

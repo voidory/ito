@@ -6,6 +6,19 @@ This report inspects the app's UI (`src/app/**`) and flags critical problems —
 bugs, inconsistencies, missing backend wiring, and disorganised/legacy code —
 each with a concrete plan to fix. Items are ordered by severity.
 
+### Status
+
+- **P0 — DONE** (PR #19): build unbroken; `Library.tsx` JSX + e2e dialog typing fixed.
+- **P1 — DONE**: CI now runs typecheck + full Vitest suite + build + Playwright e2e
+  (was one unit file). Suite made green — 3 stale test files updated to the current
+  empty-state Library design and the M20 selection-based hub UX (881/881 passing).
+- **P2 — DONE**: `window.__ito` test API gated behind `testApiEnabled()` and loaded
+  via dynamic `import()`, so it is code-split out of a normal `npm run build` and
+  never installed in production. e2e opts in with `VITE_ITO_TEST_API=1`.
+- **P3 — DONE**: startup no longer claims a non-existent in-memory fallback; a missing
+  IndexedDB now surfaces an honest error instead of a passing READY note.
+- **P4–P8**: still open (see below).
+
 ---
 
 ## P0 — BLOCKER: the app does not build at HEAD

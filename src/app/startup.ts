@@ -14,8 +14,6 @@ export async function runStartupChecks(): Promise<string> {
     missing.push("crypto.randomUUID");
   }
   if (typeof indexedDB === "undefined") {
-    // Not fatal for the shell, but worth surfacing. Storage falls back/handles
-    // this explicitly at the adapter layer; here we only note it.
     missing.push("indexedDB");
   }
 
@@ -23,9 +21,18 @@ export async function runStartupChecks(): Promise<string> {
     throw new Error(`Required browser APIs unavailable: ${missing.join(", ")}`);
   }
 
-  const storageNote = missing.includes("indexedDB")
-    ? " (persistent storage unavailable; running in-memory)"
-    : "";
+  // P3: the only storage adapter the app wires up is the IndexedDB-backed one
+  // (useWorkbench → LocalFileStorageAdapter). There is NO in-memory fallback:
+  // if IndexedDB is missing, Workbench.open will fail and nothing can be saved.
+  // The old READY note falsely claimed the app kept running "in-memory", which
+  // masked a hard failure as a soft note. Surface the truth instead.
+  if (missing.includes("indexedDB")) {
+    throw new Error(
+      "Persistent storage unavailable: this browser does not expose IndexedDB, " +
+        "so your work cannot be saved. Enable storage (e.g. leave private/incognito " +
+        "mode or allow site data) and reload.",
+    );
+  }
 
-  return `Schema v${SCHEMA_VERSION} initialised.${storageNote}`;
+  return `Schema v${SCHEMA_VERSION} initialised.`;
 }
