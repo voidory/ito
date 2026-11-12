@@ -255,6 +255,17 @@
   font-weight: 700;
 }
 
+/* Relationship labels are shown only while their hub is hovered or selected. */
+.hub-label {
+  font: 600 10px system-ui, sans-serif;
+  fill: #2a2825;
+  paint-order: stroke fill;
+  stroke: #fbfaf7;
+  stroke-width: 3px;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
 /* The hub's "open connecting page" affordance (A13-M2). */
 .open-connecting-page {
   font: 500 9px system-ui, sans-serif;
