@@ -171,6 +171,11 @@ export function normalizeToLatex(input: string): string {
     (_m, pre, a, b) => `${pre}\\frac{${a}}{${b}}`,
   );
 
+  // The glyph→command mapping above appends a separator space (so `α2` cannot
+  // fuse into `\alpha2`). A following ^/_ already terminates the command, so
+  // drop that space: `\alpha ^2` → `\alpha^2`.
+  s = s.replace(/(\\[A-Za-z]+) +(?=[\^_])/g, "$1");
+
   return s.replace(/\s+/g, " ").trim();
 }
 
