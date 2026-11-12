@@ -456,7 +456,8 @@ export function Library({
     <section data-testid="library" data-view="library" style={styles.root}>
       <header style={styles.header}>
         <h2 style={{ margin: 0 }}>Library</h2>
-        <div>
+        {sources.length > 0 && (
+          <div>
           <button
             data-testid="import-pdf-btn"
             style={{ marginLeft: "0.75rem", fontWeight: 600 }}
@@ -532,7 +533,9 @@ export function Library({
           >
             Import Zotero
           </button>
-        </div>
+
+          </div>
+        )}        </div>
       </header>
 
       {addWebsiteOpen && (
