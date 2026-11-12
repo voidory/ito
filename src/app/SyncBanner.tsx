@@ -341,5 +341,5 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: "column",
     gap: "0.25rem",
   },
-  demoNote: { margin: 0, fontSize: "0.66rem", color: "#92400e", lineHeight: 1.35 },
+  demoNote: { margin: 0, fontSize: "0.66rem", color: "var(--ito-warning-fg)", lineHeight: 1.35 },
 };

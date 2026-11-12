@@ -704,7 +704,7 @@ export function SourcePane({
             width: `${r.width * 100}%`,
             height: `${r.height * 100}%`,
             background: "rgba(26,86,219,0.25)",
-            outline: "2px solid #1a56db",
+            outline: "2px solid var(--ito-info-fg)",
             borderRadius: "3px",
             pointerEvents: "none",
           } satisfies Partial<CSSStyleDeclaration>);

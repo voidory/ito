@@ -87,7 +87,7 @@ export function ImportStagingReport({
       )}
 
       {error && (
-        <p data-testid="import-staging-error" role="alert" style={{ color: "#c5221f" }}>
+        <p data-testid="import-staging-error" role="alert" style={{ color: "var(--ito-danger-fg)" }}>
           {error}
         </p>
       )}
@@ -153,7 +153,7 @@ const styles: Record<string, React.CSSProperties> = {
   finding: {
     padding: "0.4rem 0.5rem",
     marginBottom: "0.35rem",
-    background: "#fef3c7",
+    background: "var(--ito-warning-bg)",
     border: "1px solid #f0d38a",
     borderRadius: "6px",
     fontSize: "0.82rem",

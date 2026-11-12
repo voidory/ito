@@ -52,6 +52,30 @@
   --ito-annot-green: #7ad67a;
   --ito-annot-blue: #6fb7ff;
   --ito-annot-pink: #ff9bd0;
+
+  /*
+   * P6 (styling consolidation): semantic STATUS tokens. Components previously
+   * hardcoded these exact hex values inline (error-red, success-green,
+   * warning-amber, info-blue) in dozens of places, so a theme change meant
+   * editing many inline style objects. They are consolidated here as the single
+   * source of truth; each role has a foreground (fg), a soft background (bg) and
+   * a border variant for banners/badges.
+   */
+  --ito-danger-fg: #c5221f;
+  --ito-danger-strong: #b3261e;
+  --ito-danger-bg: #fdecea;
+  --ito-danger-border: #f5c6c2;
+  --ito-danger-ink: #611a15;
+
+  --ito-success-fg: #166534;
+  --ito-success-bg: #e6f4ea;
+
+  --ito-warning-fg: #92400e;
+  --ito-warning-bg: #fef3c7;
+
+  --ito-info-fg: #1a56db;
+  --ito-info-strong: #1e40af;
+  --ito-info-bg: #dbeafe;
 }
 
 /*

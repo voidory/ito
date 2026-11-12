@@ -134,7 +134,7 @@ export function BackupExportModal({
       <div
         data-testid="backup-mode-badge"
         data-mode={isFull ? "full" : "targeted"}
-        style={{ ...styles.badge, background: isFull ? "#e6f4ea" : "#fef3c7" }}
+        style={{ ...styles.badge, background: isFull ? "var(--ito-success-bg)" : "var(--ito-warning-bg)" }}
       >
         {badge}
       </div>

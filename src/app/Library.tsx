@@ -138,7 +138,7 @@ export function AddWebsiteModal({
         <p
           data-testid="website-snapshot-required-error"
           role="alert"
-          style={{ color: "#c5221f", fontSize: "0.85rem" }}
+          style={{ color: "var(--ito-danger-fg)", fontSize: "0.85rem" }}
         >
           {error}
         </p>
@@ -230,15 +230,15 @@ export function ImportZoteroModal({
           style={{ display: "none" }}
           onChange={(e) => void takeFile(e.target.files?.[0] ?? null)}
         />
-        <span style={{ fontSize: "0.85rem", color: "#1a56db" }}>Choose JSON file…</span>
+        <span style={{ fontSize: "0.85rem", color: "var(--ito-info-fg)" }}>Choose JSON file…</span>
       </label>
       {error && (
-        <p data-testid="zotero-import-error" role="alert" style={{ color: "#c5221f", fontSize: "0.85rem" }}>
+        <p data-testid="zotero-import-error" role="alert" style={{ color: "var(--ito-danger-fg)", fontSize: "0.85rem" }}>
           {error}
         </p>
       )}
       {summary && (
-        <p data-testid="zotero-import-summary" style={{ color: "#166534", fontSize: "0.85rem" }}>
+        <p data-testid="zotero-import-summary" style={{ color: "var(--ito-success-fg)", fontSize: "0.85rem" }}>
           {summary}
         </p>
       )}
@@ -513,7 +513,7 @@ export function Library({
           {selected.size > 0 && (
             <button
               data-testid="delete-selected"
-              style={{ marginLeft: "0.75rem", color: "#b3261e" }}
+              style={{ marginLeft: "0.75rem", color: "var(--ito-danger-strong)" }}
               onClick={() => setPendingDelete([...selected])}
             >
               Delete selected ({selected.size})
@@ -796,8 +796,8 @@ function LibraryRow({
             fontSize: "0.72rem",
             padding: "0.05rem 0.4rem",
             borderRadius: "4px",
-            background: offloaded ? "#fef3c7" : "#e6f4ea",
-            color: offloaded ? "#92400e" : "#166534",
+            background: offloaded ? "var(--ito-warning-bg)" : "var(--ito-success-bg)",
+            color: offloaded ? "var(--ito-warning-fg)" : "var(--ito-success-fg)",
           }}
         >
           {status}
@@ -818,7 +818,7 @@ function LibraryRow({
           aria-label={`Delete ${source.title}`}
           title="Delete this document and its highlights"
           onClick={onDelete}
-          style={{ fontSize: "0.75rem", marginLeft: "0.4rem", color: "#b3261e" }}
+          style={{ fontSize: "0.75rem", marginLeft: "0.4rem", color: "var(--ito-danger-strong)" }}
         >
           Delete
         </button>
@@ -991,7 +991,7 @@ const styles: Record<string, React.CSSProperties> = {
     background: "none",
     fontSize: "0.95rem",
     cursor: "pointer",
-    color: "#1a56db",
+    color: "var(--ito-info-fg)",
     padding: 0,
   },
   modal: {

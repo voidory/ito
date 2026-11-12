@@ -128,9 +128,9 @@ function CaptureSyncBadge({ capture }: { capture: Capture }): JSX.Element {
             ? "Dismissed"
             : "Saved on this device";
   const palette: Record<string, { bg: string; fg: string }> = {
-    local: { bg: "#e6f4ea", fg: "#166534" },
-    pending: { bg: "#fef3c7", fg: "#92400e" },
-    uploaded: { bg: "#dbeafe", fg: "#1e40af" },
+    local: { bg: "var(--ito-success-bg)", fg: "var(--ito-success-fg)" },
+    pending: { bg: "var(--ito-warning-bg)", fg: "var(--ito-warning-fg)" },
+    uploaded: { bg: "var(--ito-info-bg)", fg: "var(--ito-info-strong)" },
     incorporated: { bg: "#ede9fe", fg: "#5b21b6" },
     dismissed: { bg: "#f3f4f6", fg: "#6b7280" },
   };

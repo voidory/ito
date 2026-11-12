@@ -27,7 +27,14 @@ each with a concrete plan to fix. Items are ordered by severity.
   `localStorage`); `App` restores a configured real remote at boot so it reconnects
   automatically, the config modal shows a "reconnects on reload" hint + a Disconnect
   action, and the in-memory demo remote is explicitly labelled ephemeral (never persisted).
-- **P6–P8**: still open (see below).
+- **P6 — PARTIAL/DONE**: added semantic status tokens to `theme.css`
+  (`--ito-danger-*`, `--ito-success-*`, `--ito-warning-*`, `--ito-info-*`) and replaced the
+  recurring hardcoded hex (error-red, success-green, warning-amber, info-blue) across the
+  shell/Library/mobile/backup/sync surfaces with `var(--ito-*)` — one source of truth for a
+  theme change. Remaining one-off neutral grays and SVG presentation attributes (which can't
+  take CSS `var()`) were intentionally left; a formal no-raw-hex lint rule is deferred (the
+  repo ships no ESLint config).
+- **P7–P8**: still open (see below).
 
 ---
 

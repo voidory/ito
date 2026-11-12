@@ -187,7 +187,7 @@ export function App(): JSX.Element {
           {boot.kind === "booting" && <p>Starting…</p>}
           {boot.kind === "error" && (
             <>
-              <h2 style={{ color: "#c5221f" }}>ERROR</h2>
+              <h2 style={{ color: "var(--ito-danger-fg)" }}>ERROR</h2>
               <p>{boot.detail}</p>
             </>
           )}
@@ -200,7 +200,7 @@ export function App(): JSX.Element {
     return (
       <main style={{ padding: "2rem" }}>
         <section data-testid="app-status" data-state="error">
-          <h2 style={{ color: "#c5221f" }}>ERROR</h2>
+          <h2 style={{ color: "var(--ito-danger-fg)" }}>ERROR</h2>
           <p>{error}</p>
         </section>
       </main>
@@ -436,9 +436,9 @@ export function SaveErrorBanner({
         alignItems: "center",
         gap: "0.75rem",
         padding: "0.5rem 1rem",
-        background: "#fdecea",
-        color: "#611a15",
-        borderBottom: "1px solid #f5c6c2",
+        background: "var(--ito-danger-bg)",
+        color: "var(--ito-danger-ink)",
+        borderBottom: "1px solid var(--ito-danger-border)",
         fontSize: "0.85rem",
       }}
     >
