@@ -1114,7 +1114,6 @@ export function NodesCanvas({
         preserveAspectRatio="xMidYMid meet"
         data-suppress-motion={suppressMotion ? "true" : "false"}
         role="presentation"
-        aria-label="Concept network"
         onPointerDown={onBackgroundPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={(e) => endGesture(e)}
@@ -1435,6 +1434,33 @@ export function NodesCanvas({
           );
         })}
       </g>
+
+      {/* Keyboard-accessible graph hit targets. They are visually hidden so
+          the network remains clean; the visible action row handles the selected
+          entity's actual operations. */}
+      <div className="nodes-accessible-controls" aria-label="Concept network controls">
+        {scene.nodes.map((node) => (
+          <button
+            key={`a11y-node-${node.pageId}`}
+            type="button"
+            aria-label={`Select node ${node.title}`}
+            onClick={() => onNodeClick(node.pageId)}
+            onDoubleClick={() => openNodePage(node.pageId)}
+          />
+        ))}
+        {scene.hubs.map((hub) => (
+          <button
+            key={`a11y-hub-${hub.relationshipId}`}
+            type="button"
+            aria-label={`Select connection ${hub.label || "connection"}`}
+            onClick={() => {
+              setSelectedHubId(hub.relationshipId);
+              setSelectedNodeId(null);
+              setSelectedCategoryId(null);
+            }}
+          />
+        ))}
+      </div>
 
       {/* Selected graph actions live outside the SVG so they are real,
           keyboard-focusable DOM controls rather than interactive SVG content. */}
