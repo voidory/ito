@@ -42,22 +42,83 @@
 }
 
 /*
- * FEAT-002 (2.3a) dynamic on-theme watercolor text selection. The native
- * ::selection paint over the transparent text layer uses a soft translucent
- * tint matching the active highlight palette so selecting glyphs feels organic
- * and on-theme rather than the stark browser-blue block. The live preview pills
- * (rendered on the fixed layer during a drag) are soft-rounded + translucent.
+ * v2-m1 SUBTRACTIVE PIGMENT HIGHLIGHTING.
+ *
+ * Every highlight surface used to paint above the page <canvas> with ordinary
+ * source-over alpha. That averages the tint INTO the glyphs underneath: a 45%
+ * yellow veil lifts black text to a washed-out olive grey (the "milky glass"
+ * look) and costs a third of its contrast.
+ *
+ * Real highlighter ink is subtractive, and `mix-blend-mode: multiply` is the
+ * same arithmetic: each channel of the result is pigment x canvas. White paper
+ * (1) takes the full tint; black ink (0) stays black whatever is laid over it.
+ *
+ * Two things make that hold on the page:
+ *  1. `.pdf-page-stage` is an isolated stacking context, so a blend inside it
+ *     composites against that page's own sheet and stops there. Without it the
+ *     blend would reach through to the desk the page sits on.
+ *  2. Everything stacked above the canvas multiplies: the committed overlays
+ *     (.ito-highlight / .ito-highlight-fragment), the live drag preview
+ *     (.ito-selection-live-preview) and the transparent text layer itself, so
+ *     the native ::selection tint and find-match backgrounds painted inside it
+ *     are ink too rather than a veil.
+ *
+ * The reader has no dark theme and a PDF page is always rendered as white
+ * paper, so no dark-mode guard is needed. If the canvas is ever inverted,
+ * these rules must switch to `screen` under that theme: multiplying a light
+ * pigment into a black sheet is invisible.
  */
-.textLayer ::selection {
-  background: rgba(255, 221, 87, 0.4);
-}
-.textLayer ::-moz-selection {
-  background: rgba(255, 221, 87, 0.4);
+.pdf-page-stage {
+  isolation: isolate;
 }
 
+.ito-highlight,
+.ito-highlight-fragment,
 .ito-selection-live-preview {
-  /* A soft, organic watercolor pill; motion-free so it is always safe. */
-  box-shadow: 0 1px 4px rgba(44, 74, 111, 0.15);
+  mix-blend-mode: multiply;
+}
+
+.pdf-page-stage > .textLayer {
+  mix-blend-mode: multiply;
+}
+
+/*
+ * A highlight strip reads as watercolour dried into the paper, not a plastic
+ * rectangle: square-ish 3px corners and a hairline of pooled pigment at the
+ * wet edge. Under multiply the rim only ever darkens.
+ */
+.ito-highlight-fragment {
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px var(--ito-pigment-rim, rgba(0, 0, 0, 0.08));
+}
+
+/* Underline: nothing behind the glyphs, one crisp pigment stroke on the
+   baseline (the 2.5px stroke colour is set per annotation). */
+.ito-highlight-fragment[data-style="underline"] {
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/*
+ * FEAT-002 (2.3a) on-theme text selection. The native ::selection tint is kept
+ * faint: the live preview strips (below) carry the pigment, and this is only
+ * what shows for a selection the preview does not mirror. Where both paint,
+ * the two washes multiply, so a live selection reads a touch deeper than the
+ * highlight it dries into.
+ */
+.textLayer ::selection {
+  background: var(--ito-selection-wash, rgba(255, 236, 153, 0.2));
+}
+.textLayer ::-moz-selection {
+  background: var(--ito-selection-wash, rgba(255, 236, 153, 0.2));
+}
+
+/* The live preview strips are a committed highlight in the making: the same
+   pigment and the same wet edge. Motion-free, so it is always safe. */
+.ito-selection-live-preview {
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px var(--ito-pigment-rim, rgba(0, 0, 0, 0.08));
 }
 
 /* FEAT-002 (2.4a) area-select mode shows a crosshair + disables text select. */

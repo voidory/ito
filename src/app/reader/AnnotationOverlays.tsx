@@ -163,8 +163,15 @@ export function SelectionToolbar({
 export const SelectionPopup = SelectionToolbar;
 
 /**
- * The live watercolor selection preview: soft-rounded translucent pills
- * mirrored over the current selection's client rects. Presentation only.
+ * The live watercolour selection preview: one strip per line of the current
+ * selection (or of a scanned-page drag), in viewport coordinates.
+ *
+ * The strips are the same subtractive pigment as a committed highlight
+ * (`mix-blend-mode: multiply`, see editor.css), so the glyphs under a live
+ * selection stay black instead of being veiled. For that blend to reach the
+ * page the strips must NOT sit inside a stacking context of their own: the
+ * caller mounts this outside the z-indexed fixed layer (see ReaderBlendLayer in
+ * SourcePane), and the wrapper here is deliberately unstyled. Presentation only.
  */
 export function LiveSelectionPreview({
   preview,
@@ -184,8 +191,8 @@ export function LiveSelectionPreview({
             width: r.width,
             height: r.bottom - r.top,
             background: preview.color,
-            opacity: 0.35,
-            borderRadius: "6px",
+            mixBlendMode: "multiply",
+            borderRadius: "3px",
             pointerEvents: "none",
             zIndex: 999,
           }}

@@ -144,6 +144,10 @@ export async function renderPage(
   // The stage establishes the positioning context + exact viewport box; canvas,
   // text layer and overlays all live inside it.
   stage.style.position = "relative";
+  // v2-m1: the stage is its own isolated stacking context, so the multiply
+  // blend of the highlight overlays composites against THIS page's canvas and
+  // stops there (it can never reach through to the desk behind the page).
+  stage.style.setProperty("isolation", "isolate");
   container.appendChild(stage);
 
   const canvas = document.createElement("canvas");

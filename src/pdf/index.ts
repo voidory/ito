@@ -8,6 +8,7 @@ export * from "./anchor";
 export * from "./render";
 export * from "./highlight";
 export * from "./pointerSelection";
+export * from "./scannedHighlight";
 export * from "./textCache";
 export * from "./scienceOcr";
 export * from "./glyphMap";

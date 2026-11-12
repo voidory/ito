@@ -9,6 +9,13 @@
  * rounded ends and NO ribbon curl. Glyphs stay legible and stationary because
  * the overlay sits BEHIND the transparent text layer and never moves them.
  *
+ * v2-m1: the overlay is SUBTRACTIVE. It still paints above the opaque page
+ * `<canvas>`, but with `mix-blend-mode: multiply` inside the page stage's own
+ * isolated stacking context, so each channel of the result is
+ * `pigment x canvas`: white paper takes the full tint while black glyphs stay
+ * black (0 x anything = 0). The former `source-over` alpha fill averaged the
+ * tint INTO the glyphs and lifted black text to a washed-out grey-yellow.
+ *
  * Motion is suppressed when either the OS `prefers-reduced-motion` query or the
  * in-app suppress-motion flag is set; the final committed state is identical,
  * so state feedback is preserved (R11) — only the transition is removed.
@@ -300,13 +307,29 @@ export interface OverlayOptions {
   readonly areaLabel?: string;
 }
 
-/** CSS color per named highlight color. */
+/** The blend mode every highlight surface composites with (see module doc). */
+export const HIGHLIGHT_BLEND_MODE = "multiply";
+
+/**
+ * Watercolour pigment per named highlight color, tuned for `multiply`.
+ *
+ * Under multiply a fill is a FILTER, not a veil: the paper shows exactly this
+ * colour and ink is untouched, so the pigments are OPAQUE and high-luminance
+ * (a light wash that lets the paper glow) rather than a saturated colour
+ * diluted with alpha. They sit close to what the previous 45%-alpha fills
+ * produced on white paper, a touch warmer.
+ */
 export const COLOR_CSS: Record<string, string> = {
-  yellow: "rgba(255, 221, 87, 0.45)",
-  green: "rgba(130, 220, 150, 0.45)",
-  blue: "rgba(130, 190, 255, 0.45)",
-  pink: "rgba(255, 150, 200, 0.45)",
+  yellow: "rgb(255, 236, 153)",
+  green: "rgb(200, 240, 196)",
+  blue: "rgb(196, 226, 255)",
+  pink: "rgb(255, 208, 226)",
 };
+
+/** The multiply pigment for a named colour (yellow when unknown). */
+export function pigmentCss(color: string): string {
+  return COLOR_CSS[color] ?? COLOR_CSS["yellow"]!;
+}
 
 function reducedMotion(suppressMotion: boolean): boolean {
   if (suppressMotion) return true;
@@ -314,17 +337,6 @@ function reducedMotion(suppressMotion: boolean): boolean {
     return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   }
   return false;
-}
-
-/**
- * A lightly-uneven rounded corner spec. Four slightly different radii give the
- * soft, hand-drawn feel the spec asks for without any ribbon curl. Seeded by
- * the fragment index so it is stable across re-renders (not jittering).
- */
-function unevenRadius(seed: number): string {
-  const base = 6;
-  const jitter = (n: number) => base + ((Math.sin(seed * 12.9898 + n * 78.233) + 1) * 2.5);
-  return `${jitter(1).toFixed(1)}px ${jitter(2).toFixed(1)}px ${jitter(3).toFixed(1)}px ${jitter(4).toFixed(1)}px`;
 }
 
 /**
@@ -345,15 +357,20 @@ export function renderHighlightOverlay(
   container.className = "ito-highlight";
   container.dataset.annotationId = opts.annotationId;
   container.dataset.kind = opts.kind;
+  container.dataset.style = opts.kind;
   if (opts.pageBorder) container.dataset.pageBorder = "true";
   Object.assign(container.style, {
     position: "absolute",
     inset: "0",
     pointerEvents: "none",
   } satisfies Partial<CSSStyleDeclaration>);
+  // Subtractive ink: the whole overlay multiplies against the page canvas.
+  // Also declared in editor.css; set inline so an overlay is never drawn as a
+  // source-over veil even where that stylesheet has not been applied.
+  container.style.setProperty("mix-blend-mode", HIGHLIGHT_BLEND_MODE);
 
   const animate = opts.animate && !reducedMotion(opts.suppressMotion);
-  const cssColor = COLOR_CSS[opts.color] ?? COLOR_CSS["yellow"]!;
+  const cssColor = pigmentCss(opts.color);
 
   if (opts.areaBox && opts.rects[0]) {
     container.dataset.area = "true";
@@ -405,7 +422,7 @@ export function renderHighlightOverlay(
     } satisfies Partial<CSSStyleDeclaration>);
     container.appendChild(border);
   } else {
-    opts.rects.forEach((r, i) => {
+    opts.rects.forEach((r) => {
       const box = document.createElement("div");
       box.className = "ito-highlight-fragment";
       // M14–M16 (FEAT-001): fragments are draggable so one highlight can be
@@ -413,19 +430,24 @@ export function renderHighlightOverlay(
       // handler lives on the SourcePane mount).
       box.draggable = true;
       const isUnderline = opts.kind === "underline";
+      box.dataset.style = opts.kind;
       Object.assign(box.style, {
         position: "absolute",
         left: `${r.x * 100}%`,
         top: isUnderline ? `${(r.y + r.height) * 100}%` : `${r.y * 100}%`,
         width: `${r.width * 100}%`,
         height: isUnderline ? "0" : `${r.height * 100}%`,
+        // An underline is a crisp pigment stroke on the baseline with nothing
+        // behind the glyphs; a highlight is a wash (its wet-edge rim and
+        // corner radius come from .ito-highlight-fragment in editor.css).
         background: isUnderline ? "transparent" : cssColor,
-        borderBottom: isUnderline ? `2px solid ${solidify(opts.color)}` : "none",
-        borderRadius: isUnderline ? "0" : unevenRadius(i),
+        borderBottom: isUnderline ? `2.5px solid ${solidify(opts.color)}` : "none",
+        borderRadius: isUnderline ? "0" : "3px",
         pointerEvents: "auto",
         // Keep glyphs legible: the overlay sits behind the text layer.
         zIndex: "0",
       } satisfies Partial<CSSStyleDeclaration>);
+      box.style.setProperty("mix-blend-mode", HIGHLIGHT_BLEND_MODE);
 
       if (animate && !isUnderline) {
         box.style.transformOrigin = "left center";

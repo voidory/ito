@@ -207,6 +207,23 @@ function defaultOcrBandLines(pageIndex: number): readonly string[] {
   return out;
 }
 
+/** The exact shape of a {@link defaultOcrBandLines} placeholder line. */
+const OCR_PLACEHOLDER_LINE = /^\[OCR\] page \d+ line \d+$/;
+
+/**
+ * True for a synthesized OCR span that carries only the PLACEHOLDER band text
+ * ("[OCR] page 1 line 3") rather than recognized text. Such a span marks where
+ * a scanned page could be selected but says nothing about what is printed
+ * there, so the pointer-selection controller skips it and a drag over the page
+ * goes to the ink-band highlighter (src/pdf/scannedHighlight.ts) instead. A
+ * synthesized span given real OCR lines is not a placeholder and stays
+ * selectable.
+ */
+export function isOcrPlaceholderSpan(el: Element): boolean {
+  if (el.getAttribute("data-ocr-synthetic") !== "true") return false;
+  return OCR_PLACEHOLDER_LINE.test((el.textContent ?? "").trim());
+}
+
 /**
  * M17 (§1.2) convenience: inject synthesized OCR spans directly into a live
  * `.textLayer` element (positioned `<span data-ocr-synthetic="true">`), so an

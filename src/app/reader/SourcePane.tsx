@@ -2,21 +2,29 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   analyzePdfPage,
+  analyzeScannedDrag,
+  captureCanvasImageData,
   computeHeadTailHash,
   createAnchor,
   createAnchorRectsWithOcrFallback,
   cropCanvasRegionToDataUrl,
+  glyphHitAtPoint,
   hitTestAnnotations,
   installPointerSelection,
   loadDocument,
+  ocrTextInRects,
+  pigmentCss,
   recomputeRectsFromQuote,
   renderPage,
   resolveAnchor,
+  SCANNED_PASSAGE_TEXT,
   type HitTestTarget,
   type IngestionController,
+  type NormPoint,
   type RenderedPage,
+  type ScannedImageData,
 } from "../../pdf";
-import type { NormalizedRect, PreParsedPageLayout } from "../../model";
+import type { NormalizedRect, PreParsedPageLayout, TextAnchor } from "../../model";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import type { AnnotationId, SourceId } from "../../model";
 import {
@@ -32,7 +40,6 @@ import {
   drawAnnotation,
   sanitizeSnapshotHtml,
   serializedRerender,
-  swatch,
   styles,
   AssociationMenu,
   CommentSurface,
@@ -133,6 +140,26 @@ export function SourcePane({
   const [livePreview, setLivePreview] = useState<{ color: string; rects: AnchorRect[] } | null>(
     null,
   );
+  // The pigment the live preview is painted in: the active tool's colour when a
+  // Highlight/Underline tool will commit on release, else the popup's default.
+  // Mirrored into refs so the once-installed native listeners read the latest.
+  const toolRef = useRef({ activeTool, activeColor });
+  toolRef.current = { activeTool, activeColor };
+  const previewColorRef = useRef(pigmentCss("yellow"));
+  previewColorRef.current = pigmentCss(
+    activeTool === "highlight" || activeTool === "underline" ? activeColor : "yellow",
+  );
+  // v2-m1 scanned-page highlighting (see the pointer effect below). `drag` is
+  // the gesture in flight; `previewPinned` keeps its preview alive while there
+  // is no DOM selection behind it; `ended` marks the release so the trailing
+  // mouseup/click of the same gesture do not undo or re-target it.
+  const scannedDragRef = useRef<ScannedDrag | null>(null);
+  const scannedPreviewPinnedRef = useRef(false);
+  const scannedDragEndedRef = useRef(false);
+  const clearLivePreview = useCallback((): void => {
+    scannedPreviewPinnedRef.current = false;
+    setLivePreview(null);
+  }, []);
   // FEAT-002 (2.5) native PDF zoom scale (50%..300%), locked 1:1 across layers.
   const BASE_ZOOM = 1.3;
   const [zoom, setZoom] = useState(1);
@@ -222,7 +249,28 @@ export function SourcePane({
     if (!hasToolbar && !hasPreview) return;
 
     const sel = typeof window !== "undefined" ? window.getSelection() : null;
-    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
+      // A scanned-page highlight has no DOM selection behind it: its pending
+      // toolbar + preview are re-derived from the anchor's normalized rects.
+      if (!toolbar || toolbar.anchor.rects.length === 0) return;
+      const anchorPage = pageByIndexRef.current.get(toolbar.anchor.pageIndex);
+      if (!anchorPage) return;
+      const rects = toViewportRects(anchorPage.stage, toolbar.anchor.rects);
+      const union = unionAnchorRect(rects);
+      if (!union) return;
+      const view = scrollRef.current?.getBoundingClientRect() ?? null;
+      const hidden =
+        view != null &&
+        (union.bottom <= view.top ||
+          union.top >= view.bottom ||
+          union.right <= view.left ||
+          union.left >= view.right);
+      setLivePreview((prev) => (prev ? { color: prev.color, rects: hidden ? [] : rects } : prev));
+      setToolbar((prev) =>
+        prev ? { ...prev, rect: hidden ? { ...prev.rect, width: -1 } : union } : prev,
+      );
+      return;
+    }
     const range = sel.getRangeAt(0);
     const page = pagesRef.current.find((p) =>
       p.textLayer.contains(range.commonAncestorContainer),
@@ -259,7 +307,7 @@ export function SourcePane({
           }))
           .filter((r) => r.width > 0 && r.bottom - r.top > 0);
         setLivePreview((prev) =>
-          prev ? { color: prev.color, rects } : { color: swatch("yellow"), rects },
+          prev ? { color: prev.color, rects } : { color: previewColorRef.current, rects },
         );
       }
     }
@@ -707,6 +755,9 @@ export function SourcePane({
             outline: "2px solid #1a56db",
             borderRadius: "3px",
             pointerEvents: "none",
+            // Subtractive like the highlights, so the flash tints the paper
+            // without veiling the passage it points at.
+            mixBlendMode: "multiply",
           } satisfies Partial<CSSStyleDeclaration>);
           // Insert the return flash above the canvas, beneath the text layer.
           page.stage.insertBefore(el, page.textLayer);
@@ -723,6 +774,8 @@ export function SourcePane({
   const onMouseUp = useCallback(
     (e?: React.MouseEvent) => {
       if (rangeMode || areaSelectActive) return;
+      // This gesture was a scanned-page drag, already resolved on pointerup.
+      if (scannedDragEndedRef.current) return;
       const selection = window.getSelection();
       if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
         setToolbar(null);
@@ -769,7 +822,7 @@ export function SourcePane({
           window.getSelection()?.removeAllRanges();
           setToolbar(null);
           // M13 (§1.2) clear the live preview on an immediate tool-first commit.
-          setLivePreview(null);
+          clearLivePreview();
           redrawOverlays();
           bump();
           return;
@@ -790,7 +843,18 @@ export function SourcePane({
         setToolbar(null);
       }
     },
-    [rangeMode, areaSelectActive, source, sourceId, activeTool, activeColor, wb, redrawOverlays, bump],
+    [
+      rangeMode,
+      areaSelectActive,
+      source,
+      sourceId,
+      activeTool,
+      activeColor,
+      wb,
+      redrawOverlays,
+      bump,
+      clearLivePreview,
+    ],
   );
 
   const commitHighlight = useCallback(
@@ -801,11 +865,11 @@ export function SourcePane({
       setToolbar(null);
       // M13 (§1.2) clear the live watercolor preview on commit so no stale pill
       // lingers after the highlight is painted.
-      setLivePreview(null);
+      clearLivePreview();
       redrawOverlays();
       bump();
     },
-    [toolbar, wb, sourceId, redrawOverlays, bump],
+    [toolbar, wb, sourceId, redrawOverlays, bump, clearLivePreview],
   );
 
   const commitRange = useCallback(async () => {
@@ -883,6 +947,13 @@ export function SourcePane({
   // triggers it). The popover anchors above the pointer.
   const onStageClick = useCallback(
     (clientX: number, clientY: number, target: HTMLElement | null) => {
+      // The click that ends a scanned-page drag is part of that drag: it must
+      // not open the popover of the highlight the drag just laid down (or of
+      // one it happened to end over).
+      if (scannedDragEndedRef.current) {
+        scannedDragEndedRef.current = false;
+        return;
+      }
       const sel = window.getSelection();
       if (sel && sel.isCollapsed === false) return; // a text selection drag
       const hit = stageHitAt(clientX, clientY);
@@ -1120,6 +1191,169 @@ export function SourcePane({
     });
   }, [isWebsite, ready]);
 
+  // v2-m1 scanned-page highlighting. A drag that begins where there is no
+  // selectable text and never produces a text selection is resolved against
+  // the page RASTER instead: analyzeScannedDrag turns it into line strips
+  // (snapped to the printed ink rows when the canvas can be read, else laid out
+  // at a standard line height). The strips track the pointer as the live
+  // preview, and on release become a TextAnchor that commits exactly like a
+  // native selection: immediately with a Highlight/Underline tool active,
+  // otherwise through the selection toolbar.
+  //
+  // On a page that DOES have a text layer the drag only counts where it is over
+  // printed ink (a scanned insert, text inside a figure); a drag across blank
+  // paper there still does nothing, as it always has.
+  useEffect(() => {
+    const mount = mountRef.current;
+    if (!mount || isWebsite) return;
+
+    /** The strips for the drag as of the pointer being at (clientX, clientY). */
+    const resolveDrag = (drag: ScannedDrag, clientX: number, clientY: number): NormalizedRect[] => {
+      if (Math.hypot(clientX - drag.startX, clientY - drag.startY) <= SCANNED_DRAG_MIN_PX) return [];
+      const box = drag.page.stage.getBoundingClientRect();
+      if (box.width <= 0 || box.height <= 0) return [];
+      const end: NormPoint = {
+        x: Math.min(1, Math.max(0, (clientX - box.left) / box.width)),
+        y: Math.min(1, Math.max(0, (clientY - box.top) / box.height)),
+      };
+      drag.minX = Math.min(drag.minX, end.x);
+      drag.maxX = Math.max(drag.maxX, end.x);
+      drag.minY = Math.min(drag.minY, end.y);
+      drag.maxY = Math.max(drag.maxY, end.y);
+      // One whole-page read per drag, on first use.
+      if (drag.image === undefined) drag.image = captureCanvasImageData(drag.page.canvas);
+      // A page with its own text layer only counts where the drag is over ink
+      // the text layer does not cover; an image-only page always yields strips.
+      const hasTextLayer = drag.page.textItemCount > 0;
+      const detection = analyzeScannedDrag(
+        { x: drag.minX, y: drag.minY, width: drag.maxX - drag.minX, height: drag.maxY - drag.minY },
+        drag.image,
+        drag.start,
+        end,
+        { snapToNearestRow: !hasTextLayer },
+      );
+      if (hasTextLayer && detection.mode !== "ink") return [];
+      return detection.rects;
+    };
+
+    const onDown = (ev: PointerEvent): void => {
+      scannedDragRef.current = null;
+      scannedDragEndedRef.current = false;
+      if (ev.button !== 0 || !pointerSelEnabledRef.current) return;
+      const hit = stageHitAt(ev.clientX, ev.clientY);
+      const page = hit ? pageByIndexRef.current.get(hit.pageIndex) : undefined;
+      if (!hit || !page) return;
+      scannedDragRef.current = {
+        page,
+        pageIndex: hit.pageIndex,
+        startX: ev.clientX,
+        startY: ev.clientY,
+        start: { x: hit.nx, y: hit.ny },
+        minX: hit.nx,
+        maxX: hit.nx,
+        minY: hit.ny,
+        maxY: hit.ny,
+        image: undefined,
+        // A press that lands on (or within the capture band of) real text is a
+        // text selection, however short it ends up.
+        eligible: glyphHitAtPoint(page.textLayer, ev.clientX, ev.clientY) == null,
+        live: false,
+      };
+    };
+
+    const onMove = (ev: PointerEvent): void => {
+      const drag = scannedDragRef.current;
+      if (!drag || !drag.eligible || (ev.buttons & 1) === 0) return;
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed) {
+        // The pointer reached real text: the text selection owns this drag.
+        drag.eligible = false;
+        drag.live = false;
+        scannedPreviewPinnedRef.current = false;
+        return;
+      }
+      const rects = resolveDrag(drag, ev.clientX, ev.clientY);
+      if (rects.length === 0) {
+        if (drag.live) {
+          drag.live = false;
+          clearLivePreview();
+        }
+        return;
+      }
+      drag.live = true;
+      scannedPreviewPinnedRef.current = true;
+      setLivePreview({
+        color: previewColorRef.current,
+        rects: toViewportRects(drag.page.stage, rects),
+      });
+    };
+
+    const onUp = (ev: PointerEvent): void => {
+      const drag = scannedDragRef.current;
+      scannedDragRef.current = null;
+      if (!drag || !drag.eligible) return;
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed) return;
+      const rects = resolveDrag(drag, ev.clientX, ev.clientY);
+      const source = wb.rawData().sources.find((s) => s.id === sourceId);
+      if (rects.length === 0 || !source) {
+        if (drag.live) clearLivePreview();
+        return;
+      }
+      const anchor: TextAnchor = {
+        docId: sourceId,
+        sourceVersionHash: source.versionHash,
+        pageIndex: drag.pageIndex,
+        rects,
+        selectedText: ocrTextInRects(drag.page.textLayer, rects) || SCANNED_PASSAGE_TEXT,
+        prefix: "",
+        suffix: "",
+      };
+      scannedDragEndedRef.current = true;
+      const tool = toolRef.current;
+      if (tool.activeTool === "highlight" || tool.activeTool === "underline") {
+        void wb.commitTextAnnotation({
+          sourceId,
+          anchor,
+          style: { kind: tool.activeTool, color: tool.activeColor },
+        });
+        setToolbar(null);
+        clearLivePreview();
+        redrawOverlaysRef.current();
+        bump();
+        return;
+      }
+      // No tool: keep the strips up and offer the same popup a text selection
+      // gets, anchored above them.
+      const viewportRects = toViewportRects(drag.page.stage, rects);
+      scannedPreviewPinnedRef.current = true;
+      setLivePreview({ color: previewColorRef.current, rects: viewportRects });
+      setEditPopover(null);
+      setToolbar({
+        sourceId,
+        anchor,
+        rect: unionAnchorRect(viewportRects) ?? anchorRectFrom(null, ev.clientX, ev.clientY),
+      });
+    };
+
+    const onCancel = (): void => {
+      const drag = scannedDragRef.current;
+      scannedDragRef.current = null;
+      if (drag?.live) clearLivePreview();
+    };
+
+    mount.addEventListener("pointerdown", onDown);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onCancel);
+    return () => {
+      mount.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
+    };
+  }, [isWebsite, ready, wb, sourceId, stageHitAt, bump, clearLivePreview]);
+
   // Apply / clear the per-page user-select lock as activeSelectionPage changes.
   useEffect(() => {
     for (const page of pagesRef.current) {
@@ -1139,9 +1373,12 @@ export function SourcePane({
     const onSelectionChange = (): void => {
       const sel = window.getSelection();
       if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
-        setLivePreview(null);
+        // A scanned-page drag paints its preview with no selection behind it.
+        if (!scannedPreviewPinnedRef.current) setLivePreview(null);
         return;
       }
+      // A real text selection takes the preview over from any scanned drag.
+      scannedPreviewPinnedRef.current = false;
       const range = sel.getRangeAt(0);
       const page = pagesRef.current.find((p) =>
         p.textLayer.contains(range.commonAncestorContainer),
@@ -1163,7 +1400,7 @@ export function SourcePane({
         setLivePreview(null);
         return;
       }
-      setLivePreview({ color: swatch("yellow"), rects });
+      setLivePreview({ color: previewColorRef.current, rects });
     };
     document.addEventListener("selectionchange", onSelectionChange);
     return () => document.removeEventListener("selectionchange", onSelectionChange);
@@ -1539,7 +1776,7 @@ export function SourcePane({
             onDismiss={() => {
               setToolbar(null);
               // M13 (§1.2) dismissing the toolbar also clears the live preview.
-              setLivePreview(null);
+              clearLivePreview();
             }}
           />
         )}
@@ -1583,8 +1820,17 @@ export function SourcePane({
             bump={bump}
           />
         )}
-        {livePreview && <LiveSelectionPreview preview={livePreview} />}
       </ReaderFixedLayer>
+
+      {/* v2-m1 the live preview multiplies into the page (subtractive pigment),
+          which only works from OUTSIDE the z-indexed fixed layer above: that
+          layer is a stacking context, and a blend never leaves the stacking
+          context it is in. */}
+      {livePreview && (
+        <ReaderBlendLayer>
+          <LiveSelectionPreview preview={livePreview} />
+        </ReaderBlendLayer>
+      )}
 
       {openComment && (
         <ReaderFixedLayer>
@@ -1718,6 +1964,62 @@ async function extractPageTexts(doc: PDFDocumentProxy): Promise<string[]> {
     }
   }
   return out;
+}
+
+/** A scanned-page drag must travel further than this (px) to count. */
+const SCANNED_DRAG_MIN_PX = 6;
+
+/** A scanned-page highlight drag in flight (see the pointer effect above). */
+interface ScannedDrag {
+  readonly page: RenderedPage;
+  readonly pageIndex: number;
+  /** Where the press landed, in viewport pixels and normalized to the stage. */
+  readonly startX: number;
+  readonly startY: number;
+  readonly start: NormPoint;
+  /** The normalized box the pointer has swept so far. */
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+  /** The page raster: undefined until first needed, null if unreadable. */
+  image: ScannedImageData | null | undefined;
+  /** False once the gesture turns out to be a text selection. */
+  eligible: boolean;
+  /** True while this drag's strips are showing as the live preview. */
+  live: boolean;
+}
+
+/** Normalized stage rects as viewport rects, against the stage's live box. */
+function toViewportRects(stage: HTMLElement, rects: readonly NormalizedRect[]): AnchorRect[] {
+  const box = stage.getBoundingClientRect();
+  return rects.map((r) => {
+    const left = box.left + r.x * box.width;
+    const top = box.top + r.y * box.height;
+    const width = r.width * box.width;
+    return { left, top, right: left + width, bottom: top + r.height * box.height, width };
+  });
+}
+
+/** The bounding box of a set of viewport rects (null when there are none). */
+function unionAnchorRect(rects: readonly AnchorRect[]): AnchorRect | null {
+  if (rects.length === 0) return null;
+  const left = Math.min(...rects.map((r) => r.left));
+  const top = Math.min(...rects.map((r) => r.top));
+  const right = Math.max(...rects.map((r) => r.right));
+  const bottom = Math.max(...rects.map((r) => r.bottom));
+  return { left, top, right, bottom, width: right - left };
+}
+
+/**
+ * v2-m1 a portal straight into document.body with NO wrapper of its own, for
+ * content that blends with the page beneath it (the multiply live preview).
+ * Unlike {@link ReaderFixedLayer} it creates no stacking context, so a
+ * `mix-blend-mode` on its children composites against the rendered PDF.
+ */
+function ReaderBlendLayer({ children }: { children: React.ReactNode }): JSX.Element {
+  if (typeof document === "undefined") return <>{children}</>;
+  return createPortal(children, document.body);
 }
 
 /**
