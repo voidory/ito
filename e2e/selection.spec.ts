@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { seedSampleLibrary } from "./helpers";
 
 /**
  * Drag-selection only reaches text the pointer actually crosses: a press in a
@@ -8,7 +9,8 @@ import { expect, test, type Page } from "@playwright/test";
  */
 async function openSample(page: Page): Promise<void> {
   await page.goto("/");
-  await expect(page.getByTestId("library-item").first()).toBeVisible({ timeout: 15_000 });
+  // Automatic seeding was removed: load the sample workspace explicitly.
+  await seedSampleLibrary(page);
   await page.getByTestId("library-open").filter({ hasText: /Sample Document/ }).click();
   await expect(page.locator(".textLayer span").first()).toBeVisible({ timeout: 20_000 });
   await page.waitForTimeout(600);
@@ -91,7 +93,8 @@ test("starting in a blank margin and crossing words selects from the first word 
 
 test("rotated PDF selection follows visible glyph geometry at 90 and 270 degrees", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByTestId("library-item").first()).toBeVisible({ timeout: 15_000 });
+  // Automatic seeding was removed: load the sample workspace explicitly.
+  await seedSampleLibrary(page);
   await page.getByTestId("library-open").filter({ hasText: /Rotated Fixture/ }).click();
   await expect(page.getByTestId("source-pane").first()).toHaveAttribute("data-ready", "true", {
     timeout: 20_000,

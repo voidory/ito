@@ -100,10 +100,14 @@ function libraryEl(wb: Workbench): ReturnType<typeof createElement> {
 }
 
 describe("m8 Library import affordances", () => {
-  it("exposes the + Import PDF button, hidden input and dropzone", async () => {
+  it("exposes the Import PDF button, hidden input and dropzone", async () => {
     const wb = await Workbench.open(new InMemoryStorageAdapter());
     const el = await render(libraryEl(wb));
-    expect(el.querySelector('[data-testid="import-pdf-btn"]')).not.toBeNull();
+    // An EMPTY library shows its import affordances in the empty-state CTA block
+    // (the header toolbar is reserved for a populated library — see
+    // "Reduce empty-state header clutter"). The empty-state Import PDF button
+    // clicks the SAME hidden `import-pdf-input`, which is always rendered.
+    expect(el.querySelector('[data-testid="empty-import-pdf"]')).not.toBeNull();
     const input = el.querySelector('[data-testid="import-pdf-input"]') as HTMLInputElement;
     expect(input).not.toBeNull();
     expect(input.accept).toContain("pdf");

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { clickCenter } from "./helpers";
+import { clickCenter, seedSampleLibrary } from "./helpers";
 
 /** The comment popover stays attached to its highlight and inside the viewport. */
 test("the comment popover follows its highlight while scrolling and never leaves the viewport", async ({
@@ -7,7 +7,8 @@ test("the comment popover follows its highlight while scrolling and never leaves
 }) => {
   await page.setViewportSize({ width: 1000, height: 600 });
   await page.goto("/");
-  await expect(page.getByTestId("library-item").first()).toBeVisible({ timeout: 15_000 });
+  // Automatic seeding was removed: load the sample workspace explicitly.
+  await seedSampleLibrary(page);
   await page.waitForFunction(() => !!window.__ito);
   await page.getByTestId("library-open").filter({ hasText: /Sample Document/ }).click();
   await expect(page.locator(".textLayer span").first()).toBeVisible({ timeout: 20_000 });

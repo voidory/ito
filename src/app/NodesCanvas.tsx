@@ -13,6 +13,11 @@ import type { CategoryId, PageId, RelationshipId, RelationshipKind, SourceId } f
 import type { ConceptGraph, Workbench } from "./workbench";
 import { Button, IconButton } from "./ui/primitives";
 import {
+  openNodePageAction,
+  openRelationshipPageAction,
+  openRelationshipWorkspaceAction,
+} from "./nodeActions";
+import {
   BasinWashes,
   mixHex,
   OverlapBleeds,
@@ -748,7 +753,7 @@ export function NodesCanvas({
   };
 
   const onOpenConnectingPage = (relationshipId: string): void => {
-    void wb.developRelationshipPage(relationshipId as RelationshipId).then(bump);
+    openRelationshipPageAction(wb, relationshipId, bump);
   };
 
   // M13 (§2.2, P2): a CLEAN click on a Node-Intersection hub/line opens the full
@@ -758,12 +763,7 @@ export function NodesCanvas({
   const openHubWorkspace = useCallback(
     (relationshipId: string, scenePt?: { x: number; y: number } | null): void => {
       recordDive(relationshipId, scenePt ?? null);
-      void wb
-        .openRelationshipWorkspace(relationshipId as RelationshipId)
-        .then(() => {
-          wb.setViewMode("files");
-          bump();
-        });
+      openRelationshipWorkspaceAction(wb, relationshipId, bump);
     },
     [wb, bump, recordDive],
   );
@@ -798,10 +798,24 @@ export function NodesCanvas({
   const openNodePage = (pageId: string): void => {
     const pos = scene.positions[pageId as PageId] ?? null;
     recordDive(pageId, pos);
-    wb.openNodeWorkspace(pageId as PageId);
-    wb.setViewMode("files");
-    bump();
+    openNodePageAction(wb, pageId, bump);
   };
+
+  // Selection is deliberately ephemeral UI state. Escape clears it without
+  // changing durable network records.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.key !== "Escape") return;
+      setSelectedNodeId(null);
+      setSelectedHubId(null);
+      setSelectedCategoryId(null);
+      setSelectedNodeIds([]);
+      setConnectMode(false);
+      setCategoryModalOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   // M13 (§2.2): route a CLEAN background click (<=5px client drag) through the
   // pure 4-tier hit-tester. P1/P2 are normally caught by the node/hub click
@@ -832,9 +846,7 @@ export function NodesCanvas({
       switch (result.kind) {
         case "node":
           recordDive(result.pageId, scene.positions[result.pageId as PageId] ?? scenePt);
-          wb.openNodeWorkspace(result.pageId as PageId);
-          wb.setViewMode("files");
-          bump();
+          openNodePageAction(wb, result.pageId, bump);
           break;
         case "hub":
           openHubWorkspace(result.relationshipId, scenePt);
@@ -1101,8 +1113,7 @@ export function NodesCanvas({
         data-zoom={round(zoom)}
         preserveAspectRatio="xMidYMid meet"
         data-suppress-motion={suppressMotion ? "true" : "false"}
-        role="img"
-        aria-label="Concept network"
+        role="presentation"
         onPointerDown={onBackgroundPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={(e) => endGesture(e)}
@@ -1407,71 +1418,125 @@ export function NodesCanvas({
             >
               {hub.label}
             </text>
-            {/*
-              A13-M2: develop/open the hub's FULL Connecting Page in the
-              SubjectEditor. Distinct from selecting the hub and from the
-              inline short-label edit below.
-              Clicking lazily creates-or-opens the explanatory subject Page and
-              bumps so the shell re-renders into the editor. Hidden until the
-              hub is hovered or selected/editing (§3.2 declutter).
-            */}
+            {/* The hub label is graphical only. Interactive actions are
+                rendered as accessible DOM controls outside the SVG. */}
             <text
-              className="open-connecting-page"
-              data-testid="open-connecting-page"
-              data-relationship-id={hub.relationshipId}
-              data-pill-visible={pillVisible ? "true" : "false"}
+              className="hub-label"
               x={round(hub.center.x)}
-              y={round(hub.center.y) + 22}
+              y={round(hub.center.y) - 12}
               textAnchor="middle"
-              role="button"
-              style={{
-                opacity: pillVisible ? 1 : 0,
-                pointerEvents: pillVisible ? "auto" : "none",
-              }}
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={() => onOpenConnectingPage(hub.relationshipId)}
+              style={{ opacity: pillVisible ? 1 : 0 }}
+              pointerEvents="none"
             >
-              Open connecting page
-            </text>
-            {/* Keep label editing as an explicit action, separate from selection. */}
-            <text
-              className="open-connecting-page"
-              data-testid="open-relationship-workspace"
-              data-relationship-id={hub.relationshipId}
-              x={round(hub.center.x)}
-              y={round(hub.center.y) + 56}
-              textAnchor="middle"
-              role="button"
-              style={{
-                opacity: pillVisible ? 1 : 0,
-                pointerEvents: pillVisible ? "auto" : "none",
-              }}
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={() => openHubWorkspace(hub.relationshipId)}
-            >
-              Open workspace
-            </text>
-            <text
-              className="open-connecting-page"
-              data-testid="edit-hub-label"
-              data-relationship-id={hub.relationshipId}
-              x={round(hub.center.x)}
-              y={round(hub.center.y) + 40}
-              textAnchor="middle"
-              role="button"
-              style={{
-                opacity: pillVisible ? 1 : 0,
-                pointerEvents: pillVisible ? "auto" : "none",
-              }}
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={() => onHubClick(hub.relationshipId)}
-            >
-              Edit label
+              {hub.label}
             </text>
           </g>
           );
         })}
       </g>
+
+      {/* Keyboard-accessible graph hit targets. They are visually hidden so
+          the network remains clean; the visible action row handles the selected
+          entity's actual operations. */}
+      <div className="nodes-accessible-controls" aria-label="Concept network controls">
+        {scene.nodes.map((node) => (
+          <button
+            key={`a11y-node-${node.pageId}`}
+            type="button"
+            aria-label={`Select node ${node.title}`}
+            onClick={() => onNodeClick(node.pageId)}
+            onDoubleClick={() => openNodePage(node.pageId)}
+          />
+        ))}
+        {scene.hubs.map((hub) => (
+          <button
+            key={`a11y-hub-${hub.relationshipId}`}
+            type="button"
+            aria-label={`Select connection ${hub.label || "connection"}`}
+            onClick={() => {
+              setSelectedHubId(hub.relationshipId);
+              setSelectedNodeId(null);
+              setSelectedCategoryId(null);
+            }}
+          />
+        ))}
+      </div>
+
+      {/* Selected graph actions live outside the SVG so they are real,
+          keyboard-focusable DOM controls rather than interactive SVG content. */}
+      {selectedNodeId && scene.positions[selectedNodeId] && (
+        <div
+          data-testid="selected-node-actions"
+          className="nodes-selection-actions"
+          style={selectionActionStyle(
+            scene.positions[selectedNodeId]!,
+            viewBox,
+          )}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <span className="nodes-selection-label">
+            {scene.nodes.find((n) => n.pageId === selectedNodeId)?.title ?? "Node"}
+          </span>
+          <button
+            type="button"
+            data-testid="selected-node-open-page"
+            onClick={() => openNodePage(selectedNodeId)}
+          >
+            Open page
+          </button>
+          <button
+            type="button"
+            data-testid="selected-node-clear"
+            aria-label="Clear node selection"
+            onClick={() => setSelectedNodeId(null)}
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      {selectedHubId && scene.hubs.find((h) => h.relationshipId === selectedHubId) && (
+        <div
+          data-testid="selected-hub-actions"
+          className="nodes-selection-actions"
+          style={selectionActionStyle(
+            scene.hubs.find((h) => h.relationshipId === selectedHubId)!.center,
+            viewBox,
+          )}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <span className="nodes-selection-label">Connection</span>
+          <button
+            type="button"
+            data-testid="selected-hub-open-page"
+            onClick={() => onOpenConnectingPage(selectedHubId)}
+          >
+            Open connecting page
+          </button>
+          <button
+            type="button"
+            data-testid="selected-hub-open-workspace"
+            onClick={() => openHubWorkspace(selectedHubId)}
+          >
+            Open workspace
+          </button>
+          <button
+            type="button"
+            data-testid="selected-hub-edit-label"
+            onClick={() => onHubClick(selectedHubId)}
+          >
+            Edit label
+          </button>
+          <button
+            type="button"
+            data-testid="selected-hub-clear"
+            aria-label="Clear hub selection"
+            onClick={() => setSelectedHubId(null)}
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {/* Circular dot nodes with minimal hover labels. */}
       <g data-testid="node-layer">
@@ -1515,6 +1580,7 @@ export function NodesCanvas({
             style={{ cursor: "grab" }}
             onPointerDown={(e) => onNodePointerDown(e, node.pageId)}
             onClick={() => onNodeClick(node.pageId)}
+            onDoubleClick={() => openNodePage(node.pageId)}
             onMouseEnter={() => setHoveredNode(node.pageId)}
             onMouseLeave={() =>
               setHoveredNode((cur) => (cur === node.pageId ? null : cur))
@@ -1575,6 +1641,22 @@ export function NodesCanvas({
       </svg>
     </div>
   );
+}
+
+function selectionActionStyle(
+  point: { x: number; y: number },
+  viewBox: string,
+): React.CSSProperties {
+  const [vx, vy, vw, vh] = viewBox.split(/\s+/).map(Number);
+  const left = ((point.x - (vx ?? 0)) / (vw || 1)) * 100;
+  const top = ((point.y - (vy ?? 0)) / (vh || 1)) * 100;
+  return {
+    position: "absolute",
+    left: `${left}%`,
+    top: `${top}%`,
+    transform: "translate(10px, -50%)",
+    zIndex: 8,
+  };
 }
 
 /** Vertical spacing between stacked N06 placeholders (presentation only). */

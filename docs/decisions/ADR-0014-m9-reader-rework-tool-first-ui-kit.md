@@ -2,7 +2,7 @@
 
 - Status: ACCEPTED (M9, FEAT-001 + FEAT-002)
 - Spec references: the Zotero-style reader rework captured in
-  `KIRO_HANDOFF_reader_rework.md` (reader chrome consolidation, tool-first
+  `docs/archive/KIRO_HANDOFF_reader_rework.md` (reader chrome consolidation, tool-first
   annotation interaction, left/right sidebars, Library table, Nodes toolbar
   restyle) under the user's STRICT 2-FEAT plan.
 - Relationship to prior ADRs: ADR-0006 established the range/annotation
