@@ -303,6 +303,16 @@ interface ItoTestApi {
     comment?: string,
     imageDataUrl?: string,
   ): Promise<string>;
+  /**
+   * Draft LaTeX for a box on a page of a stored PDF via the reader's own
+   * render + crop + extraction path (no annotation is created).
+   */
+  extractLatexAt(
+    sourceId: string,
+    pageIndex: number,
+    rect: { x: number; y: number; width: number; height: number },
+    options?: { scale?: number },
+  ): Promise<string>;
   // -- §3.3 interactive 2D canvas -------------------------------------------
   /** Persist a node's dragged OFFSET (D19); records NO history revision. */
   setDragOffset(pageId: string, offset: { dx: number; dy: number }): Promise<void>;

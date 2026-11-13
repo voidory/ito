@@ -11,8 +11,7 @@ import type {
 import {
   convertLatexToMathML,
   copyScienceToWordClipboard,
-  detectRegionRules,
-  extractLatexFromRegion,
+  draftLatexFromStage,
   extractMechanismFromRegion,
   figureCharsFromSpans,
   loadRasterFromDataUrl,
@@ -618,8 +617,7 @@ function SciencePanel({
       return;
     }
     setLatexStatus("Reading the selection…");
-    const rules = await detectRegionRules(anchor.imageDataUrl, anchor.rect);
-    const extracted = extractLatexFromRegion(stage, anchor.rect, undefined, { rules });
+    const extracted = await draftLatexFromStage(stage, anchor.rect, anchor.imageDataUrl);
     if (extracted.length === 0) {
       setLatexStatus("No selectable text inside this box — type the LaTeX manually.");
       return;

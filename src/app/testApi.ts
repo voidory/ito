@@ -36,6 +36,13 @@ import {
   type SceneGraphInput,
 } from "../network";
 import { KoofrStorageAdapter, type StagedImport } from "../storage";
+import {
+  cropCanvasRegionToDataUrl,
+  draftLatexFromStage,
+  loadDocument,
+  renderPage,
+  type RenderedPage,
+} from "../pdf";
 import { isWebGLAvailable } from "./ThreeScene";
 import { Workbench } from "./workbench";
 
@@ -543,6 +550,19 @@ interface ItoTestApi {
     comment?: string,
     imageDataUrl?: string,
   ): Promise<string>;
+  /**
+   * Draft LaTeX for a box on a page of a stored PDF, through the same render,
+   * crop and extraction path the reader's Area tool uses (no annotation is
+   * created). The page is rendered into a hidden host at `scale` (default 2)
+   * and kept for the next call, so many boxes on one page cost one render.
+   * Drives the extraction benchmark (docs/LATEX-EXTRACTION-PLAN.md, Phase 1).
+   */
+  extractLatexAt(
+    sourceId: string,
+    pageIndex: number,
+    rect: NormalizedRect,
+    options?: { scale?: number },
+  ): Promise<string>;
   // -- §3.3 interactive 2D canvas -------------------------------------------
   /** Persist a node's dragged OFFSET (D19); records NO history revision. */
   setDragOffset(pageId: string, offset: { dx: number; dy: number }): Promise<void>;
@@ -725,6 +745,34 @@ function makeInternalRemote(): InternalRemote {
   }) as unknown as typeof fetch;
 
   return remote;
+}
+
+/** The page {@link ItoTestApi.extractLatexAt} last rendered, kept between calls. */
+interface LatexBenchPage {
+  readonly sourceId: string;
+  readonly pageIndex: number;
+  readonly scale: number;
+  readonly doc: Awaited<ReturnType<typeof loadDocument>>;
+  readonly page: RenderedPage;
+}
+let latexBench: LatexBenchPage | null = null;
+
+/** A laid-out but invisible mount: glyph measurement needs real client rects. */
+function latexBenchHost(): HTMLElement {
+  const existing = document.getElementById("ito-latex-bench-host");
+  if (existing) return existing;
+  const host = document.createElement("div");
+  host.id = "ito-latex-bench-host";
+  Object.assign(host.style, {
+    position: "fixed",
+    left: "0",
+    top: "0",
+    opacity: "0",
+    pointerEvents: "none",
+    zIndex: "-1",
+  } satisfies Partial<CSSStyleDeclaration>);
+  document.body.appendChild(host);
+  return host;
 }
 
 export function installTestApi(wb: Workbench, bump: () => void): void {
@@ -1387,6 +1435,32 @@ export function installTestApi(wb: Workbench, bump: () => void): void {
       );
       bump();
       return view.annotation.id;
+    },
+    async extractLatexAt(sourceId, pageIndex, rect, options) {
+      const scale = options?.scale ?? 2;
+      if (
+        !latexBench ||
+        latexBench.sourceId !== sourceId ||
+        latexBench.pageIndex !== pageIndex ||
+        latexBench.scale !== scale
+      ) {
+        let doc = latexBench?.sourceId === sourceId ? latexBench.doc : null;
+        latexBench?.page.unload();
+        latexBench?.page.container.remove();
+        if (!doc) {
+          if (latexBench) await latexBench.doc.destroy();
+          latexBench = null;
+          const bytes = await wb.readSourceBytes(sourceId as SourceId);
+          if (!bytes) throw new Error("extractLatexAt: source has no stored bytes");
+          doc = await loadDocument(bytes);
+        }
+        const page = await renderPage(doc, pageIndex + 1, latexBenchHost(), scale);
+        page.container.dataset.pageIndex = String(pageIndex);
+        page.stage.dataset.pageIndex = String(pageIndex);
+        latexBench = { sourceId, pageIndex, scale, doc, page };
+      }
+      const crop = cropCanvasRegionToDataUrl(latexBench.page.canvas, rect);
+      return draftLatexFromStage(latexBench.page.stage, rect, crop);
     },
     async setDragOffset(pageId, offset) {
       await wb.setDragOffset(pageId as PageId, offset.dx, offset.dy);

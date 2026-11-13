@@ -1,0 +1,26 @@
+{
+  "comment": "Per-tier exact-match targets and CI floors for the LaTeX extraction benchmark. `target` is the goal; `floor` is the gate: a run below it fails. Floors sit one point under the measured baseline (see BENCHMARK.md) because glyph positions are measured against the browser's fallback fonts, which differ between machines; they only move up. Edited by hand; the corpus builder never touches this file.",
+  "extractionScale": 2,
+  "tiers": {
+    "tex-display": {
+      "target": 0.999,
+      "floor": 0.18
+    },
+    "tex-inline": {
+      "target": 0.999,
+      "floor": 0.18
+    },
+    "tex-times": {
+      "target": 0.999,
+      "floor": 0.215
+    },
+    "tex-tounicode": {
+      "target": 0.999,
+      "floor": 0.205
+    },
+    "scanned": {
+      "target": null,
+      "floor": 0
+    }
+  }
+}

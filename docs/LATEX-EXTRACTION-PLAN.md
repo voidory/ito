@@ -1,7 +1,29 @@
 # Box-selection LaTeX extraction: plan to professional grade
 
-Status: proposal. Nothing here is implemented beyond the baseline in commit
-`31b67e5`.
+Status: Phase 1 is built. Phases 2 to 6 are proposals.
+
+## Target
+
+**99.9% exact match on TeX-produced PDFs**, measured by the benchmark in
+`src/science/research/latex/` (see its `README.md` and the generated
+`BENCHMARK.md`).
+
+Measured baseline, before any Phase 2 work: **19.75%** exact match pooled over
+7,585 selections on four TeX tiers (display 19.19%, inline 18.96%, Times
+22.76%, ToUnicode 21.97%), and 0% on scanned pages.
+
+What the target means in practice:
+
+- It is a claim about at most 1 failure in 1,000 selections. The display tier
+  holds 3,460 selections so that such a claim is testable at all: with zero
+  failures, the 95% upper bound on the failure rate is about 3 divided by the
+  number of selections.
+- "Exact" is structural, not textual (`normalize.ts`). It still requires
+  recovering fonts, variant letters and accents, none of which the current
+  extractor attempts.
+- The corpus is 160 real formulas plus a seeded grammar. Reaching the target on
+  it is necessary, not sufficient, for real papers; that needs the real-paper
+  tier below.
 
 ## Where we are
 
@@ -90,6 +112,37 @@ Goal: a number that says how good the extractor is, gated in CI.
   at least 15 times.
 - The report is reproducible: two runs give identical numbers.
 - A baseline number exists for the current extractor.
+
+### Status: built, with two tiers outstanding
+
+| Task | State |
+|---|---|
+| 1. Corpus builder | Done for TeX (four tiers) and scanned. `scripts/gen-math-corpus.mjs`. |
+| 1. Real-paper tier | **Not built.** Needs a licence check per paper and hand labelling. |
+| 1. Other-producer tier | **Not built.** Word and LibreOffice exports. |
+| 2. Structural normaliser | Done. `normalize.ts`, with its own parser. |
+| 3. Scorer | Done. `score.ts`: exact match, tree edit distance, confidence bound. |
+| 4. Runner | Done. `e2e/latex-benchmark.bench.ts` and `window.__ito.extractLatexAt`. |
+| 5. Report | Done. `BENCHMARK.md`, generated. |
+| 6. CI gate | Done. `.github/workflows/latex-benchmark.yml`, floors in `thresholds.json`. |
+
+Differences from the tasks as first written:
+
+- The corpus is far larger than 300 equations (3,460), because the 99.9%
+  target is not testable on fewer than about 3,000.
+- The runner renders each page itself through the reader's `renderPage` and
+  extraction functions instead of scrolling the reader UI, and lives in its own
+  Playwright config so `npm run test:e2e` stays a behaviour suite.
+- Floors sit one point under the baseline, not at it: glyph positions are
+  measured against the browser's fallback fonts, which differ between machines.
+- Manual tiers go in `corpus/manual-tiers.json`, which the generator merges.
+
+What the baseline says about priorities (display tier, exact match by
+construct): big operators, integrals, accents, binomials, matrices, cases and
+every font change score 0%; tall delimiters 2%; radicals 4%. Display `\sum`
+and `\int` arrive from the text layer as `X` and `Z`, big delimiters arrive as
+nothing, and `\neq` arrives as `=`. These are font-encoding problems, which is
+what Phase 2 addresses, so the order of the plan stands.
 
 ### Risks
 
@@ -330,7 +383,8 @@ Acceptance: each item has a test that fails before the fix and passes after.
 | Real-paper tier: which papers, licence check | Phase 1 | Open-licence arXiv only |
 | Renderer: KaTeX or Temml | Phase 5a | Decide on the Word paste test |
 | Structured math editor dependency | Phase 5c | Spike before committing |
-| Accuracy targets per tier | After Phase 1 baseline | Set from measured numbers |
+| Accuracy target on TeX PDFs | Decided | 99.9% exact match |
+| Accuracy targets for other tiers | After their baselines | Set from measured numbers |
 
 ## Not in scope
 

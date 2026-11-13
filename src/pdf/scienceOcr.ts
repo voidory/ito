@@ -134,6 +134,20 @@ export async function detectRegionRules(
   }));
 }
 
+/**
+ * Draft LaTeX for a box on a rendered page: the one path both the reader's
+ * popover and the benchmark run. Rules come from the crop captured when the
+ * box was drawn; glyphs from the page's live text layer.
+ */
+export async function draftLatexFromStage(
+  pageStageEl: HTMLElement,
+  normRect: NormalizedRect,
+  imageDataUrl?: string,
+): Promise<string> {
+  const rules = await detectRegionRules(imageDataUrl, normRect);
+  return extractLatexFromRegion(pageStageEl, normRect, undefined, { rules });
+}
+
 /** Rough relative advance widths, for splitting a run when the DOM cannot. */
 function charWeight(ch: string): number {
   if (/[iljtf.,;:'!|()\[\] ]/.test(ch)) return 0.5;
