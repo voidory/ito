@@ -4,6 +4,8 @@
 //   - sample-3page.pdf          : 3+ pages of ordinary selectable text
 //   - sample-multicol.pdf       : a two-column layout page
 //   - sample-rotated.pdf        : pages with 90/180/270 rotation
+//   - sample-math.pdf           : typeset equations (scripts, a fraction bar,
+//                                 a radical, limits) for LaTeX extraction
 //   - sample-12page-figure.pdf  : a 12-page TWO-COLUMN document whose first
 //                                 page embeds a raster figure (PNG via
 //                                 embedPng) — exercises the reader's area /
@@ -266,15 +268,79 @@ async function makeRotated() {
   return pdf.save();
 }
 
+// Typeset equations the way a PDF really stores them: no structure, just runs
+// of glyphs at different baselines/sizes plus drawn rules (fraction bar,
+// radical vinculum). Exercises box-selection LaTeX extraction. The coordinates
+// are mirrored in e2e/latex-extract.spec.ts.
+async function makeMath() {
+  const pdf = await PDFDocument.create();
+  const roman = await pdf.embedFont(StandardFonts.TimesRoman);
+  const italic = await pdf.embedFont(StandardFonts.TimesRomanItalic);
+  const symbol = await pdf.embedFont(StandardFonts.Symbol);
+  const page = pdf.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+  const ink = rgb(0, 0, 0);
+  const S = 14; // main size
+  const s = 9.8; // script size
+  // Draw runs left to right; each run is [text, font, size, baselineShift].
+  const typeset = (x, y, runs) => {
+    let cur = x;
+    for (const [text, font, size = S, shift = 0] of runs) {
+      page.drawText(text, { x: cur, y: y + shift, size, font, color: ink });
+      cur += font.widthOfTextAtSize(text, size);
+    }
+    return cur;
+  };
+  const rule = (x0, x1, y) =>
+    page.drawLine({ start: { x: x0, y }, end: { x: x1, y }, thickness: 0.6, color: ink });
+
+  // 1. E = mc^2
+  typeset(72, 700, [["E", italic], [" = ", roman], ["mc", italic], ["2", roman, s, 5.6]]);
+
+  // 2. the quadratic formula
+  const fx = typeset(72, 630, [["x", italic], [" = ", roman]]);
+  const numEnd = typeset(fx + 3, 640, [
+    ["\u2212", symbol], ["b", italic], [" \u00b1 ", symbol], ["\u221a", symbol],
+  ]);
+  const radEnd = typeset(numEnd, 640, [
+    ["b", italic], ["2", roman, s, 5.6], [" \u2212 ", symbol], ["4", roman], ["ac", italic],
+  ]);
+  rule(numEnd - 0.5, radEnd, 652.5);
+  rule(fx, radEnd + 3, 634);
+  const denW = roman.widthOfTextAtSize("2", S) + italic.widthOfTextAtSize("a", S);
+  typeset((fx + radEnd + 3 - denW) / 2, 619, [["2", roman], ["a", italic]]);
+
+  // 3. a sum with limits, and a stacked sub/superscript
+  page.drawText("\u2211", { x: 76, y: 555, size: 22, font: symbol, color: ink });
+  typeset(75, 542, [["i", italic, s], ["=1", roman, s]]);
+  typeset(81, 577, [["n", italic, s]]);
+  const sx = typeset(96, 560, [["a", italic], ["i", italic, s, -3]]);
+  const bx = typeset(sx + 2, 560, [[" = ", roman], ["\u03b1", symbol], ["x", italic]]);
+  typeset(bx, 560, [["k", italic, s, -3]]);
+  typeset(bx, 560, [["2", roman, s, 5.6]]);
+
+  // 4. an equation inline in a sentence (the box must cut through text runs)
+  typeset(72, 480, [
+    ["The energy is ", roman], ["E", italic], [" = ", roman], ["mc", italic],
+    ["2", roman, s, 5.6], [" for every mass.", roman],
+  ]);
+  return pdf.save();
+}
+
 async function main() {
   await mkdir(OUT_DIR, { recursive: true });
+  // `npm run gen-fixtures -- math` regenerates only the math fixture.
+  const only = process.argv[2];
   const outputs = [
-    ["sample-3page.pdf", await makeThreePage()],
-    ["sample-multicol.pdf", await makeMultiColumn()],
-    ["sample-rotated.pdf", await makeRotated()],
-    ["sample-12page-figure.pdf", await makeTwelvePageFigure()],
-  ];
-  for (const [name, bytes] of outputs) {
+    ["sample-3page.pdf", makeThreePage],
+    ["sample-multicol.pdf", makeMultiColumn],
+    ["sample-rotated.pdf", makeRotated],
+    ["sample-12page-figure.pdf", makeTwelvePageFigure],
+    ["sample-math.pdf", makeMath],
+  ]
+    .filter(([name]) => !only || name.includes(only))
+    .map(([name, make]) => [name, make()]);
+  for (const [name, pending] of outputs) {
+    const bytes = await pending;
     const path = resolve(OUT_DIR, name);
     await writeFile(path, bytes);
     console.log(`wrote ${path} (${bytes.length} bytes)`);

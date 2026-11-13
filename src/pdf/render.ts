@@ -303,6 +303,7 @@ export async function renderPage(
     // if this is an image-only page (0 native text items), inject deterministic
     // synthetic OCR text-band spans so it is still selectable/highlightable.
     annotateSpansWithNormRects(renderScale);
+    stampBaselineGeometry(textLayerBuilder.textDivs, viewport);
 
     // M18 (§11): the text-layer DOM was just rebuilt (new text nodes), so the
     // cached glyph map is stale — invalidate it so the next selection/range op
@@ -356,6 +357,44 @@ export async function renderPage(
       const nh = Math.max(0.008, h / stageH);
       span.dataset.normRect = `${nx},${ny},${nw},${nh}`;
     });
+  }
+
+  /**
+   * Stamp each pdf.js text span with the EXACT baseline origin, font size and
+   * on-screen angle of its text run (`data-base-geom="x,y,size,angle"`, x/y/size
+   * normalized to the viewport box). pdf.js positions a span from the PDF
+   * font's declared ascent but the browser paints a fallback font, so the DOM
+   * baseline is off by a font-dependent amount; the box-selection LaTeX
+   * extractor needs the true baseline to tell a subscript from on-line text.
+   * `textDivs` is index-aligned with the page's text items; if that ever stops
+   * holding the stamp is skipped and the extractor falls back to DOM boxes.
+   */
+  function stampBaselineGeometry(
+    textDivs: readonly HTMLElement[],
+    viewport: { width: number; height: number; transform: number[] },
+  ): void {
+    try {
+      const items = (textContent.items as unknown as { str?: string; transform?: number[] }[]).filter(
+        (it) => it.str !== undefined,
+      );
+      if (items.length !== textDivs.length || viewport.width <= 0 || viewport.height <= 0) return;
+      items.forEach((item, i) => {
+        const t = item.transform;
+        if (!t || t.length < 6) return;
+        const tx = pdfjs.Util.transform(viewport.transform, t) as number[];
+        const size = Math.hypot(tx[2]!, tx[3]!);
+        const angle = Math.atan2(tx[1]!, tx[0]!);
+        if (![tx[4], tx[5], size, angle].every((v) => Number.isFinite(v))) return;
+        textDivs[i]!.dataset.baseGeom = [
+          (tx[4]! / viewport.width).toFixed(6),
+          (tx[5]! / viewport.height).toFixed(6),
+          (size / viewport.height).toFixed(6),
+          angle.toFixed(4),
+        ].join(",");
+      });
+    } catch {
+      // Best-effort: the extractor degrades to DOM line boxes without a stamp.
+    }
   }
 
   /** The 0-based page index this render belongs to (from the container attr). */

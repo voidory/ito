@@ -11,6 +11,8 @@ import type {
 import {
   convertLatexToMathML,
   copyScienceToWordClipboard,
+  detectRegionRules,
+  extractLatexFromRegion,
   extractMechanismFromRegion,
   figureCharsFromSpans,
   loadRasterFromDataUrl,
@@ -591,6 +593,41 @@ function SciencePanel({
     [latex],
   );
 
+  const [latexStatus, setLatexStatus] = useState<string | null>(null);
+  const draftPreview = useMemo(
+    () => (latexDraft.trim().length > 0 ? convertLatexToMathML(latexDraft) : null),
+    [latexDraft],
+  );
+
+  /**
+   * Draft LaTeX from the PDF text inside this box. Glyph positions come from
+   * the page's live text layer and fraction bars / radical rules from the crop
+   * captured when the box was drawn. The result only fills the editable draft:
+   * nothing is stored until the user saves it.
+   */
+  const readLatexFromSelection = async (): Promise<void> => {
+    if (!anchor) return;
+    const escId = typeof CSS !== "undefined" && CSS.escape ? CSS.escape(anchor.docId) : anchor.docId;
+    const stage =
+      document.querySelector<HTMLElement>(
+        `[data-source-id="${escId}"] .pdf-page-stage[data-page-index="${anchor.pageIndex}"]`,
+      ) ??
+      document.querySelector<HTMLElement>(`.pdf-page-stage[data-page-index="${anchor.pageIndex}"]`);
+    if (!stage || !stage.querySelector(".textLayer span")) {
+      setLatexStatus("This page has no selectable text here — type the LaTeX manually.");
+      return;
+    }
+    setLatexStatus("Reading the selection…");
+    const rules = await detectRegionRules(anchor.imageDataUrl, anchor.rect);
+    const extracted = extractLatexFromRegion(stage, anchor.rect, undefined, { rules });
+    if (extracted.length === 0) {
+      setLatexStatus("No selectable text inside this box — type the LaTeX manually.");
+      return;
+    }
+    setLatexDraft(extracted);
+    setLatexStatus("Read from the PDF text in this box. Check it against the figure, then save.");
+  };
+
   const saveLatex = async (value: string): Promise<void> => {
     await wb.setAnnotationScienceData(annotationId, { latex: value });
     setEditing(null);
@@ -922,7 +959,11 @@ function SciencePanel({
           className="ito-ctx-item"
           onClick={() => {
             setLatexDraft(latex ?? "");
-            setEditing((m) => (m === "latex" ? null : "latex"));
+            setLatexStatus(null);
+            const opening = editing !== "latex";
+            setEditing(opening ? "latex" : null);
+            // Nothing saved yet: draft it from the selected text straight away.
+            if (opening && !latex) void readLatexFromSelection();
           }}
         >
           <span className="ito-ctx-item-label">Extract / Edit LaTeX Math</span>
@@ -966,9 +1007,31 @@ function SciencePanel({
             placeholder="\frac{-b \pm \sqrt{b^2 - 4ac}}{2a}"
             style={{ width: "100%", fontFamily: "monospace" }}
           />
+          {latexStatus && (
+            <div data-testid="latex-extract-status" style={{ fontSize: "0.78rem", color: "#666", padding: "0.2rem 0" }}>
+              {latexStatus}
+            </div>
+          )}
+          {draftPreview && draftPreview !== mathPreview && (
+            <div
+              data-testid="latex-draft-preview"
+              className="ito-latex-preview"
+              // The compiled MathML is a safe, self-generated string (no user HTML).
+              dangerouslySetInnerHTML={{ __html: draftPreview }}
+            />
+          )}
           <button data-testid="save-latex-btn" onClick={() => void saveLatex(latexDraft)}>
             Save LaTeX
           </button>
+          {anchor && (
+            <button
+              data-testid="reextract-latex-btn"
+              title="Replace the draft with LaTeX read from the PDF text inside this box"
+              onClick={() => void readLatexFromSelection()}
+            >
+              Read from selection
+            </button>
+          )}
         </div>
       )}
 

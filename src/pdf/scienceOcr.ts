@@ -33,6 +33,13 @@ import {
   type RawCurlyArrow,
 } from "./mechanismVision";
 import { parseSmilesGraph } from "../science/recognition/chemGraph";
+import {
+  MATH_SYMBOL_TO_LATEX,
+  detectHorizontalRules,
+  glyphsToLatex,
+  type MathGlyph,
+  type MathRule,
+} from "./mathLayout";
 
 // ---------------------------------------------------------------------------
 // §2.2(1) LaTeX extraction from a cropped region
@@ -58,43 +65,184 @@ const SYMBOL_TO_LATEX: Record<string, string> = {
   "·": "\\cdot", "∈": "\\in", "∉": "\\notin", "∪": "\\cup", "∩": "\\cap",
 };
 
+/** Options for {@link extractLatexFromRegion}. */
+export interface ExtractLatexOptions {
+  /**
+   * Thin horizontal rules (fraction bars, radical vincula) inside the region,
+   * in normalized 0..1 PAGE coordinates — see {@link detectRegionRules}. They
+   * are drawn as graphics, so the text layer alone cannot supply them.
+   */
+  readonly rules?: readonly MathRule[];
+}
+
 /**
- * M17 (§2.2(1)) reconstruct clean LaTeX from the `.textLayer` spans that
- * intersect `normRect` on `pageStageEl`. Unicode math symbols/Greek letters are
- * mapped to LaTeX commands, `a/b` fractions become `\frac{a}{b}`, `√x` becomes
- * `\sqrt{x}`, and `^`/`_` runs are wrapped in braces. When no stage/spans are
- * available (jsdom, or a crop over an image region) the `hintText` is
- * normalized the same way, so a caller can always pass extracted OCR text.
+ * M17 (§2.2(1)) reconstruct LaTeX from the text inside a box selection.
+ *
+ * The glyphs whose centres fall inside `normRect` are lifted from the page's
+ * `.textLayer` WITH their geometry (per-glyph x extent, baseline, font size)
+ * and handed to {@link glyphsToLatex}, which rebuilds super/subscripts,
+ * fractions, radicals, limits and line breaks from where the glyphs sit. A box
+ * that cuts through a text run therefore yields only the glyphs it covers, not
+ * the whole run. When no stage/glyphs are available (jsdom, or a crop over an
+ * image region) `hintText` is normalized instead, so a caller can always pass
+ * extracted OCR text.
  */
 export function extractLatexFromRegion(
   pageStageEl: HTMLElement | null,
   normRect: NormalizedRect,
   hintText?: string,
+  options: ExtractLatexOptions = {},
 ): string {
-  const collected = collectRegionText(pageStageEl, normRect);
-  const raw = collected.length > 0 ? collected : (hintText ?? "");
-  return normalizeToLatex(raw);
+  const stageBox = pageStageEl?.getBoundingClientRect();
+  // Work in on-screen pixels so the page's aspect ratio is respected; without a
+  // laid-out stage (jsdom) fall back to a nominal page so geometry still scales.
+  const sw = stageBox && stageBox.width > 0 ? stageBox.width : 1000;
+  const sh = stageBox && stageBox.height > 0 ? stageBox.height : 1414;
+  const glyphs = collectRegionGlyphs(pageStageEl, normRect, sw, sh);
+  if (glyphs.length === 0) return normalizeToLatex(hintText ?? "");
+  const rules = (options.rules ?? []).map((r) => ({
+    x0: r.x0 * sw,
+    x1: r.x1 * sw,
+    y: r.y * sh,
+    ...(r.thickness != null ? { thickness: r.thickness * sh } : {}),
+  }));
+  const latex = glyphsToLatex(glyphs, rules);
+  return latex.length > 0 ? latex : normalizeToLatex(hintText ?? "");
 }
 
-/** Lift text from the spans intersecting a normalized crop rect, in order. */
-function collectRegionText(pageStageEl: HTMLElement | null, normRect: NormalizedRect): string {
-  if (!pageStageEl) return "";
+/**
+ * Find the fraction bars / radical vincula drawn inside an area crop, as rules
+ * in normalized page coordinates for {@link extractLatexFromRegion}. Reads the
+ * crop's own pixels (the PNG captured when the box was drawn), so nothing is
+ * re-rendered. Resolves to `[]` where the crop cannot be decoded (jsdom, or an
+ * area that predates the cropper).
+ */
+export async function detectRegionRules(
+  imageDataUrl: string | undefined,
+  normRect: NormalizedRect,
+): Promise<MathRule[]> {
+  if (!imageDataUrl || normRect.width <= 0 || normRect.height <= 0) return [];
+  const image = await loadRasterFromDataUrl(imageDataUrl);
+  if (!image) return [];
+  const kx = normRect.width / image.width;
+  const ky = normRect.height / image.height;
+  return detectHorizontalRules(image).map((r) => ({
+    x0: normRect.x + r.x0 * kx,
+    x1: normRect.x + r.x1 * kx,
+    y: normRect.y + r.y * ky,
+    thickness: (r.thickness ?? 1) * ky,
+  }));
+}
+
+/** Rough relative advance widths, for splitting a run when the DOM cannot. */
+function charWeight(ch: string): number {
+  if (/[iljtf.,;:'!|()\[\] ]/.test(ch)) return 0.5;
+  if (/[mwMW∑∏]/.test(ch)) return 1.5;
+  if (/[A-Z]/.test(ch)) return 1.2;
+  return 1;
+}
+
+/**
+ * Lift the glyphs whose centre lies inside a normalized crop rect, each with
+ * its x extent, baseline and font size in stage pixels.
+ *
+ *  - Baseline + font size come from the exact pdf.js text transform that
+ *    `render.ts` stamps on each span (`data-base-geom`); a browser's fallback
+ *    font would otherwise shift the DOM baseline by a font-dependent amount —
+ *    enough to confuse a subscript with on-line text.
+ *  - Per-glyph x extents are measured with a DOM Range, so a box that cuts a
+ *    run in half selects only the glyphs it covers.
+ *  - Spans without either (cache-hydrated spans, jsdom) fall back to their
+ *    normalized rect, split proportionally.
+ */
+function collectRegionGlyphs(
+  pageStageEl: HTMLElement | null,
+  normRect: NormalizedRect,
+  sw: number,
+  sh: number,
+): MathGlyph[] {
+  if (!pageStageEl) return [];
   const textLayer = pageStageEl.querySelector<HTMLElement>(".textLayer");
-  if (!textLayer) return "";
+  if (!textLayer) return [];
   const stageBox = pageStageEl.getBoundingClientRect();
-  const spans = Array.from(textLayer.querySelectorAll<HTMLElement>("span"));
-  const picked: { x: number; y: number; text: string }[] = [];
+  const measurable = stageBox.width > 0 && stageBox.height > 0;
+  let spans = Array.from(textLayer.querySelectorAll<HTMLElement>("span")).filter(
+    (el) => el.childElementCount === 0 && (el.textContent ?? "").trim().length > 0 &&
+      el.dataset.ocrSynthetic !== "true",
+  );
+  // A cache-hydrated layer duplicates the live pdf.js spans: prefer the live ones.
+  const live = spans.filter((el) => el.dataset.cachedSpan !== "true");
+  if (live.length > 0) spans = live;
+
+  const rx0 = normRect.x * sw;
+  const rx1 = (normRect.x + normRect.width) * sw;
+  const ry0 = normRect.y * sh;
+  const ry1 = (normRect.y + normRect.height) * sh;
+  const range = measurable && typeof document !== "undefined" && document.createRange
+    ? document.createRange()
+    : null;
+  const out: MathGlyph[] = [];
+
   for (const span of spans) {
     const geo = spanNormGeometry(span, stageBox);
     if (!geo) continue;
-    if (rectsIntersect(geo, normRect)) {
-      const text = span.textContent ?? "";
-      if (text.length > 0) picked.push({ x: geo.x, y: geo.y, text });
+    let x0 = geo.x * sw;
+    let width = geo.width * sw;
+    // Cached rects are baseline-bottomed; a live line box hangs ~0.2em below.
+    let size = geo.height * sh;
+    let base = span.dataset.cachedSpan === "true" || !measurable
+      ? (geo.y + geo.height) * sh
+      : geo.y * sh + 0.8 * size;
+    const stamp = span.dataset.baseGeom?.split(",").map((p) => parseFloat(p));
+    if (stamp && stamp.length === 4 && stamp.every((v) => Number.isFinite(v))) {
+      if (Math.abs(stamp[3]!) > 0.2) continue; // not horizontal on screen
+      base = stamp[1]! * sh;
+      size = stamp[2]! * sh;
+      if (!measurable) x0 = stamp[0]! * sw;
     }
+    if (!(size > 0)) continue;
+    // Cheap reject before measuring individual glyphs.
+    const midY = base - 0.3 * size;
+    if (midY < ry0 || midY > ry1 || x0 > rx1 || x0 + width < rx0) continue;
+
+    const textNode = span.firstChild;
+    const str = span.textContent ?? "";
+    const chars = Array.from(str);
+    let measured: { x0: number; x1: number }[] | null = null;
+    if (range && textNode && textNode.nodeType === 3) {
+      measured = [];
+      let offset = 0;
+      for (const ch of chars) {
+        try {
+          range.setStart(textNode, offset);
+          range.setEnd(textNode, offset + ch.length);
+          const r = range.getBoundingClientRect();
+          measured.push({ x0: r.left - stageBox.left, x1: r.right - stageBox.left });
+        } catch {
+          measured = null;
+          break;
+        }
+        offset += ch.length;
+      }
+      if (measured && !measured.some((m) => m.x1 > m.x0)) measured = null;
+    }
+    if (!measured) {
+      const total = chars.reduce((acc, ch) => acc + charWeight(ch), 0) || 1;
+      let acc = 0;
+      measured = chars.map((ch) => {
+        const a = x0 + (acc / total) * width;
+        acc += charWeight(ch);
+        return { x0: a, x1: x0 + (acc / total) * width };
+      });
+    }
+    chars.forEach((ch, i) => {
+      const m = measured![i]!;
+      const c = (m.x0 + m.x1) / 2;
+      if (ch.trim().length === 0 || c < rx0 || c > rx1) return;
+      out.push({ ch, x0: m.x0, x1: m.x1, base, size });
+    });
   }
-  // Reading order: top-to-bottom then left-to-right.
-  picked.sort((a, b) => (Math.abs(a.y - b.y) > 0.01 ? a.y - b.y : a.x - b.x));
-  return picked.map((p) => p.text).join(" ").replace(/\s+/g, " ").trim();
+  return out;
 }
 
 function spanNormGeometry(
@@ -118,15 +266,6 @@ function spanNormGeometry(
     };
   }
   return null;
-}
-
-function rectsIntersect(a: NormalizedRect, b: NormalizedRect): boolean {
-  return !(
-    a.x > b.x + b.width ||
-    a.x + a.width < b.x ||
-    a.y > b.y + b.height ||
-    a.y + a.height < b.y
-  );
 }
 
 /**
@@ -192,6 +331,7 @@ type LatexToken =
   | { kind: "num"; value: string }
   | { kind: "ident"; value: string }
   | { kind: "op"; value: string }
+  | { kind: "text"; value: string; cmd: string }
   | { kind: "sup" }
   | { kind: "sub" }
   | { kind: "lbrace" }
@@ -206,10 +346,36 @@ type LatexToken =
  */
 export function convertLatexToMathML(latex: string): string {
   const tokens = tokenizeLatex(latex ?? "");
-  const { nodes } = parseSequence(tokens, 0, false);
-  const body = nodes.length > 0 ? nodes.join("") : "<mrow></mrow>";
+  // A top-level `\\` separates the lines of a multi-line equation.
+  const rows: LatexToken[][] = [[]];
+  let depth = 0;
+  for (const tok of tokens) {
+    if (tok.kind === "lbrace") depth++;
+    else if (tok.kind === "rbrace") depth = Math.max(0, depth - 1);
+    if (depth === 0 && tok.kind === "cmd" && tok.name === "\\") rows.push([]);
+    else rows[rows.length - 1]!.push(tok);
+  }
+  const bodies = rows
+    .filter((r, i) => r.length > 0 || i === 0)
+    .map((r) => {
+      const { nodes } = parseSequence(r, 0, false);
+      return nodes.length > 0 ? nodes.join("") : "<mrow></mrow>";
+    });
+  const body =
+    bodies.length > 1
+      ? `<mtable>${bodies.map((b) => `<mtr><mtd><mrow>${b}</mrow></mtd></mtr>`).join("")}</mtable>`
+      : bodies[0]!;
   return `<math xmlns="${MATHML_NS}" display="block"><mrow>${body}</mrow></math>`;
 }
+
+/** `\name` -> glyph for every plain symbol command the extractor can emit. */
+const EXTRA_OPS: Record<string, string> = Object.fromEntries(
+  Object.entries(MATH_SYMBOL_TO_LATEX)
+    .filter(([, cmd]) => /^\\[A-Za-z]+$/.test(cmd))
+    .map(([glyph, cmd]) => [cmd.slice(1), glyph]),
+);
+/** Commands whose `{…}` argument is literal text, not math. */
+const TEXT_CMDS = new Set(["text", "mathrm", "operatorname", "mathbb", "textrm", "mathit"]);
 
 const GREEK_NAMES = new Set(
   Object.values(GREEK_TO_LATEX).map((c) => c.replace(/^\\/, "")),
@@ -243,10 +409,34 @@ function tokenizeLatex(src: string): LatexToken[] {
         j++;
       }
       if (name.length === 0 && j < src.length) {
-        // An escaped symbol like \{ — treat the next char as a symbol.
-        out.push({ kind: "sym", value: src[j]! });
+        const esc = src[j]!;
+        if (esc === "\\") {
+          out.push({ kind: "cmd", name: "\\" });
+        } else if (",;:! ".includes(esc)) {
+          out.push({ kind: "cmd", name: "space" });
+        } else {
+          // An escaped symbol like \{ — treat the next char as a symbol.
+          out.push({ kind: "sym", value: esc });
+        }
         i = j + 1;
         continue;
+      }
+      if (TEXT_CMDS.has(name)) {
+        // Literal-text argument: keep its spaces instead of tokenizing it.
+        let k = j;
+        while (k < src.length && src[k] === " ") k++;
+        if (src[k] === "{") {
+          let depth = 1;
+          let m = k + 1;
+          while (m < src.length && depth > 0) {
+            if (src[m] === "{") depth++;
+            else if (src[m] === "}") depth--;
+            if (depth > 0) m++;
+          }
+          out.push({ kind: "text", value: src.slice(k + 1, m), cmd: name });
+          i = Math.min(src.length, m + 1);
+          continue;
+        }
       }
       out.push({ kind: "cmd", name });
       i = j;
@@ -366,6 +556,17 @@ function parseAtom(tokens: LatexToken[], start: number): { node: string | null; 
       return { node: `<mo>${escapeXml(tok.value)}</mo>`, next: start + 1 };
     case "op":
       return { node: `<mo>${escapeXml(tok.value)}</mo>`, next: start + 1 };
+    case "text": {
+      const v = escapeXml(tok.value);
+      if (tok.cmd === "mathbb") {
+        return { node: `<mi mathvariant="double-struck">${v}</mi>`, next: start + 1 };
+      }
+      if (tok.cmd === "text" || tok.cmd === "textrm") {
+        return { node: `<mtext>${v.replace(/ /g, "\u00a0")}</mtext>`, next: start + 1 };
+      }
+      const variant = tok.cmd === "mathit" ? "italic" : "normal";
+      return { node: `<mi mathvariant="${variant}">${v}</mi>`, next: start + 1 };
+    }
     case "cmd":
       return parseCommand(tokens, start);
     case "sup":
@@ -399,6 +600,18 @@ function parseCommand(tokens: LatexToken[], start: number): { node: string | nul
     const radNode = rad.node ?? "<mrow></mrow>";
     return { node: `<msqrt>${radNode}</msqrt>`, next: i };
   }
+  if (name === "overline" || name === "bar") {
+    const arg = parseAtom(tokens, i);
+    return {
+      node: `<mover accent="true">${arg.node ?? "<mrow></mrow>"}<mo>\u00af</mo></mover>`,
+      next: arg.next,
+    };
+  }
+  if (name === "space" || name === "quad" || name === "qquad") {
+    const w = name === "space" ? "0.28em" : name === "quad" ? "1em" : "2em";
+    return { node: `<mspace width="${w}"/>`, next: i };
+  }
+  if (name === "\\") return { node: null, next: i };
   if (BIG_OPS[name]) {
     return { node: `<mo>${BIG_OPS[name]}</mo>`, next: i };
   }
@@ -407,6 +620,9 @@ function parseCommand(tokens: LatexToken[], start: number): { node: string | nul
   }
   if (GREEK_NAMES.has(name) && GREEK_CHAR[name]) {
     return { node: `<mi>${GREEK_CHAR[name]}</mi>`, next: i };
+  }
+  if (EXTRA_OPS[name]) {
+    return { node: `<mo>${EXTRA_OPS[name]}</mo>`, next: i };
   }
   if (name === "left" || name === "right") {
     // Delimiter wrappers: emit the following delimiter glyph as an <mo>.

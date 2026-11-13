@@ -918,8 +918,13 @@ export function SourcePane({
       }
       const id = hitTestAnnotations(hitTargetsForPage(hit.pageIndex), hit.nx, hit.ny);
       if (!id) return;
+      // Anchor to the clicked element only when it is glyph-sized (a text-layer
+      // span). A click on an area box lands on the page canvas itself, whose
+      // rect is the whole page: anchoring to that throws the popover off-screen
+      // once the page is scrolled, so anchor to the pointer instead.
+      const targetRect = target?.getBoundingClientRect() ?? null;
       const rect = anchorRectFrom(
-        target?.getBoundingClientRect() ?? null,
+        targetRect && targetRect.height <= 120 ? targetRect : null,
         clientX,
         clientY,
       );
