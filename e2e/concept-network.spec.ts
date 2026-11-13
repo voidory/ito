@@ -206,9 +206,10 @@ test("clicking a hub opens the connecting-page label surface", async ({ page }) 
   );
 
   page.once("dialog", (d) => void d.accept("Bridges P and Q"));
-  // A single click opens the page; the short label has its own hover control.
-  await page.getByTestId("graph-hub").hover();
-  await page.getByTestId("edit-hub-label").click();
+  // M20 selection model: click the hub to select it, then use the "Edit label"
+  // action in the selected-hub action panel (prompt-driven label edit).
+  await page.getByTestId("graph-hub").click();
+  await page.getByTestId("selected-hub-edit-label").click();
 
   await expect
     .poll(() => page.evaluate((id) => window.__ito.relationshipLabel(id), relId))
@@ -310,9 +311,9 @@ test("A13-M2: developing a relationship's connection promotes it to a real Conne
   expect(pagesBefore).toBe(2);
 
   // Develop the connection into a full page via the on-canvas control (A13-M2).
-  // The pill is revealed on hover (declutter), so hover the hub first.
-  await page.getByTestId("graph-hub").hover();
-  await page.getByTestId("open-connecting-page").click();
+  // M20 selection model: select the hub, then use its "Open connecting page".
+  await page.getByTestId("graph-hub").click();
+  await page.getByTestId("selected-hub-open-page").click();
 
   // A REAL explanatory Page is created, linked via explanatoryPageId, and opened
   // in the SubjectEditor (open subject == the new page).
@@ -387,7 +388,7 @@ test("clicking a hub selects it; Open connecting page docks its Connecting Page 
   await expect(page.getByTestId("nodes-page-dock")).toHaveCount(0);
 
   // The explicit control develops the Connecting Page and docks it beside the map.
-  await page.getByTestId("open-connecting-page").click();
+  await page.getByTestId("selected-hub-open-page").click();
   await expect(page.getByTestId("nodes-page-dock")).toBeVisible();
   const explanatory = await page.evaluate(
     (id) => window.__ito.relationshipExplanatoryPageId(id),

@@ -10,9 +10,14 @@ test.describe("M21 UI/UX priorities", () => {
     await expect(page.getByTestId("library-table")).toBeVisible();
     await expect(page.getByTestId("library-item")).toHaveCount(3);
 
-    while (await page.getByTestId("delete-source").count() > 0) {
+    // Delete every document one at a time. Drive each deletion deterministically
+    // (open the confirm bar, confirm, then wait for the row count to drop) so a
+    // mid-redraw re-render can't detach the next `delete-source` locator.
+    for (let remaining = await page.getByTestId("library-item").count(); remaining > 0; remaining--) {
       await page.getByTestId("delete-source").first().click();
+      await expect(page.getByTestId("delete-confirm")).toBeVisible();
       await page.getByTestId("delete-confirm-yes").click();
+      await expect(page.getByTestId("library-item")).toHaveCount(remaining - 1);
     }
 
     await expect(page.getByTestId("library-empty")).toBeVisible();
