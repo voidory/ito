@@ -12,19 +12,28 @@ import { expect, type Locator, type Page } from "@playwright/test";
  *
  * Assumes the page has already navigated (`goto("/")`) and the app is ready.
  */
+/** The sample workspace imports exactly this many fixtures. */
+export const SAMPLE_WORKSPACE_ITEM_COUNT = 3;
+
 export async function seedSampleLibrary(page: Page): Promise<void> {
   const loadSample = page.getByTestId("load-sample-workspace");
-  const anyItem = page.getByTestId("library-item").first();
+  const items = page.getByTestId("library-item");
   // The app boots asynchronously: wait until EITHER the empty-state CTA or an
   // already-present library item has rendered, so this is robust whether or not
   // the caller pre-waited for app-status=ready and whether the library was
   // already seeded (e.g. a reload).
-  await expect(loadSample.or(anyItem).first()).toBeVisible({ timeout: 20_000 });
-  // Load the sample workspace only when the library is still empty.
+  await expect(loadSample.or(items.first()).first()).toBeVisible({ timeout: 20_000 });
   if (await loadSample.count()) {
     await loadSample.click();
+    // The three fixtures import sequentially and the observable store re-renders
+    // after EACH one lands (P4), so the first row appears while imports are
+    // still in flight. Wait for ALL fixtures to settle, otherwise a spec that
+    // reads the count (or needs >=2 rows to "Open together") races the import.
+    await expect(items).toHaveCount(SAMPLE_WORKSPACE_ITEM_COUNT, { timeout: 20_000 });
+  } else {
+    // Already seeded (e.g. a reload): just confirm at least one row is present.
+    await expect(items.first()).toBeVisible({ timeout: 20_000 });
   }
-  await expect(anyItem).toBeVisible({ timeout: 20_000 });
 }
 
 /**
