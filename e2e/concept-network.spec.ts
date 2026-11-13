@@ -207,9 +207,13 @@ test("clicking a hub opens the connecting-page label surface", async ({ page }) 
 
   page.once("dialog", (d) => void d.accept("Bridges P and Q"));
   // M20 selection model: click the hub to select it, then use the "Edit label"
-  // action in the selected-hub action panel (prompt-driven label edit).
+  // action in the selected-hub action panel (prompt-driven label edit). The
+  // panel is positioned at the hub centre and can sit near a canvas edge, so
+  // scroll it into view and force the click.
   await page.getByTestId("graph-hub").click();
-  await page.getByTestId("selected-hub-edit-label").click();
+  const editLabel = page.getByTestId("selected-hub-edit-label");
+  await editLabel.scrollIntoViewIfNeeded();
+  await editLabel.click({ force: true });
 
   await expect
     .poll(() => page.evaluate((id) => window.__ito.relationshipLabel(id), relId))
@@ -312,8 +316,12 @@ test("A13-M2: developing a relationship's connection promotes it to a real Conne
 
   // Develop the connection into a full page via the on-canvas control (A13-M2).
   // M20 selection model: select the hub, then use its "Open connecting page".
+  // The action panel sits at the hub centre (possibly near an edge): scroll
+  // into view and force the click.
   await page.getByTestId("graph-hub").click();
-  await page.getByTestId("selected-hub-open-page").click();
+  const openPage = page.getByTestId("selected-hub-open-page");
+  await openPage.scrollIntoViewIfNeeded();
+  await openPage.click({ force: true });
 
   // A REAL explanatory Page is created, linked via explanatoryPageId, and opened
   // in the SubjectEditor (open subject == the new page).
@@ -388,7 +396,9 @@ test("clicking a hub selects it; Open connecting page docks its Connecting Page 
   await expect(page.getByTestId("nodes-page-dock")).toHaveCount(0);
 
   // The explicit control develops the Connecting Page and docks it beside the map.
-  await page.getByTestId("selected-hub-open-page").click();
+  const openConnecting = page.getByTestId("selected-hub-open-page");
+  await openConnecting.scrollIntoViewIfNeeded();
+  await openConnecting.click({ force: true });
   await expect(page.getByTestId("nodes-page-dock")).toBeVisible();
   const explanatory = await page.evaluate(
     (id) => window.__ito.relationshipExplanatoryPageId(id),

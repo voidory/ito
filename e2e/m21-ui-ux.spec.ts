@@ -1,5 +1,11 @@
 import { test, expect } from "@playwright/test";
 
+// Nodes/hubs idle-bob (CSS) in the canvas; reduced motion freezes them so
+// Playwright can click the <g> graph-node / graph-hub elements (otherwise the
+// clickable element is "not stable"). The app honours this via
+// @media (prefers-reduced-motion) in network.css.
+test.use({ reducedMotion: "reduce" });
+
 test.describe("M21 UI/UX priorities", () => {
   test("starts genuinely empty, supports explicit sample loading, and keeps empty state after deleting the final document", async ({ page }) => {
     await page.goto("/");
