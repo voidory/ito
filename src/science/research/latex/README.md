@@ -111,17 +111,56 @@ selection as `[id, page, x0, y0, x1, y1]` in PDF points from the bottom-left.
 | `tex-times` | pdfLaTeX, Times math (`mathptmx`) |
 | `tex-tounicode` | pdfLaTeX, Computer Modern with ToUnicode maps |
 | `scanned` | Image-only pages rasterised from the display tier |
+| `real-display` | Display equations from the source of 30 arXiv papers, set by the same harness |
+| `real-inline` | Inline formulas from the same papers, each inside a line of prose |
 
 160 equations are hand-picked real formulas (`scripts/math-corpus/curated.mjs`);
 the rest come from a seeded grammar (`scripts/math-corpus/grammar.mjs`) that
 produces valid but not meaningful mathematics. Treat a number on this corpus as
 a statement about TeX typesetting, not about real papers.
 
+### Real-paper tiers
+
+The grammar decides how often each construct appears in the generated tiers,
+and it was written to cover constructs, not to match how often authors use
+them. The real-paper tiers fix that: their equations and their frequencies are
+the authors'.
+
+`scripts/gen-real-paper-tier.mjs harvest` takes 60 arXiv papers under CC BY 4.0
+or CC0 (mathematics, physics, computer science, statistics), reads the
+equations out of their LaTeX source and expands the authors' own simple macros.
+Thirty papers go to this corpus and thirty to the held-out set, so no paper is
+in both. The papers and their licences are listed in `SOURCES.md`.
+
+Read the numbers with three limits in mind:
+
+- **The page is ours.** Each equation is typeset alone by the benchmark's
+  harness (pdfLaTeX, amsmath, Computer Modern), not cut out of the paper's own
+  PDF. The tier tests real mathematics, not real page layout: no equation
+  numbers, no surrounding text, no other fonts.
+- **Equations on heavy macros are left out.** An equation is kept only if,
+  after expansion, every command in it is in the benchmark's vocabulary and it
+  compiles in the harness. Of 59,026 formulas found, 5,914 were dropped for a
+  command outside the vocabulary, half of them the old font switch `\rm`.
+  Another 13,779 were dropped as trivial (a lone symbol) and 14,932 as
+  duplicates. What remains leans towards plainly written LaTeX.
+- **At most 30 display and 30 inline formulas per paper**, spread evenly
+  through it, so one long paper cannot dominate.
+
 ### Regenerating
 
 ```bash
 npm run gen-math-corpus
 ```
+
+```bash
+node scripts/gen-real-paper-tier.mjs
+```
+
+The second command retypesets the real-paper tiers from
+`scripts/math-corpus/real-papers.json` and then runs the first for both sets.
+Adding `harvest` fetches papers from arXiv again, which needs network access
+to `arxiv.org` and `oaipmh.arxiv.org`.
 
 Needs `pdflatex` (Debian: `texlive-latex-base texlive-fonts-recommended`),
 `pdftoppm` (`poppler-utils`) and Node 22.18 or later. Output is deterministic:
@@ -131,12 +170,11 @@ commit.
 
 ### Not built yet
 
-- **Real-paper tier.** The plan is to harvest ground truth from the LaTeX
-  source of arXiv papers, compiled with the same position markers this corpus
-  uses, and to commit only papers under CC BY or CC0. Authors' macros must be
-  expanded first, which is the open problem.
+- **Real pages.** The real-paper tiers (below) hold real equations on the
+  harness's own pages. Boxes drawn on the papers' own PDFs, with their fonts,
+  numbering and line breaks, are not built.
 - **Other-producer tier.** Word and LibreOffice exports.
 
-Both go in `corpus/manual-tiers.json` (`{ "equations": {...}, "tiers": {...} }`,
+Such tiers go in `corpus/manual-tiers.json` (`{ "equations": {...}, "tiers": {...} }`,
 same shape as the manifest), which the generator merges and never overwrites.
 Add a matching entry to `thresholds.json`.

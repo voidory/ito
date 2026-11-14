@@ -314,7 +314,9 @@ function renderHeldoutReport(): string {
       "proportions. An interval wholly above zero means the extractor does better on equations " +
       "it was developed against than on unseen ones: it has been fitted to the corpus. For the " +
       "12pt tier the comparison is paired: identical equations set in other font design sizes, " +
-      "so a gap there is about fonts, not about which equations were seen.",
+      "so a gap there is about fonts, not about which equations were seen. The real-paper tiers compare " +
+      "two different sets of papers, and equations from one paper fail together, so their intervals are " +
+      "narrower than the truth: read them as a lower bound on the uncertainty.",
   );
   constructTables(lines);
   return `${lines.join("\n").replace(/\n+$/, "")}\n`;

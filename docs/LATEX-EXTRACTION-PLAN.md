@@ -1,6 +1,6 @@
 # Box-selection LaTeX extraction: plan to professional grade
 
-Status: Phases 1 and 2 are built. The real-paper tier comes next, then Phase 3.
+Status: Phases 1 and 2 and the real-paper tiers are built. Phase 3 is next.
 Phases 3 to 6 are proposals.
 
 ## Target
@@ -148,7 +148,7 @@ Goal: a number that says how good the extractor is, gated in CI.
 |---|---|
 | 1. Corpus builder | Done for TeX (four tiers) and scanned. `scripts/gen-math-corpus.mjs`. |
 | 1. Held-out set | Done. `corpus-heldout/`: 3,259 unseen grammar equations in three tiers, one of them 12pt. |
-| 1. Real-paper tier | **Not built.** Approach decided: see below. |
+| 1. Real-paper tier | Done, with limits: see below. `real-display` and `real-inline`, 60 papers split between the two sets. |
 | 1. Other-producer tier | **Not built.** Word and LibreOffice exports. |
 | 2. Structural normaliser | Done. `normalize.ts`, with its own parser. |
 | 3. Scorer | Done. `score.ts`: exact match, tree edit distance, confidence bound. |
@@ -189,12 +189,35 @@ comparison. Removing them from the held-out side only made that set harder
 (the twins are short and easy) and showed a spurious 2.5-point gap in the first
 build.
 
-The real-paper tier, when built: harvest ground truth from the LaTeX source of
-arXiv papers by compiling them with the same position markers the corpus
-builder uses, instead of hand labelling. Only papers under a licence that
-allows redistribution (CC BY, CC0) can be committed. The open problem is that
-authors' own macros must be expanded before the source is usable as ground
-truth.
+The real-paper tiers (`scripts/gen-real-paper-tier.mjs`, sources credited in
+`src/science/research/latex/SOURCES.md`) hold equations from the LaTeX source of
+60 arXiv papers under CC BY 4.0 or CC0, with the authors' simple macros
+expanded: 611 display and 889 inline formulas from 30 papers in the development
+corpus, 595 and 862 from 30 other papers in the held-out set. Each equation is
+typeset alone by the benchmark's harness, so the tiers measure real
+mathematics on our pages, not the papers' own pages; and equations that rest on
+macros or packages outside the benchmark's vocabulary are left out. Boxes on
+the papers' own PDFs remain unbuilt.
+
+Measured after Phase 2:
+
+| | Development | Held-out |
+|---|---|---|
+| `real-display` | 91.33% of 611 | 88.24% of 595 |
+| `real-inline` | 99.33% of 889 | 98.61% of 862 |
+
+The held-out papers score lower by 3.1 points on display (95% interval -0.3 to
++6.6) and 0.7 on inline (-0.3 to +1.8). Neither interval excludes zero, but
+both lean the same way, the intervals are too narrow because a paper's
+equations fail together, and six small fixes were made after looking at the
+development tier's failures. Treat the held-out figures as the honest ones.
+
+What real papers say about the generated tiers: the grammar over-weights the
+hard constructs. A matrix, cases, binomial or stacked symbol is in 26.2% of the
+generated display tier and 3.1% of the real one; a root index in 2.1% and in
+none. That is why real display equations score 91% where generated ones score
+69%. The generated tiers remain the right place to test coverage of each
+construct; the real tiers say how much each one matters.
 
 What the baseline says about priorities (display tier, exact match by
 construct): big operators, integrals, accents, binomials, matrices, cases and
@@ -333,8 +356,21 @@ what Phase 2 addresses, so the order of the plan stands.
 Goal: replace the fixed-threshold cascade with a scored search, and cover the
 constructs it cannot express. Required for the target: half of the display
 tier's equations need a construct the extractor does not model (see "Order and
-dependencies"). Order the tasks by measured mass: the tree (task 1), then
-delimiters (4), accents and root indices (6), grids (5); the scored search
+dependencies"). Order the tasks by what fails on real papers. Of the 53
+failures in the development `real-display` tier after Phase 2:
+
+| Failure involves | Failures | Share of real display equations with it |
+|---|---|---|
+| A grid: matrix, array, cases, binomial, stacked symbol | 19 | 3.1% (all of them fail) |
+| Limits under an operator or a function name | 14 | 24.7% |
+| Several lines (`aligned`), usually a fraction joining two rows | 12 | 6.4% |
+| An accent (over several glyphs, or doubled) | 4 | 13.6% |
+| None of these | 4 | 52.2% |
+
+So: the tree (task 1), then rows and grids (5), which also stops fractions
+reaching across lines, then limits under function names and neighbouring
+operators, then the accent cases. Root indices and pre-scripts come last: they
+are in the generated tiers and absent from the real one. The scored search
 (2 and 3) only if what remains needs it.
 
 ### Tasks
@@ -504,7 +540,7 @@ Acceptance: each item has a test that fails before the fix and passes after.
 | Decision | Needed by | Recommendation |
 |---|---|---|
 | Local model, remote service, or neither | Phase 4 | Local default, remote opt-in |
-| Real-paper tier: which papers | Before the target is claimed | CC BY or CC0 arXiv papers, ground truth harvested from source (approach decided, papers not chosen) |
+| Real-paper tier: which papers | Before the target is claimed | Done: 60 CC BY 4.0 and CC0 arXiv papers, ground truth harvested from source |
 | Renderer: KaTeX or Temml | Phase 5a | Decide on the Word paste test |
 | Structured math editor dependency | Phase 5c | Spike before committing |
 | Accuracy target on TeX PDFs | Decided | 99.9% exact match |

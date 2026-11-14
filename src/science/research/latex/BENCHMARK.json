@@ -40,6 +40,22 @@
     "n": 0,
     "exact": 0
    }
+  },
+  "real-display": {
+   "n": 611,
+   "exact": 558,
+   "comparable": {
+    "n": 611,
+    "exact": 558
+   }
+  },
+  "real-inline": {
+   "n": 889,
+   "exact": 883,
+   "comparable": {
+    "n": 889,
+    "exact": 883
+   }
   }
  }
 }

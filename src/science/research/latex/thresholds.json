@@ -24,11 +24,11 @@
     },
     "real-display": {
       "target": 0.999,
-      "floor": 0
+      "floor": 0.91
     },
     "real-inline": {
       "target": 0.999,
-      "floor": 0
+      "floor": 0.99
     }
   },
   "heldout": {

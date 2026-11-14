@@ -57,6 +57,8 @@ const CHARS = [
   ["\\langle", "\\langle", "open"], ["\\rangle", "\\rangle", "close"], ["\\lfloor", "\\lfloor", "open"],
   ["\\rfloor", "\\rfloor", "close"], ["\\lceil", "\\lceil", "open"], ["\\rceil", "\\rceil", "close"],
   ["\\&", "\\&", "ord"], ["\\$", "\\$", "ord"], ["\\_", "\\_", "ord"], ["{}^{\\prime}", "\\prime", "ord"],
+  // The negation slash on its own: `\not\subset`, and the Feynman slash `\not p`.
+  ["\\not{}", "\\not", "rel"],
 ];
 
 const ORD = words(`infty partial nabla hbar ell Re Im aleph wp imath jmath emptyset varnothing forall
@@ -121,8 +123,8 @@ const STYLES = [
   ["\\boldsymbol", "bm", [...ALNUM, ...GREEK_SRC, ...BOLD_SYMBOLS]],
   ["\\mathit", "it", [...ALNUM, ...GREEK_SRC]],
   ["\\textit", "it", TEXT_ONLY],
-  ["\\mathsf", "sf", ALNUM],
-  ["\\mathtt", "tt", ALNUM],
+  ["\\mathsf", "sf", [...ALNUM, ...GREEK_UPPER.map((g) => `\\${g}`)]],
+  ["\\mathtt", "tt", [...ALNUM, ...GREEK_UPPER.map((g) => `\\${g}`)]],
   ["\\mathcal", "cal", UPPER],
   ["\\mathscr", "cal", UPPER],
   ["\\mathbb", "bb", UPPER],
@@ -156,6 +158,10 @@ for (const [cmd, style, atoms] of STYLES) {
   }
 }
 for (const name of ACCENTS) ask(`$\\${name}{x}$`, "accent", `\\${name}`, "accent");
+// Accents in the bold fonts are other slots: `\boldsymbol{\hat{x}}`, `\mathbf{\hat{x}}`.
+for (const wrap of ["\\boldsymbol", "\\mathbf"]) {
+  for (const name of ACCENTS) ask(`$${wrap}{\\${name}{x}}$`, "accent", `\\${name}`, "accent");
+}
 for (const name of WIDE_ACCENTS) {
   for (const arg of ["x", "xx", "xxx", "xxxx", "xxxxxx"]) ask(`$\\${name}{${arg}}$`, "accent", `\\${name}`, "accent");
 }
@@ -210,7 +216,7 @@ function record(req, glyphs) {
   const entry = { tex: req.tex, cls: req.cls, ...(req.style ? { style: req.style } : {}) };
 
   if (req.kind === "accent") {
-    const rest = glyphs.filter((g) => !(g.family === "CMMI" && g.slot === 0x78));
+    const rest = glyphs.filter((g) => !(g.slot === 0x78 && ["CMMI", "CMMIB", "CMBX"].includes(g.family)));
     if (rest.length !== 1) return void problems.push(`${req.src}: expected one accent glyph, saw ${rest.length}`);
     return claim(rest[0].family, rest[0].slot, entry);
   }

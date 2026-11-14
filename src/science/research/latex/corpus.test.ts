@@ -150,3 +150,33 @@ describe("held-out LaTeX benchmark set", () => {
     for (const c of devConstructs) expect(counts.get(c) ?? 0, c).toBeGreaterThanOrEqual(15);
   });
 });
+
+describe("real-paper tiers", () => {
+  type Source = { arxiv: string; title: string; authors: string; licence: string };
+  const sourcesOf = (m: unknown): Source[] => (m as { sources?: Source[] }).sources ?? [];
+
+  it("credits every paper, and uses only CC BY 4.0 and CC0 papers", () => {
+    for (const m of [manifest, heldout]) {
+      const sources = sourcesOf(m);
+      expect(sources.length).toBeGreaterThanOrEqual(10);
+      for (const s of sources) {
+        expect(s.arxiv).toMatch(/^\d{4}\.\d{4,5}$/);
+        expect(s.title.length).toBeGreaterThan(0);
+        expect(s.authors.length).toBeGreaterThan(0);
+        expect(["http://creativecommons.org/licenses/by/4.0/", "http://creativecommons.org/publicdomain/zero/1.0/"]).toContain(s.licence);
+      }
+    }
+  });
+
+  it("puts no paper in both the development corpus and the held-out set", () => {
+    const dev = new Set(sourcesOf(manifest).map((s) => s.arxiv));
+    for (const s of sourcesOf(heldout)) expect(dev.has(s.arxiv), s.arxiv).toBe(false);
+  });
+
+  it("has a display and an inline tier in each set", () => {
+    for (const m of [manifest, heldout]) {
+      expect(m.tiers["real-display"]!.placements.length).toBeGreaterThanOrEqual(300);
+      expect(m.tiers["real-inline"]!.placements.length).toBeGreaterThanOrEqual(300);
+    }
+  });
+});

@@ -13,8 +13,11 @@
  *   - variant letters (`\epsilon` vs `\varepsilon`, `\phi` vs `\varphi`);
  *   - `\bar` (an accent glyph) vs `\overline` (a rule).
  *   - word spaces inside text: `\text{is even}` is not `\text{iseven}`.
- * A script after a font group belongs to the group's last character, as it
- * does on the page: `\mathrm{Te}^b` equals `\mathrm{T}\mathrm{e}^b`.
+ * A font is a property of each character it changes, not of how the source
+ * groups them: `\mathbf{AB}` equals `\mathbf{A}\mathbf{B}`, `\mathrm{Te}^b`
+ * equals `\mathrm{T}\mathrm{e}^b`, and `\mathrm{c,2}` equals `\mathrm{c},2`
+ * because `\mathrm` changes neither the comma nor the digit. Bold italic
+ * (`\boldsymbol`) and bold upright (`\mathbf`) are different fonts.
  * What IS folded, because it is spacing or size only: `\,` `\;` `\quad`,
  * `\left`/`\right`/`\big`, `\displaystyle`, `\limits`, `\dfrac`/`\tfrac`,
  * and a space at either end of a text run (`\text{if }x` equals `\text{if}x`:
@@ -59,7 +62,7 @@ const TRANSPARENT = new Set(["boxed", "mathop", "mathbin", "mathrel", "mathord",
 
 const FONTS: Readonly<Record<string, string>> = {
   text: "rm", textrm: "rm", mathrm: "rm", operatorname: "rm", textnormal: "rm", mbox: "rm", hbox: "rm",
-  textup: "rm", mathbf: "bf", textbf: "bf", boldsymbol: "bf", bm: "bf", pmb: "bf",
+  textup: "rm", mathbf: "bf", textbf: "bf", boldsymbol: "bm", bm: "bm", pmb: "bm",
   mathbb: "bb", mathcal: "cal", mathscr: "cal", mathfrak: "frak", mathsf: "sf", textsf: "sf",
   mathtt: "tt", texttt: "tt", mathit: "it", textit: "it",
 };
@@ -89,9 +92,15 @@ const SYNONYMS: Readonly<Record<string, string>> = {
   le: "leq", ge: "geq", ne: "neq", to: "rightarrow", gets: "leftarrow", land: "wedge",
   lor: "vee", lnot: "neg", owns: "ni", iff: "Longleftrightarrow", implies: "Longrightarrow",
   impliedby: "Longleftarrow", backslash: "setminus", dotsc: "ldots", dotso: "ldots",
-  dots: "ldots", dotsb: "cdots", dotsm: "cdots", dotsi: "cdots", hslash: "hbar",
+  dotsb: "cdots", dotsm: "cdots", dotsi: "cdots", hslash: "hbar", bot: "perp", dag: "dagger", ddag: "ddagger",
   thicksim: "sim", thickapprox: "approx", bmod: "mod", square: "Box", degree: "circ",
 };
+/** Binary operators and relations: `\dots` before one of these is `\cdots`. */
+const DOTS_CENTRED_BEFORE = new Set([
+  "times", "cdot", "pm", "mp", "circ", "oplus", "otimes", "cup", "cap", "wedge", "vee", "leq", "geq",
+  "neq", "approx", "equiv", "sim", "simeq", "cong", "propto", "ll", "gg", "subset", "subseteq",
+  "supset", "supseteq", "in", "rightarrow", "leftarrow", "Rightarrow", "prec", "succ", "preceq", "succeq",
+]);
 /** Commands that typeset a plain character (or the double bar `\|`). */
 const CMD_TO_LEAF: Readonly<Record<string, string>> = {
   mid: "|", vert: "|", lvert: "|", rvert: "|", Vert: "\\|", lVert: "\\|", rVert: "\\|",
@@ -394,6 +403,15 @@ class Parser {
     // amsmath sets multiple integrals as repeated integral signs.
     if (name === "iint") return node("row", [leaf("\\int"), leaf("\\int")]);
     if (name === "iiint") return node("row", [leaf("\\int"), leaf("\\int"), leaf("\\int")]);
+    if (name === "dots") {
+      // amsmath's `\dots` looks at what follows: centred before a binary
+      // operator or a relation, on the baseline otherwise.
+      const nx = this.peek();
+      const centred = nx != null && (nx.k === "chr" ? "+-=<>*".includes(nx.v) : nx.k === "cmd" && DOTS_CENTRED_BEFORE.has(SYNONYMS[nx.v] ?? nx.v));
+      return centred
+        ? node("row", [leaf("\\cdot"), leaf("\\cdot"), leaf("\\cdot")])
+        : node("row", [leaf("."), leaf("."), leaf(".")]);
+    }
     if (name === "ldots") return node("row", [leaf("."), leaf("."), leaf(".")]);
     if (name === "cdots") return node("row", [leaf("\\cdot"), leaf("\\cdot"), leaf("\\cdot")]);
     if (name === "begin") return this.environment(this.envName());
@@ -466,6 +484,61 @@ function trimSpaces(kids: readonly TexNode[]): TexNode[] {
   return out;
 }
 
+const UPPER_GREEK = new Set(["\\Gamma", "\\Delta", "\\Theta", "\\Lambda", "\\Xi", "\\Pi", "\\Sigma", "\\Upsilon", "\\Phi", "\\Psi", "\\Omega"]);
+
+/**
+ * The font a character really ends up in under a font command, or null when
+ * the command does not change it. `\mathrm{c,2}` changes the `c` only: the
+ * comma and the digit are the glyphs they would be outside. `\mathbf` leaves
+ * lowercase Greek and symbols alone; `\boldsymbol` emboldens everything, and
+ * for digits and capital Greek gives exactly what `\mathbf` gives.
+ */
+function fontOn(font: string, symbol: string): string | null {
+  if (/^[A-Za-z]$/.test(symbol)) return font;
+  const letterOnly = font === "cal" || font === "bb" || font === "frak";
+  if (/^[0-9]$/.test(symbol) || UPPER_GREEK.has(symbol)) {
+    if (font === "rm" || letterOnly) return null;
+    return font === "bm" ? "bf" : font;
+  }
+  if (symbol === SPACE || symbol === "empty") return null;
+  return font === "bm" ? "bm" : null;
+}
+
+/** Apply a font to every character under `n` that it changes. An inner font command wins. */
+function pushFont(font: string, n: TexNode): TexNode {
+  if (n.t.startsWith("font:")) return n;
+  if (n.c.length === 0) {
+    const f = fontOn(font, n.t);
+    return f ? node(`font:${f}`, [n]) : n;
+  }
+  return regroupIfRow(node(n.t, n.c.map((c) => pushFont(font, c))));
+}
+const regroupIfRow = (n: TexNode): TexNode => (n.t === "row" ? regroup(n.c) : n);
+
+/**
+ * A row's children with neighbouring characters of one font gathered into one
+ * group, so `\mathbf{A}\mathbf{B}` and `\mathbf{AB}` are the same tree. A
+ * word space survives only between two groups of one font, where it joins
+ * them into one piece of text.
+ */
+function regroup(kids: readonly TexNode[]): TexNode {
+  const flat = kids.filter((k) => k.t !== "empty").flatMap((k) => (k.t === "row" ? k.c : [k]));
+  const out: TexNode[] = [];
+  for (let i = 0; i < flat.length; i++) {
+    const k = flat[i]!;
+    const prev = out[out.length - 1];
+    if (k.t === SPACE) {
+      const next = flat[i + 1];
+      if (prev && next && prev.t.startsWith("font:") && next.t === prev.t) out[out.length - 1] = node(prev.t, [...prev.c, k]);
+      continue;
+    }
+    if (prev && k.t === prev.t && k.t.startsWith("font:")) out[out.length - 1] = node(k.t, [...prev.c, ...k.c]);
+    else out.push(k);
+  }
+  if (out.length === 0) return EMPTY;
+  return out.length === 1 ? out[0]! : node("row", out);
+}
+
 /**
  * Settle word spaces once adjacent text runs have been merged (which is why
  * `canon` leaves them alone): `\text{for }\text{all}` must keep its space.
@@ -475,23 +548,12 @@ function settleSpaces(n: TexNode): TexNode {
   const kids = n.c.map(settleSpaces);
   if (n.t.startsWith("font:")) {
     const kept = trimSpaces(kids);
-    return kept.length === 0 ? EMPTY : node(n.t, kept);
-  }
-  if (n.t === "row") {
-    const flat = kids.filter((k) => k.t !== "empty").flatMap((k) => (k.t === "row" ? k.c : [k]));
-    // Neighbouring groups in one font are one group: `\mathbf{A}\mathbf{B}`
-    // and `\mathbf{AB}` print the same. (Upright runs were merged in `canon`,
-    // which also has to keep their word spaces.)
-    const kept: TexNode[] = [];
-    for (const k of flat) {
-      const prev = kept[kept.length - 1];
-      if (prev && k.t === prev.t && k.t.startsWith("font:") && k.t !== "font:rm") {
-        kept[kept.length - 1] = node(k.t, [...prev.c, ...k.c]);
-      } else kept.push(k);
-    }
     if (kept.length === 0) return EMPTY;
-    return kept.length === 1 ? kept[0]! : node("row", kept);
+    // A font is a property of each character it changes, not of the group.
+    const font = n.t.slice(5);
+    return regroup(kept.map((k) => pushFont(font, k)));
   }
+  if (n.t === "row") return regroup(kids);
   // A script on a font group sits on the group's last character: on the page,
   // `\mathrm{Te}^b` and `\mathrm{T}\mathrm{e}^b` are the same thing.
   const base = kids[0];

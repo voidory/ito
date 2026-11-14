@@ -408,8 +408,11 @@ function applyRules(input: Box[], rules: readonly MathRule[]): Box[] {
           bottom: bb.bottom, base, size, tex: `\\sqrt{${inner.tex}}`, kind: "sqrt",
         };
       } else if (
-        below.length <= 8 &&
-        rule.y <= base - 0.75 * size && rule.y >= base - 1.4 * size &&
+        // A rule from the PDF just above the ink, with nothing over it, is an
+        // overline whatever it covers; one found in pixels has to look like one.
+        (below.every((b) => b.exact || b.kind !== "glyph")
+          ? rule.y <= bb.top + 0.05 * size && rule.y >= bb.top - 0.6 * size
+          : below.length <= 8 && rule.y <= base - 0.75 * size && rule.y >= base - 1.4 * size) &&
         rule.x1 - rule.x0 <= 1.4 * (bb.x1 - bb.x0) + 0.3 * s
       ) {
         used = nB;
@@ -628,6 +631,14 @@ function mergeStyledRuns(mains: Box[], size: number, all: readonly Box[] = mains
     }
   }
   flush();
+  // `\liminf` and `\limsup` print as two words a thin space apart.
+  for (let i = out.length - 1; i > 0; i--) {
+    const a = out[i - 1]!;
+    const b = out[i]!;
+    if (a.tex === "\\lim" && (b.tex === "\\inf" || b.tex === "\\sup") && b.x0 - a.x1 < 0.3 * size) {
+      out.splice(i - 1, 2, { ...mergedBox([a, b], `\\lim${b.tex.slice(1)}`, "word"), exact: true, cls: "fn" });
+    }
+  }
   // Text of one or two letters with no word space is a symbol set upright
   // (`\mathrm{d}`, `\mathrm{kg}`), which is what the source most likely said.
   for (const b of out) {
@@ -722,7 +733,9 @@ function joinTex(parts: string[]): string {
 
 function lineToTex(line: Line): string {
   const s = line.size;
-  const all = [...line.boxes].sort((a, b) => a.x0 - b.x0);
+  // At the same place a zero-width glyph comes first: the slash of `\not` is
+  // drawn at the left edge of the symbol it negates.
+  const all = [...line.boxes].sort((a, b) => a.x0 - b.x0 || a.x1 - a.x0 - (b.x1 - b.x0));
   const mainsRaw: Box[] = [];
   const scripts: Box[] = [];
   for (const b of all) {
