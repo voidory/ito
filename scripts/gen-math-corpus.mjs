@@ -36,6 +36,10 @@ import { PDFDocument } from "pdf-lib";
 import { canonicalLatex, constructsOf, parseLatex } from "../src/science/research/latex/normalize.ts";
 import { CURATED } from "./math-corpus/curated.mjs";
 import { makeGrammar } from "./math-corpus/grammar.mjs";
+import {
+  MAX_DISPLAY_WIDTH, PAD_DISPLAY, PAD_INLINE_X, PAD_INLINE_Y, PAGE_H, PAGE_W, compile, placements,
+  texSource, tier,
+} from "./math-corpus/typeset.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const LATEX_DIR = resolve(HERE, "../src/science/research/latex");
@@ -52,15 +56,6 @@ const GENERATED = 3300;
 const SUBSET = 760;
 /** Pages of the display tier rasterised into the scanned tier. */
 const SCANNED_PAGES = 6;
-const PAGE_W = 612;
-const PAGE_H = 792;
-const MARGIN = 54;
-/** How loosely a reader draws the box, in points beyond the ink. */
-const PAD_DISPLAY = 3;
-const PAD_INLINE_X = 1.5;
-const PAD_INLINE_Y = 2;
-const SP_PER_BP = 65781.76;
-
 // ---------------------------------------------------------------------------
 // Equations
 // ---------------------------------------------------------------------------
@@ -99,102 +94,6 @@ function buildEquations({ seed, curated, prefix }, exclude = new Set()) {
 }
 
 // ---------------------------------------------------------------------------
-// TeX
-// ---------------------------------------------------------------------------
-
-const LEAD = ["The value of", "We then obtain", "Recall that", "It follows that", "Suppose", "Note that", "Here", "In this case"];
-const TAIL = ["is used in the estimate below.", "holds throughout.", "by the previous lemma.", "as claimed.", "in what follows.", "for the remainder of the section.", "and the result follows."];
-
-function texSource(equations, { inline = false, preamble = "", pointSize = 10 }) {
-  const lines = [
-    String.raw`\documentclass[${pointSize}pt]{article}`,
-    String.raw`\usepackage[letterpaper,margin=${MARGIN}bp]{geometry}`,
-    String.raw`\usepackage{amsmath,amssymb}`,
-    preamble,
-    // Reproducible bytes: no dates, no engine banner, a fixed trailer id.
-    String.raw`\pdfinfoomitdate=1 \pdfsuppressptexinfo=-1 \pdftrailerid{ito-math-corpus}`,
-    String.raw`\pdfcompresslevel=9 \pdfobjcompresslevel=2`,
-    String.raw`\tracinglostchars=2`,
-    String.raw`\pagestyle{empty}\parindent=0pt\raggedbottom\raggedright`,
-    String.raw`\newwrite\posfile \immediate\openout\posfile=\jobname.pos`,
-    String.raw`\newbox\eqbox`,
-    // Record where the box lands: \pdfsavepos marks the baseline-left corner
-    // and the write is deferred to shipout, when the position is known. The
-    // box's own dimensions are expanded now, before the next equation reuses it.
-    String.raw`\newcommand{\eqmark}[1]{\pdfsavepos\edef\next{\write\posfile{#1 \noexpand\the\pdflastxpos\space\noexpand\the\pdflastypos\space\the\wd\eqbox\space\the\ht\eqbox\space\the\dp\eqbox\space\noexpand\the\count0}}\next}`,
-    String.raw`\newcommand{\eq}[2]{\setbox\eqbox\hbox{$\displaystyle #2$}\par\noindent\hskip 12bp\eqmark{#1}\box\eqbox\par\vskip 16bp}`,
-    String.raw`\newcommand{\ieq}[4]{\setbox\eqbox\hbox{$#2$}\par\noindent #3 \eqmark{#1}\box\eqbox{} #4\par\vskip 9bp}`,
-    String.raw`\begin{document}`,
-  ];
-  equations.forEach((e, i) => {
-    lines.push(
-      inline
-        ? `\\ieq{${e.id}}{${e.latex}}{${LEAD[i % LEAD.length]}}{${TAIL[i % TAIL.length]}}`
-        : `\\eq{${e.id}}{${e.latex}}`,
-    );
-  });
-  lines.push(String.raw`\end{document}`);
-  return lines.join("\n") + "\n";
-}
-
-/** Compile `tex`; returns the PDF bytes and each equation's recorded box. */
-function compile(workDir, name, tex) {
-  writeFileSync(join(workDir, `${name}.tex`), tex);
-  try {
-    execFileSync("pdflatex", ["-interaction=nonstopmode", "-halt-on-error", `${name}.tex`], {
-      cwd: workDir,
-      stdio: "pipe",
-    });
-  } catch {
-    const log = readFileSync(join(workDir, `${name}.log`), "latin1");
-    const at = log.indexOf("\n!");
-    const lineNo = /\nl\.(\d+)/.exec(log.slice(at))?.[1];
-    const culprit = lineNo ? tex.split("\n")[Number(lineNo) - 1] : "";
-    throw new Error(`pdflatex failed in ${name}:\n${log.slice(at, at + 400)}\n${culprit}`);
-  }
-  const log = readFileSync(join(workDir, `${name}.log`), "latin1");
-  const lost = log.match(/Missing character[^\n]*/g) ?? [];
-  if (lost.length > 0) {
-    throw new Error(`${name}: ${lost.length} glyph(s) missing from the font, e.g. ${lost[0]}`);
-  }
-  const boxes = new Map();
-  for (const line of readFileSync(join(workDir, `${name}.pos`), "latin1").split("\n")) {
-    const m = /^(\S+) (-?\d+) (-?\d+) ([\d.]+)pt ([\d.]+)pt ([\d.]+)pt (\d+)$/.exec(line.trim());
-    if (!m) continue;
-    const pt = 72 / 72.27; // TeX points -> PDF points
-    boxes.set(m[1], {
-      x: Number(m[2]) / SP_PER_BP,
-      y: Number(m[3]) / SP_PER_BP,
-      wd: Number(m[4]) * pt,
-      ht: Number(m[5]) * pt,
-      dp: Number(m[6]) * pt,
-      page: Number(m[7]) - 1,
-    });
-  }
-  return { pdf: readFileSync(join(workDir, `${name}.pdf`)), boxes };
-}
-
-const round = (v) => Math.round(v * 100) / 100;
-
-/** Selection rectangles in PDF points (y up): [id, page, x0, y0, x1, y1]. */
-function placements(equations, boxes, padX, padY) {
-  const out = [];
-  for (const e of equations) {
-    const b = boxes.get(e.id);
-    if (!b) throw new Error(`no recorded position for ${e.id}`);
-    out.push([
-      e.id,
-      b.page,
-      round(b.x - padX),
-      round(b.y - b.dp - padY),
-      round(b.x + b.wd + padX),
-      round(b.y + b.ht + padY),
-    ]);
-  }
-  return out;
-}
-
-// ---------------------------------------------------------------------------
 // Scanned tier
 // ---------------------------------------------------------------------------
 
@@ -220,17 +119,6 @@ async function rasterise(workDir, pdfName, pages) {
 // Main
 // ---------------------------------------------------------------------------
 
-const tier = (pdf, description, list) => ({
-  pdf,
-  description,
-  pageWidth: PAGE_W,
-  pageHeight: PAGE_H,
-  placements: list,
-});
-
-/** Widest display equation that still leaves room for the selection padding. */
-const MAX_DISPLAY_WIDTH = PAGE_W - 2 * MARGIN - 12 - 2 * PAD_DISPLAY;
-
 /**
  * Compile the display tier, dropping generated equations too wide for the
  * measure. Returns the kept equations and their compiled page.
@@ -252,6 +140,26 @@ function compileDisplay(work, name, equations, options = {}) {
 function inlineCandidates(equations, tags, display) {
   const stacked = (e) => tags.get(e.id).some((t) => t === "multi-line" || t === "matrix" || t === "cases");
   return equations.filter((e) => !stacked(e) && display.boxes.get(e.id).wd <= 230);
+}
+
+/**
+ * Tiers this script cannot generate (real papers, other producers) live in
+ * the set's manual-tiers.json, next to their PDFs, so regenerating the TeX
+ * tiers never discards them. scripts/gen-real-paper-tier.mjs writes that file.
+ */
+function mergeManualTiers(manifest) {
+  const manualPath = join(OUT, "manual-tiers.json");
+  if (!existsSync(manualPath)) return;
+  const manual = JSON.parse(readFileSync(manualPath, "utf8"));
+  if (manual.sources) manifest.sources = manual.sources;
+  for (const [id, latex] of Object.entries(manual.equations ?? {})) {
+    if (id in manifest.equations) throw new Error(`manual-tiers.json reuses equation id ${id}`);
+    manifest.equations[id] = latex;
+  }
+  for (const [name, t] of Object.entries(manual.tiers ?? {})) {
+    if (name in manifest.tiers) throw new Error(`manual-tiers.json redefines tier ${name}`);
+    manifest.tiers[name] = t;
+  }
 }
 
 async function buildDev(work) {
@@ -306,20 +214,7 @@ async function buildDev(work) {
     equations: Object.fromEntries(equations.map((e) => [e.id, e.latex])),
   };
 
-  // Hand-labelled tiers (real papers, other producers) live in their own file
-  // so regenerating the TeX tiers never discards them.
-  const manualPath = join(OUT, "manual-tiers.json");
-  if (existsSync(manualPath)) {
-    const manual = JSON.parse(readFileSync(manualPath, "utf8"));
-    for (const [id, latex] of Object.entries(manual.equations ?? {})) {
-      if (id in manifest.equations) throw new Error(`manual-tiers.json reuses equation id ${id}`);
-      manifest.equations[id] = latex;
-    }
-    for (const [name, t] of Object.entries(manual.tiers ?? {})) {
-      if (name in manifest.tiers) throw new Error(`manual-tiers.json redefines tier ${name}`);
-      manifest.tiers[name] = t;
-    }
-  }
+  mergeManualTiers(manifest);
 
   const files = {
     "tex-display.pdf": display.pdf,
@@ -393,6 +288,7 @@ async function buildHeldout(work) {
     },
     equations: Object.fromEntries(equations.map((e) => [e.id, e.latex])),
   };
+  mergeManualTiers(manifest);
   const files = {
     "tex-display.pdf": display.pdf,
     "tex-inline.pdf": inline.pdf,

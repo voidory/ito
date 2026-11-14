@@ -128,7 +128,7 @@ describe("held-out LaTeX benchmark set", () => {
     const { drawn, excludedDevIds } = heldout.comparison;
     // Same draw size as the development corpus's generated part.
     expect(drawn).toBe(Object.keys(manifest.equations).filter((id) => id.startsWith("g")).length);
-    expect(Object.keys(heldout.equations).length).toBe(drawn - excludedDevIds.length);
+    expect(Object.keys(heldout.equations).filter((id) => id.startsWith("h")).length).toBe(drawn - excludedDevIds.length);
     expect(new Set(excludedDevIds).size).toBe(excludedDevIds.length);
     for (const id of excludedDevIds) {
       expect(id.startsWith("g"), id).toBe(true);
@@ -150,4 +150,3 @@ describe("held-out LaTeX benchmark set", () => {
     for (const c of devConstructs) expect(counts.get(c) ?? 0, c).toBeGreaterThanOrEqual(15);
   });
 });
-

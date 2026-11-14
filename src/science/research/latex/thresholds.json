@@ -1,5 +1,5 @@
 {
-  "comment": "Per-tier exact-match targets and CI floors for the LaTeX extraction benchmark. `target` is the goal: 99.9% is claimed for pdfLaTeX with Computer Modern and AMS fonts only, so tiers set in other fonts (and scanned pages) have no target until their baselines are understood. `floor` is the gate: a run below it fails. Floors sit just under the measured rate (see BENCHMARK.md) and only move up. Since Phase 2 the extractor reads glyphs and rules from the PDF itself, so the result does not depend on the machine's fonts and a floor can sit within a point of the measurement. `heldout` lists the tiers of the held-out set (corpus-heldout/), which has targets but no floors: it is measured at phase gates, not gated in CI. Edited by hand; the corpus builder never touches this file.",
+  "comment": "Per-tier exact-match targets and CI floors for the LaTeX extraction benchmark. `target` is the goal: 99.9% is claimed for pdfLaTeX with Computer Modern and AMS fonts only, so tiers set in other fonts (and scanned pages) have no target until their baselines are understood. `floor` is the gate: a run below it fails. Floors sit just under the measured rate (see BENCHMARK.md) and only move up. Since Phase 2 the extractor reads glyphs and rules from the PDF itself, so the result does not depend on the machine's fonts and a floor can sit within a point of the measurement. The `real-*` tiers hold equations from the source of openly licensed arXiv papers, set in Computer Modern by the benchmark harness, so they are inside the target. `heldout` lists the tiers of the held-out set (corpus-heldout/), which has targets but no floors: it is measured at phase gates, not gated in CI. Edited by hand; the corpus builder never touches this file.",
   "extractionScale": 2,
   "tiers": {
     "tex-display": {
@@ -21,6 +21,14 @@
     "scanned": {
       "target": null,
       "floor": 0
+    },
+    "real-display": {
+      "target": 0.999,
+      "floor": 0
+    },
+    "real-inline": {
+      "target": 0.999,
+      "floor": 0
     }
   },
   "heldout": {
@@ -31,6 +39,12 @@
       "target": 0.999
     },
     "tex-display-12pt": {
+      "target": 0.999
+    },
+    "real-display": {
+      "target": 0.999
+    },
+    "real-inline": {
       "target": 0.999
     }
   }
