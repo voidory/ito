@@ -160,8 +160,8 @@
 /* FEAT-002 (2.2a) the selected highlight's fragments get an accent outline. */
 .ito-highlight[data-selected="true"] .ito-highlight-fragment,
 .ito-highlight[data-selected="true"] .ito-highlight-area {
-  outline: 2px solid var(--ito-accent, #2c4a6f);
-  outline-offset: 1px;
+  outline: 1.5px solid var(--ito-accent, #2c4a6f);
+  outline-offset: 2px;
 }
 
 /*
