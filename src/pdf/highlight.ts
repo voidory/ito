@@ -302,10 +302,10 @@ export interface OverlayOptions {
 
 /** CSS color per named highlight color. */
 export const COLOR_CSS: Record<string, string> = {
-  yellow: "rgba(255, 221, 87, 0.45)",
-  green: "rgba(130, 220, 150, 0.45)",
-  blue: "rgba(130, 190, 255, 0.45)",
-  pink: "rgba(255, 150, 200, 0.45)",
+  yellow: "rgba(255, 221, 87, 0.32)",
+  green: "rgba(130, 220, 150, 0.32)",
+  blue: "rgba(130, 190, 255, 0.32)",
+  pink: "rgba(255, 150, 200, 0.32)",
 };
 
 function reducedMotion(suppressMotion: boolean): boolean {
