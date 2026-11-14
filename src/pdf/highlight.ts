@@ -382,7 +382,7 @@ export function renderHighlightOverlay(
     } satisfies Partial<CSSStyleDeclaration>);
     container.appendChild(border);
   } else {
-    opts.rects.forEach((r, i) => {
+    opts.rects.forEach((r) => {
       const box = document.createElement("div");
       box.className = "ito-highlight-fragment";
       // M14–M16 (FEAT-001): fragments are draggable so one highlight can be
