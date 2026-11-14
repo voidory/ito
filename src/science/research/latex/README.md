@@ -18,6 +18,9 @@ tool, and compares the drafted LaTeX with the ground truth.
   fonts (`\mathbf`, `\mathbb`, `\mathrm`), variant letters (`\varepsilon`),
   accents, and word spaces inside text (`\text{is even}` is not
   `\text{iseven}`).
+  How a run of one font is grouped does not count, because it does not show:
+  `\mathbf{AB}` equals `\mathbf{A}\mathbf{B}`, and a script after a font group
+  sits on its last character (`\mathrm{Te}^b` equals `\mathrm{T}\mathrm{e}^b`).
 - **Mean similarity** is 1 minus the normalised tree edit distance (`score.ts`),
   so a nearly-right draft scores higher than an empty one.
 

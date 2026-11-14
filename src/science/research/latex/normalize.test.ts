@@ -175,3 +175,14 @@ describe("scoring", () => {
     expect(pairedGapInterval(0, 0, 760)).toEqual({ gap: 0, lower: 0, upper: 0 });
   });
 });
+
+describe("scripts on font groups", () => {
+  it("puts the script on the group's last character", () => {
+    expect(canonicalLatex("\\mathrm{Te}^b")).toBe(canonicalLatex("\\mathrm{T}\\mathrm{e}^b"));
+    expect(canonicalLatex("\\mathbf{AB}_i")).toBe(canonicalLatex("\\mathbf{A}\\mathbf{B}_i"));
+    expect(canonicalLatex("\\mathbf{AB}")).toBe(canonicalLatex("\\mathbf{A}\\mathbf{B}"));
+    expect(canonicalLatex("\\mathbf{A}\\mathcal{B}")).not.toBe(canonicalLatex("\\mathbf{AB}"));
+    expect(canonicalLatex("\\mathrm{e}^b")).toBe("script(font:rm(e) empty b)");
+    expect(canonicalLatex("\\mathrm{Te}^b")).not.toBe(canonicalLatex("\\mathrm{T}^b\\mathrm{e}"));
+  });
+});

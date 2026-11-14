@@ -28,6 +28,19 @@ export interface MathGlyph {
   readonly base: number;
   /** Font size (em height) in the same unit as the coordinates. */
   readonly size: number;
+  /**
+   * Exact identity, when the glyph's font slot is known (`texGlyphs.ts`): the
+   * LaTeX it is, its class (`ord`, `bin`, `rel`, `op`, `int`, `open`, `close`,
+   * `fence`, `punct`, `accent`, `radical`) and its font style (`rm`, `bf`,
+   * `bm`, `it`, `sf`, `tt`, `cal`, `bb`, `frak`). With `tex` set, `ch` is not
+   * interpreted and none of the character heuristics below apply to the glyph.
+   */
+  readonly tex?: string;
+  readonly cls?: string;
+  readonly style?: string;
+  /** Ink extent (y grows downwards), when known. */
+  readonly top?: number;
+  readonly bottom?: number;
 }
 
 /** A thin horizontal rule (fraction bar / radical vinculum) in glyph units. */
@@ -90,7 +103,7 @@ const SUBSCRIPT_CHARS: Readonly<Record<string, string>> = {
 const FUNCTIONS = new Set([
   "sin", "cos", "tan", "cot", "sec", "csc", "sinh", "cosh", "tanh", "arcsin", "arccos",
   "arctan", "log", "ln", "exp", "lim", "max", "min", "sup", "inf", "det", "dim", "ker",
-  "arg", "deg", "gcd", "mod",
+  "arg", "deg", "gcd", "mod", "coth", "lg", "hom", "Pr",
 ]);
 /** Short prose words that only count as text next to another text word. */
 const STOPWORDS = new Set([
@@ -127,6 +140,11 @@ interface Box {
   kind: BoxKind;
   /** The source character for `glyph` boxes. */
   ch?: string;
+  /** Identity came from the font slot: no character heuristics apply. */
+  exact?: boolean;
+  cls?: string;
+  /** Font style still to be applied to `tex` (see {@link styled}). */
+  style?: string;
 }
 
 interface Line {
@@ -148,7 +166,29 @@ function cx(b: { x0: number; x1: number }): number {
 }
 
 function isAnchor(b: Box): boolean {
-  return b.kind === "glyph" && b.ch != null && ANCHOR_CHARS.has(b.ch);
+  // An exact glyph already carries the baseline of the line it is centred on.
+  return b.kind === "glyph" && !b.exact && b.ch != null && ANCHOR_CHARS.has(b.ch);
+}
+
+/**
+ * Exact delimiters and big operators. Their size says nothing about the line
+ * they are on: `\left\{` around script-size content is still a full-size
+ * glyph, so they neither set a line's size nor count as scripts when larger.
+ */
+function isTall(b: Box): boolean {
+  return b.kind === "glyph" && b.exact === true && b.cls != null && TALL_CLASSES.has(b.cls);
+}
+const TALL_CLASSES = new Set(["open", "close", "fence", "op", "int"]);
+
+const STYLE_COMMANDS: Readonly<Record<string, string>> = {
+  rm: "\\mathrm", bf: "\\mathbf", bm: "\\boldsymbol", it: "\\mathit", sf: "\\mathsf",
+  tt: "\\mathtt", cal: "\\mathcal", bb: "\\mathbb", frak: "\\mathfrak",
+};
+
+/** A box's LaTeX with its pending font style applied. */
+function styled(b: Box): string {
+  const cmd = b.style ? STYLE_COMMANDS[b.style] : undefined;
+  return cmd ? `${cmd}{${b.tex}}` : b.tex;
 }
 
 function charToTex(ch: string): string {
@@ -184,6 +224,23 @@ function toBoxes(glyphs: readonly MathGlyph[]): Box[] {
       out.push(glyphBox(sub, g.x0, g.x1, g.base + 0.2 * g.size, 0.7 * g.size));
       continue;
     }
+    if (g.tex != null) {
+      out.push({
+        x0: g.x0,
+        x1: Math.max(g.x1, g.x0),
+        top: g.top ?? g.base - 0.8 * g.size,
+        bottom: g.bottom ?? g.base + 0.2 * g.size,
+        base: g.base,
+        size: g.size,
+        tex: g.tex,
+        kind: "glyph",
+        ch: g.tex,
+        exact: true,
+        cls: g.cls ?? "ord",
+        ...(g.style ? { style: g.style } : {}),
+      });
+      continue;
+    }
     // Keep symbols we map explicitly; fold everything else (math italics,
     // ligatures, fullwidth forms) to its plain compatibility form.
     const known = GREEK[g.ch] != null || MATH_SYMBOL_TO_LATEX[g.ch] != null;
@@ -210,21 +267,35 @@ function bbox(boxes: readonly Box[]): { x0: number; x1: number; top: number; bot
 // Rules -> fractions, radicals, overlines
 // ---------------------------------------------------------------------------
 
-/** Boxes stacked contiguously away from a rule (up: dir = -1, down: dir = +1). */
-function chainFrom(cands: Box[], y: number, dir: -1 | 1, s: number): Box[] {
+/**
+ * Boxes stacked contiguously away from a rule (up: dir = -1, down: dir = +1).
+ * `bridges` are the heights of other rules in the same column: a fraction
+ * inside a numerator leaves a gap at its own bar that is not a break.
+ */
+function chainFrom(cands: Box[], y: number, dir: -1 | 1, bridges: readonly number[] = []): Box[] {
   const out: Box[] = [];
+  if (cands.length === 0) return out;
+  const s = Math.max(...cands.map((b) => b.size));
+  // Exact boxes end at their ink, and TeX keeps a numerator's baseline (not
+  // its ink) a fixed distance from the bar; boxes from characters are padded.
+  const reach = (b: Box | null): number => (b == null || b.exact ? 0.7 : 0.35) * s;
+  type Item = { top: number; bottom: number; box: Box | null };
+  const items: Item[] = [
+    ...cands.map((b) => ({ top: b.top, bottom: b.bottom, box: b })),
+    ...bridges.filter((r) => (dir < 0 ? r < y : r > y)).map((r) => ({ top: r, bottom: r, box: null })),
+  ];
   let edge = y;
   if (dir < 0) {
-    for (const b of [...cands].sort((a, c) => c.bottom - a.bottom)) {
-      if (edge - b.bottom > 0.35 * s) break;
-      out.push(b);
-      edge = Math.min(edge, b.top);
+    for (const it of items.sort((a, c) => c.bottom - a.bottom)) {
+      if (edge - it.bottom > reach(it.box)) break;
+      if (it.box) out.push(it.box);
+      edge = Math.min(edge, it.top);
     }
   } else {
-    for (const b of [...cands].sort((a, c) => a.top - c.top)) {
-      if (b.top - edge > 0.35 * s) break;
-      out.push(b);
-      edge = Math.max(edge, b.bottom);
+    for (const it of items.sort((a, c) => a.top - c.top)) {
+      if (it.top - edge > reach(it.box)) break;
+      if (it.box) out.push(it.box);
+      edge = Math.max(edge, it.bottom);
     }
   }
   return out;
@@ -255,14 +326,29 @@ function applyRules(input: Box[], rules: readonly MathRule[]): Box[] {
   while (pending.length > 0 && boxes.length > 0) {
     const rule = pending.shift()!;
     const s = median(boxes.map((b) => b.size));
+    // A rule from the PDF spans exactly what it belongs to; one found in
+    // pixels may be a little short.
+    const slack = (b: Box): number => (b.exact ? 0.02 : 0.15) * s;
     const cands = boxes.filter((b) => {
       const c = cx(b);
-      return c >= rule.x0 - 0.15 * s && c <= rule.x1 + 0.15 * s;
+      return c >= rule.x0 - slack(b) && c <= rule.x1 + slack(b);
     });
-    const mid = (b: Box): number => (b.kind === "glyph" ? b.base - 0.3 * b.size : (b.top + b.bottom) / 2);
-    const above = chainFrom(cands.filter((b) => mid(b) < rule.y), rule.y, -1, s);
-    const isSurd = (b: Box): boolean => b.kind === "glyph" && b.ch === "√";
-    let below = chainFrom(cands.filter((b) => mid(b) >= rule.y), rule.y, 1, s);
+    const mid = (b: Box): number =>
+      b.kind === "glyph" && !b.exact ? b.base - 0.3 * b.size : (b.top + b.bottom) / 2;
+    const bridges = pending
+      .filter((r) => (r.x0 + r.x1) / 2 >= rule.x0 && (r.x0 + r.x1) / 2 <= rule.x1)
+      .map((r) => r.y);
+    const above = chainFrom(cands.filter((b) => mid(b) < rule.y), rule.y, -1, bridges);
+    const isSurd = (b: Box): boolean => b.kind === "glyph" && (b.exact ? b.cls === "radical" : b.ch === "√");
+    let below = chainFrom(cands.filter((b) => mid(b) >= rule.y), rule.y, 1, bridges);
+    // A radical sign from the PDF ends exactly where its rule starts, and
+    // everything under the rule down to the sign's foot is the radicand.
+    const exactSurd = above.length > 0 ? undefined : boxes.find(
+      (b) => isSurd(b) && b.exact && Math.abs(b.x1 - rule.x0) < 0.1 * s && Math.abs(b.top - rule.y) < 0.3 * s,
+    );
+    if (exactSurd) {
+      below = cands.filter((b) => b !== exactSurd && mid(b) >= rule.y && mid(b) <= exactSurd.bottom + 0.1 * s);
+    }
     // A radical sign at the rule's left end belongs to the rule, not under it.
     if (above.length === 0) below = below.filter((b) => !(isSurd(b) && cx(b) <= rule.x0 + 0.3 * s));
     if (below.length === 0) continue;
@@ -270,16 +356,22 @@ function applyRules(input: Box[], rules: readonly MathRule[]): Box[] {
     const consumed = new Set<Box>([...above, ...below]);
     const nested = (set: Box[]): MathRule[] => {
       const bb = bbox(set);
+      // An overline lies above the ink of what it covers, so look a little
+      // beyond the boxes, but never across the rule being applied.
+      const top = Math.max(bb.top - 0.6 * s, bb.top < rule.y ? -Infinity : rule.y + 1e-6);
+      const bottom = Math.min(bb.bottom + 0.3 * s, bb.bottom > rule.y ? Infinity : rule.y - 1e-6);
       return pending.filter((r) => {
         const c = (r.x0 + r.x1) / 2;
-        return c >= bb.x0 && c <= bb.x1 && r.y >= bb.top && r.y <= bb.bottom;
+        return c >= bb.x0 && c <= bb.x1 && r.y >= top && r.y <= bottom;
       });
     };
     let made: Box | null = null;
     let used: MathRule[] = [];
 
     if (above.length > 0) {
-      if (!boundedByRule(above, boxes, rule, s) || !boundedByRule(below, boxes, rule, s)) continue;
+      // Only a rule found in pixels can be an underline mistaken for a bar.
+      const drawn = [...above, ...below].every((b) => b.exact || b.kind !== "glyph");
+      if (!drawn && (!boundedByRule(above, boxes, rule, s) || !boundedByRule(below, boxes, rule, s))) continue;
       const nA = nested(above);
       const nB = nested(below);
       used = [...nA, ...nB];
@@ -299,21 +391,21 @@ function applyRules(input: Box[], rules: readonly MathRule[]): Box[] {
     } else {
       const bb = bbox(below);
       const size = Math.max(...below.map((b) => b.size));
-      const bigBases = below.filter((b) => b.size >= 0.8 * size).map((b) => b.base);
-      const base = median(bigBases);
-      const surd = boxes.find(
+      const nB = nested(below);
+      const inner = layout(below, nB, false);
+      const base = inner.base ?? median(below.filter((b) => b.size >= 0.8 * size).map((b) => b.base));
+      const surd = exactSurd ?? boxes.find(
         (b) =>
           isSurd(b) && !consumed.has(b) &&
           cx(b) >= rule.x0 - 1.3 * s && cx(b) <= rule.x0 + 0.3 * s &&
           Math.abs(b.base - rule.y) < 2.5 * s,
       );
-      const nB = nested(below);
       if (surd) {
         consumed.add(surd);
         used = nB;
         made = {
           x0: Math.min(surd.x0, bb.x0), x1: Math.max(rule.x1, bb.x1), top: Math.min(rule.y, bb.top),
-          bottom: bb.bottom, base, size, tex: `\\sqrt{${build(below, nB, false)}}`, kind: "sqrt",
+          bottom: bb.bottom, base, size, tex: `\\sqrt{${inner.tex}}`, kind: "sqrt",
         };
       } else if (
         below.length <= 8 &&
@@ -323,7 +415,7 @@ function applyRules(input: Box[], rules: readonly MathRule[]): Box[] {
         used = nB;
         made = {
           x0: bb.x0, x1: bb.x1, top: Math.min(rule.y, bb.top), bottom: bb.bottom, base, size,
-          tex: `\\overline{${build(below, nB, false)}}`, kind: "over",
+          tex: `\\overline{${inner.tex}}`, kind: "over",
         };
       }
     }
@@ -342,15 +434,20 @@ function applyRules(input: Box[], rules: readonly MathRule[]): Box[] {
 
 function splitLines(boxes: Box[]): Line[] {
   if (boxes.length === 0) return [];
-  const plain = boxes.filter((b) => !isAnchor(b));
+  // A delimiter is as tall as what it encloses, so it can be a full-size glyph
+  // around script-size content: it does not say what size the line is.
+  const plain = boxes.filter((b) => !isAnchor(b) && !(isTall(b) && b.cls !== "op" && b.cls !== "int"));
   const pool = plain.length > 0 ? plain : boxes;
   const maxS = Math.max(...pool.map((b) => b.size));
   const large = pool.filter((b) => b.size >= 0.8 * maxS).sort((a, b) => a.base - b.base);
   const lines: Line[] = [];
   let cur: Box[] = [];
   let mean = 0;
+  // Lines of exact glyphs are at least a baseline skip apart, and at the
+  // smallest size a script is as large as its base, so split less eagerly.
+  const lineGap = (large.every((b) => b.exact || b.kind !== "glyph") ? 0.7 : 0.4) * maxS;
   for (const b of large) {
-    if (cur.length > 0 && b.base - mean > 0.4 * maxS) {
+    if (cur.length > 0 && b.base - mean > lineGap) {
       lines.push(makeLine(cur));
       cur = [];
     }
@@ -362,36 +459,58 @@ function splitLines(boxes: Box[]): Line[] {
   const largeSet = new Set(large);
   const leftover: Box[] = [];
   // Operator glyphs first, so the limits hanging off them see the full extent.
-  const rest = boxes.filter((b) => !largeSet.has(b)).sort((a, b) => Number(isAnchor(b)) - Number(isAnchor(a)));
-  for (const b of rest) {
-    let best = -1;
-    let bestD = Infinity;
-    lines.forEach((l, i) => {
-      // Operator-font glyphs hang from their origin: compare against mid-line.
-      const ref = isAnchor(b) ? l.base - 0.5 * l.size : l.base;
-      const d = Math.abs(b.base - ref);
-      const e = bbox(l.boxes);
-      if (d > 1.7 * l.size || cx(b) < e.x0 - 1.2 * l.size || cx(b) > e.x1 + 1.2 * l.size) return;
-      if (d < bestD) {
-        bestD = d;
-        best = i;
-      }
-    });
-    if (best >= 0) lines[best]!.boxes.push(b);
-    else leftover.push(b);
+  let rest = boxes
+    .filter((b) => !largeSet.has(b))
+    .sort((a, b) => Number(isAnchor(b) || isTall(b)) - Number(isAnchor(a) || isTall(a)));
+  // A box joins the nearest line it is close to. Joining widens the line, so
+  // go round again until nothing more joins: a second fraction after the
+  // first is next to the line only once the first has joined.
+  for (let progress = true; progress && rest.length > 0; ) {
+    progress = false;
+    const waiting: Box[] = [];
+    for (const b of rest) {
+      let best = -1;
+      let bestD = Infinity;
+      lines.forEach((l, i) => {
+        // Operator-font glyphs hang from their origin: compare against mid-line.
+        const ref = isAnchor(b) ? l.base - 0.5 * l.size : l.base;
+        const d = Math.abs(b.base - ref);
+        const e = bbox(l.boxes);
+        if (d > 1.7 * l.size || b.x1 < e.x0 - 1.2 * l.size || b.x0 > e.x1 + 1.2 * l.size) return;
+        if (d < bestD) {
+          bestD = d;
+          best = i;
+        }
+      });
+      if (best >= 0) {
+        lines[best]!.boxes.push(b);
+        progress = true;
+      } else waiting.push(b);
+    }
+    rest = waiting;
   }
+  leftover.push(...rest);
   if (leftover.length > 0 && leftover.length < boxes.length) lines.push(...splitLines(leftover));
   else if (leftover.length > 0) lines.push(makeLine(leftover));
   return lines.sort((a, b) => a.base - b.base);
 }
 
 function makeLine(large: Box[]): Line {
-  return {
-    boxes: [...large],
-    large: new Set(large),
-    base: median(large.map((b) => b.base)),
-    size: median(large.map((b) => b.size)),
-  };
+  const size = median(large.map((b) => b.size));
+  return { boxes: [...large], large: new Set(large), base: lineBaseline(large), size };
+}
+
+/**
+ * The baseline of a line of full-size boxes. With exact glyphs it is the
+ * baseline of the leftmost one: at the smallest size a script is as large as
+ * its base and only shifted, and a script follows its base. Otherwise the
+ * median, which tolerates fallback-font noise.
+ */
+function lineBaseline(large: Box[]): number {
+  if (!large.every((b) => b.exact || b.kind !== "glyph")) return median(large.map((b) => b.base));
+  const glyphs = large.filter((b) => !isTall(b) && b.kind !== "frac");
+  const pool = glyphs.length > 0 ? glyphs : large;
+  return pool.reduce((a, b) => (b.x0 < a.x0 ? b : a)).base;
 }
 
 /**
@@ -426,7 +545,7 @@ function mergeStackedFractions(lines: Line[]): Line[] {
         // Two short centred lines are a fraction only if neither is itself a
         // statement: a numerator rarely carries a relation at its top level.
         const relation = (l: Line): boolean =>
-          l.boxes.some((x) => x.ch != null && l.large.has(x) && "=<>≤≥≈≡→".includes(x.ch));
+          l.boxes.some((x) => l.large.has(x) && (x.exact ? x.cls === "rel" : x.ch != null && "=<>≤≥≈≡→".includes(x.ch)));
         const alone =
           out.length === 2 && a.boxes.length <= 8 && b.boxes.length <= 8 && !relation(a) && !relation(b);
         if (!host && !alone) continue;
@@ -456,7 +575,8 @@ function mergeStackedFractions(lines: Line[]): Line[] {
 // ---------------------------------------------------------------------------
 
 function isLetter(b: Box): boolean {
-  return b.kind === "glyph" && b.ch != null && /^[A-Za-z]$/.test(b.ch);
+  // An exact letter is a variable unless its font says otherwise (see mergeStyledRuns).
+  return b.kind === "glyph" && !b.exact && b.ch != null && /^[A-Za-z]$/.test(b.ch);
 }
 
 function mergedBox(run: Box[], tex: string, kind: BoxKind): Box {
@@ -464,8 +584,64 @@ function mergedBox(run: Box[], tex: string, kind: BoxKind): Box {
   return { ...bb, base: run[0]!.base, size: run[0]!.size, tex, kind };
 }
 
+/**
+ * Exact glyphs say which font they are in, so words need no guessing: touching
+ * glyphs of one style are one run. An upright run is a function name, a unit
+ * or a word of text; upright runs a word space apart are one piece of text.
+ * Any other style wraps the run in its font command.
+ */
+function mergeStyledRuns(mains: Box[], size: number, all: readonly Box[] = mains): Box[] {
+  if (!mains.some((b) => b.exact && b.style)) return mains;
+  const out: Box[] = [];
+  let run: Box[] = [];
+  const flush = (): void => {
+    if (run.length === 0) return;
+    const style = run[0]!.style!;
+    const word = run.map((b) => b.tex).join("");
+    if (style === "rm" && FUNCTIONS.has(word)) {
+      out.push({ ...mergedBox(run, `\\${word}`, "word"), exact: true, cls: "fn" });
+    } else if (style === "rm") {
+      const prev = out[out.length - 1];
+      const gap = prev ? run[0]!.x0 - prev.x1 : Infinity;
+      const first = run[0]!;
+      const clear = prev != null && !all.some((b) => cx(b) > prev.x1 && cx(b) < first.x0);
+      if (prev && prev.kind === "text" && prev.exact && gap > 0.2 * size && gap < 0.9 * size && clear) {
+        // A word space, not math spacing: the same piece of text goes on.
+        prev.tex = `${prev.tex.slice(0, -1)} ${word}}`;
+        prev.x1 = run[run.length - 1]!.x1;
+      } else {
+        out.push({ ...mergedBox(run, `\\text{${word}}`, "text"), exact: true, cls: "ord" });
+      }
+    } else {
+      out.push({ ...mergedBox(run, `${STYLE_COMMANDS[style] ?? "\\mathrm"}{${word}}`, "word"), exact: true, cls: "ord" });
+    }
+    run = [];
+  };
+  for (const b of mains) {
+    const last = run[run.length - 1];
+    if (b.exact && b.style && b.kind === "glyph") {
+      if (last && (last.style !== b.style || b.x0 - last.x1 > 0.12 * size)) flush();
+      run.push(b);
+    } else {
+      flush();
+      out.push(b);
+    }
+  }
+  flush();
+  // Text of one or two letters with no word space is a symbol set upright
+  // (`\mathrm{d}`, `\mathrm{kg}`), which is what the source most likely said.
+  for (const b of out) {
+    if (b.kind === "text" && b.exact && !b.tex.includes(" ") && b.tex.length <= 9) {
+      b.tex = `\\mathrm{${b.tex.slice(6, -1)}}`;
+      b.kind = "word";
+    }
+  }
+  return out;
+}
+
 /** Fuse adjacent letters into function names (`\sin`) and prose (`\text{…}`). */
-function mergeWords(mains: Box[], size: number): Box[] {
+function mergeWords(input: Box[], size: number, all: readonly Box[] = input): Box[] {
+  const mains = mergeStyledRuns(input, size, all);
   // 1. maximal runs of touching letters
   const runs: Box[][] = [];
   const items: (Box | Box[])[] = [];
@@ -551,12 +727,17 @@ function lineToTex(line: Line): string {
   const scripts: Box[] = [];
   for (const b of all) {
     const d = (line.base - b.base) / s;
-    const tol = b.kind === "frac" ? 0.3 : b.size <= 0.85 * s ? 0.08 : 0.28;
-    if (line.large.has(b) || isAnchor(b) || Math.abs(d) <= tol) mainsRaw.push(b);
+    // Exact glyphs: a script is never on the baseline, whatever its size, and
+    // at the smallest size it is no smaller than its base, only shifted.
+    const tol = b.kind === "frac" ? 0.3
+      : isTall(b) ? (b.size >= 0.85 * s ? 0.35 : -1)
+      : b.exact ? (b.size <= 0.85 * s ? -1 : 0.14)
+      : b.size <= 0.85 * s ? 0.08 : 0.28;
+    if ((line.large.has(b) && !b.exact) || isAnchor(b) || Math.abs(d) <= tol) mainsRaw.push(b);
     else scripts.push(b);
   }
-  if (mainsRaw.length === 0) return joinTex(all.map((b) => b.tex));
-  const mains = mergeWords(mainsRaw, s);
+  if (mainsRaw.length === 0) return joinTex(all.map(styled));
+  const mains = mergeWords(mainsRaw, s, all);
 
   // Connected runs of off-baseline glyphs: each is one script (or one limit).
   const parent = scripts.map((_, i) => i);
@@ -566,7 +747,10 @@ function lineToTex(line: Line): string {
       const a = scripts[i]!;
       const b = scripts[j]!;
       const gap = Math.max(0, b.x0 - a.x1, a.x0 - b.x1);
-      if (gap < 0.3 * s && Math.abs(a.base - b.base) < 0.45 * Math.max(a.size, b.size)) {
+      // Inside a script TeX sets relations and operators tight, so exact
+      // glyphs of one script nearly touch; limits of neighbouring operators don't.
+      const near = (a.exact || a.kind !== "glyph") && (b.exact || b.kind !== "glyph") ? 0.2 : 0.3;
+      if (gap < near * s && Math.abs(a.base - b.base) < 0.45 * Math.max(a.size, b.size)) {
         parent[find(i)] = find(j);
       }
     }
@@ -588,7 +772,7 @@ function lineToTex(line: Line): string {
     let host: Box | null =
       mains.find(
         (m) =>
-          ((m.kind === "glyph" && m.ch != null && LIMIT_OPS.has(m.ch)) || LIMIT_WORDS.has(m.tex)) &&
+          ((m.kind === "glyph" && (m.exact ? m.cls === "op" : m.ch != null && LIMIT_OPS.has(m.ch))) || LIMIT_WORDS.has(m.tex)) &&
           c >= m.x0 - 0.2 * s && c <= m.x1 + 0.2 * s,
       ) ?? null;
     if (!host) {
@@ -612,7 +796,7 @@ function lineToTex(line: Line): string {
   const lead = script(null);
   if (lead) parts.push(`{}${lead}`);
   mains.forEach((m, i) => {
-    let tex = m.tex;
+    let tex = styled(m);
     if (m.kind === "text") {
       // Keep the word spacing that the surrounding math would otherwise eat.
       tex = `\\text{${i > 0 ? " " : ""}${tex.slice(6, -1)}${i < mains.length - 1 ? " " : ""}}`;
@@ -623,10 +807,18 @@ function lineToTex(line: Line): string {
 }
 
 function build(boxes: Box[], rules: readonly MathRule[], allowStack: boolean): string {
+  return layout(boxes, rules, allowStack).tex;
+}
+
+/** LaTeX for a set of boxes, and their baseline when they form a single line. */
+function layout(boxes: Box[], rules: readonly MathRule[], allowStack: boolean): { tex: string; base: number | null } {
   const structured = rules.length > 0 ? applyRules(boxes, rules) : boxes;
   let lines = splitLines(structured);
   if (allowStack) lines = mergeStackedFractions(lines);
-  return lines.map(lineToTex).filter((t) => t.length > 0).join(" \\\\ ");
+  return {
+    tex: lines.map(lineToTex).filter((t) => t.length > 0).join(" \\\\ "),
+    base: lines.length === 1 ? lines[0]!.base : null,
+  };
 }
 
 /**
@@ -636,12 +828,16 @@ function build(boxes: Box[], rules: readonly MathRule[], allowStack: boolean): s
 function usableRules(boxes: Box[], rules: readonly MathRule[]): MathRule[] {
   if (boxes.length === 0) return [];
   const s = median(boxes.map((b) => b.size));
+  // Rules read from the PDF's own drawing operations are rules: only pixel
+  // detection can mistake a short stroke or a minus sign for one.
+  const fromPdf = boxes.every((b) => b.exact);
   return rules.filter((r) => {
     const len = r.x1 - r.x0;
-    if (len < 0.4 * s) return false;
     if (r.thickness != null && r.thickness > Math.max(0.16 * s, 1.5)) return false;
+    if (fromPdf) return true;
+    if (len < 0.4 * s) return false;
     return !boxes.some((b) => {
-      if (b.ch == null || !BAR_CHARS.has(b.ch)) return false;
+      if (b.exact || b.ch == null || !BAR_CHARS.has(b.ch)) return false;
       const overlap = Math.min(b.x1, r.x1) - Math.max(b.x0, r.x0);
       return overlap >= 0.6 * Math.min(len, b.x1 - b.x0) && len <= 1.6 * (b.x1 - b.x0) + 0.2 * s &&
         r.y >= b.base - 0.7 * b.size && r.y <= b.base + 0.15 * b.size;
@@ -655,10 +851,82 @@ function usableRules(boxes: Box[], rules: readonly MathRule[]): MathRule[] {
  * fraction is only inferred from an unambiguous centred stack.
  */
 export function glyphsToLatex(glyphs: readonly MathGlyph[], rules: readonly MathRule[] = []): string {
-  const boxes = toBoxes(glyphs);
+  const boxes = applyAccents(toBoxes(glyphs));
   if (boxes.length === 0) return "";
   const good = usableRules(boxes, rules);
-  return build(boxes, good, good.length === 0).replace(/\s+/g, " ").trim();
+  // With no rule to go by, a fraction can only be guessed from a stack. Exact
+  // glyphs come with the page's real rules, so no rule means no fraction.
+  const guessStacks = good.length === 0 && !boxes.every((b) => b.exact);
+  return build(boxes, good, guessStacks).replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Attach each accent glyph (`\hat`, `\vec`, `\widetilde`...) to what it sits
+ * over. Only exact glyphs can be accents: a character alone does not say
+ * whether `^` is a hat or a caret. TeX centres an accent over its base, so the
+ * base is whatever lies under the accent's own width, just below its ink.
+ */
+function applyAccents(input: Box[]): Box[] {
+  const accents = input.filter((b) => b.exact && b.cls === "accent");
+  if (accents.length === 0) return input;
+  let boxes = input.filter((b) => !(b.exact && b.cls === "accent"));
+  // Narrow accents first, so `\widehat{\hat{x} y}` nests the right way round.
+  for (const acc of accents.sort((a, b) => a.x1 - a.x0 - (b.x1 - b.x0))) {
+    const s = acc.size;
+    const wide = acc.tex.startsWith("\\wide");
+    // The wide accents come from the extension font, which is not always
+    // scaled with the script it sits in: only a narrow accent matches its
+    // base in size.
+    const under = boxes.filter(
+      (b) =>
+        (wide || (b.size >= 0.9 * s && b.size <= 1.1 * s)) &&
+        b.top - acc.bottom > -0.2 * b.size && b.top - acc.bottom < 0.5 * b.size,
+    );
+    let bases: Box[];
+    if (wide) {
+      // A wide accent is centred over a run of boxes. TeX has three sizes of
+      // each (0.56, 1 and 1.44 em) and uses the largest that is no wider than
+      // what it covers, which bounds the run from both sides.
+      const row = under.sort((a, b) => a.x0 - b.x0);
+      const w = (acc.x1 - acc.x0) / s;
+      const min = w < 0.8 ? 0 : w - 0.2; // an italic correction counts as width
+      const max = w < 0.8 ? 1.03 : w < 1.2 ? 1.47 : Infinity;
+      let best: Box[] = [];
+      for (let i = 0; i < row.length; i++) {
+        for (let j = i; j < row.length; j++) {
+          const run = row.slice(i, j + 1);
+          const bb = bbox(run);
+          const width = (bb.x1 - bb.x0) / s;
+          if (Math.abs(cx(bb) - cx(acc)) > 0.12 * s || width < min || width > max) continue;
+          if (best.length === 0 || bb.x1 - bb.x0 > bbox(best).x1 - bbox(best).x0) best = run;
+        }
+      }
+      bases = best;
+    } else {
+      const nearest = under
+        .filter((b) => Math.abs(cx(b) - cx(acc)) < 0.5 * (b.x1 - b.x0) + 0.12 * s)
+        .sort((a, b) => Math.abs(cx(a) - cx(acc)) - Math.abs(cx(b) - cx(acc)))[0];
+      bases = nearest ? [nearest] : [];
+    }
+    if (bases.length === 0) continue; // an accent with nothing under it is dropped
+    const inner = bases.sort((a, b) => a.x0 - b.x0);
+    const set = new Set(inner);
+    const bb = bbox(inner);
+    boxes = boxes.filter((b) => !set.has(b));
+    boxes.push({
+      x0: bb.x0,
+      x1: bb.x1,
+      top: Math.min(bb.top, acc.top),
+      bottom: bb.bottom,
+      base: inner[0]!.base,
+      size: inner[0]!.size,
+      tex: `${acc.tex}{${build(inner, [], false)}}`,
+      kind: "word",
+      exact: true,
+      cls: "ord",
+    });
+  }
+  return boxes;
 }
 
 // ---------------------------------------------------------------------------

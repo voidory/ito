@@ -3,34 +3,34 @@
  "tiers": {
   "tex-display": {
    "n": 3460,
-   "exact": 664,
+   "exact": 2393,
    "comparable": {
     "n": 3259,
-    "exact": 564
+    "exact": 2207
    }
   },
   "tex-inline": {
    "n": 2605,
-   "exact": 494,
+   "exact": 2174,
    "comparable": {
     "n": 2416,
-    "exact": 416
+    "exact": 1991
    }
   },
   "tex-times": {
    "n": 760,
-   "exact": 173,
+   "exact": 316,
    "comparable": {
     "n": 580,
-    "exact": 89
+    "exact": 204
    }
   },
   "tex-tounicode": {
    "n": 760,
-   "exact": 167,
+   "exact": 556,
    "comparable": {
     "n": 580,
-    "exact": 85
+    "exact": 391
    }
   },
   "scanned": {

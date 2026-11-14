@@ -10,9 +10,9 @@ Only aggregates are reported. Individual failures are deliberately left out, and
 
 | Tier | Selections | Exact | Exact rate | Mean similarity | Target | Best provable |
 |---|---|---|---|---|---|---|
-| `tex-display` | 3259 | 515 | 15.80% | 0.721 | 99.90% | 99.91% |
-| `tex-inline` | 2435 | 390 | 16.02% | 0.744 | 99.90% | 99.88% |
-| `tex-display-12pt` | 760 | 110 | 14.47% | 0.734 | 99.90% | 99.61% |
+| `tex-display` | 3259 | 2249 | 69.01% | 0.890 | 99.90% | 99.91% |
+| `tex-inline` | 2435 | 2028 | 83.29% | 0.973 | 99.90% | 99.88% |
+| `tex-display-12pt` | 760 | 515 | 67.76% | 0.888 | 99.90% | 99.61% |
 
 - `tex-display`: pdfLaTeX, Computer Modern 10pt, display style, one equation per line
 - `tex-inline`: pdfLaTeX, Computer Modern 10pt, text style, equation inside a line of prose
@@ -22,9 +22,9 @@ Only aggregates are reported. Individual failures are deliberately left out, and
 
 | Held-out tier | Compared with | Its rate | Held-out rate | Gap | 95% interval | Reading |
 |---|---|---|---|---|---|---|
-| `tex-display` | development `tex-display`, 3259 comparable equations | 17.31% | 15.80% | +1.50 pts | -0.30 to +3.31 | no detectable gap |
-| `tex-inline` | development `tex-inline`, 2416 comparable equations | 17.22% | 16.02% | +1.20 pts | -0.89 to +3.30 | no detectable gap |
-| `tex-display-12pt` | the same 760 equations in held-out `tex-display` | 14.47% | 14.47% | +0.00 pts | -0.36 to +0.36 | no detectable gap |
+| `tex-display` | development `tex-display`, 3259 comparable equations | 67.72% | 69.01% | -1.29 pts | -3.54 to +0.97 | no detectable gap |
+| `tex-inline` | development `tex-inline`, 2416 comparable equations | 82.41% | 83.29% | -0.88 pts | -3.00 to +1.25 | no detectable gap |
+| `tex-display-12pt` | the same 760 equations in held-out `tex-display` | 67.89% | 67.76% | +0.13 pts | -0.13 to +0.39 | no detectable gap |
 
 *Gap* is the compared rate minus the held-out rate. For the 10pt tiers the comparison is the same extractor on the development corpus, read from `BENCHMARK.json`: generated equations only, less the ones this set's draw also produced, so both sides were drawn by the same rule and lost the same equations. The interval is Newcombe's for two independent proportions. An interval wholly above zero means the extractor does better on equations it was developed against than on unseen ones: it has been fitted to the corpus. For the 12pt tier the comparison is paired: identical equations set in other font design sizes, so a gap there is about fonts, not about which equations were seen.
 
@@ -34,35 +34,35 @@ Empty extractions: 0 of 3259.
 
 | Construct | Selections | Exact | Exact rate | Mean similarity |
 |---|---|---|---|---|
-| script | 2662 | 354 | 13.30% | 0.724 |
-| greek | 2281 | 302 | 13.24% | 0.733 |
-| function | 1439 | 181 | 12.58% | 0.741 |
-| fraction | 1170 | 135 | 11.54% | 0.731 |
-| sub+sup | 822 | 87 | 10.58% | 0.720 |
-| tall-delimiter | 634 | 11 | 1.74% | 0.509 |
-| radical | 628 | 21 | 3.34% | 0.701 |
-| accent | 621 | 0 | 0.00% | 0.692 |
-| limits | 549 | 64 | 11.66% | 0.696 |
-| binomial | 445 | 0 | 0.00% | 0.531 |
-| font-bf | 387 | 0 | 0.00% | 0.666 |
-| big-operator | 372 | 0 | 0.00% | 0.626 |
-| text | 353 | 3 | 0.85% | 0.693 |
-| matrix | 330 | 0 | 0.00% | 0.367 |
-| font-bb | 307 | 0 | 0.00% | 0.770 |
-| nested-script | 282 | 50 | 17.73% | 0.757 |
-| prime | 278 | 34 | 12.23% | 0.758 |
-| integral | 250 | 0 | 0.00% | 0.658 |
-| multi-line | 216 | 35 | 16.20% | 0.780 |
-| integral-bounds | 189 | 0 | 0.00% | 0.636 |
-| upright-letter | 177 | 0 | 0.00% | 0.682 |
-| overline | 165 | 18 | 10.91% | 0.729 |
-| font-cal | 139 | 0 | 0.00% | 0.716 |
-| nested-fraction | 138 | 6 | 4.35% | 0.690 |
-| fraction-in-script | 121 | 4 | 3.31% | 0.693 |
-| cases | 120 | 0 | 0.00% | 0.491 |
-| root-index | 120 | 0 | 0.00% | 0.629 |
-| plain | 100 | 68 | 68.00% | 0.900 |
-| stacked-symbol | 28 | 0 | 0.00% | 0.649 |
+| script | 2662 | 1814 | 68.14% | 0.895 |
+| greek | 2281 | 1614 | 70.76% | 0.911 |
+| function | 1439 | 999 | 69.42% | 0.912 |
+| fraction | 1170 | 809 | 69.15% | 0.923 |
+| sub+sup | 822 | 620 | 75.43% | 0.944 |
+| tall-delimiter | 634 | 169 | 26.66% | 0.679 |
+| radical | 628 | 432 | 68.79% | 0.922 |
+| accent | 621 | 446 | 71.82% | 0.929 |
+| limits | 549 | 459 | 83.61% | 0.960 |
+| binomial | 445 | 0 | 0.00% | 0.742 |
+| font-bf | 387 | 238 | 61.50% | 0.839 |
+| big-operator | 372 | 306 | 82.26% | 0.955 |
+| text | 353 | 192 | 54.39% | 0.837 |
+| matrix | 330 | 0 | 0.00% | 0.455 |
+| font-bb | 307 | 244 | 79.48% | 0.953 |
+| nested-script | 282 | 199 | 70.57% | 0.922 |
+| prime | 278 | 202 | 72.66% | 0.936 |
+| integral | 250 | 214 | 85.60% | 0.973 |
+| multi-line | 216 | 125 | 57.87% | 0.877 |
+| integral-bounds | 189 | 161 | 85.19% | 0.971 |
+| upright-letter | 177 | 128 | 72.32% | 0.937 |
+| overline | 165 | 114 | 69.09% | 0.920 |
+| font-cal | 139 | 90 | 64.75% | 0.909 |
+| nested-fraction | 138 | 91 | 65.94% | 0.936 |
+| fraction-in-script | 121 | 85 | 70.25% | 0.930 |
+| cases | 120 | 0 | 0.00% | 0.589 |
+| root-index | 120 | 0 | 0.00% | 0.814 |
+| plain | 100 | 100 | 100.00% | 1.000 |
+| stacked-symbol | 28 | 0 | 0.00% | 0.781 |
 
 ## `tex-inline` by construct
 
@@ -70,32 +70,32 @@ Empty extractions: 0 of 2435.
 
 | Construct | Selections | Exact | Exact rate | Mean similarity |
 |---|---|---|---|---|
-| script | 1975 | 245 | 12.41% | 0.731 |
-| greek | 1743 | 211 | 12.11% | 0.732 |
-| function | 1045 | 127 | 12.15% | 0.733 |
-| fraction | 917 | 49 | 5.34% | 0.637 |
-| sub+sup | 667 | 55 | 8.25% | 0.695 |
-| limits | 519 | 55 | 10.60% | 0.698 |
-| accent | 472 | 0 | 0.00% | 0.644 |
-| radical | 464 | 4 | 0.86% | 0.667 |
-| big-operator | 350 | 0 | 0.00% | 0.639 |
-| binomial | 317 | 0 | 0.00% | 0.531 |
-| tall-delimiter | 260 | 2 | 0.77% | 0.611 |
-| font-bf | 250 | 0 | 0.00% | 0.721 |
-| font-bb | 245 | 0 | 0.00% | 0.739 |
-| integral | 230 | 0 | 0.00% | 0.672 |
-| prime | 220 | 27 | 12.27% | 0.738 |
-| nested-script | 211 | 30 | 14.22% | 0.715 |
-| text | 184 | 2 | 1.09% | 0.815 |
-| integral-bounds | 175 | 0 | 0.00% | 0.642 |
-| upright-letter | 140 | 0 | 0.00% | 0.635 |
-| nested-fraction | 116 | 0 | 0.00% | 0.476 |
-| overline | 112 | 14 | 12.50% | 0.701 |
-| plain | 100 | 68 | 68.00% | 0.900 |
-| fraction-in-script | 98 | 1 | 1.02% | 0.648 |
-| font-cal | 95 | 0 | 0.00% | 0.698 |
-| root-index | 87 | 0 | 0.00% | 0.624 |
-| stacked-symbol | 25 | 0 | 0.00% | 0.616 |
+| script | 1975 | 1606 | 81.32% | 0.972 |
+| greek | 1743 | 1420 | 81.47% | 0.973 |
+| function | 1045 | 849 | 81.24% | 0.973 |
+| fraction | 917 | 706 | 76.99% | 0.970 |
+| sub+sup | 667 | 548 | 82.16% | 0.977 |
+| limits | 519 | 443 | 85.36% | 0.977 |
+| accent | 472 | 379 | 80.30% | 0.975 |
+| radical | 464 | 352 | 75.86% | 0.967 |
+| big-operator | 350 | 295 | 84.29% | 0.975 |
+| binomial | 317 | 0 | 0.00% | 0.833 |
+| tall-delimiter | 260 | 148 | 56.92% | 0.935 |
+| font-bf | 250 | 205 | 82.00% | 0.977 |
+| font-bb | 245 | 210 | 85.71% | 0.983 |
+| integral | 230 | 202 | 87.83% | 0.982 |
+| prime | 220 | 175 | 79.55% | 0.975 |
+| nested-script | 211 | 169 | 80.09% | 0.973 |
+| text | 184 | 157 | 85.33% | 0.977 |
+| integral-bounds | 175 | 152 | 86.86% | 0.981 |
+| upright-letter | 140 | 109 | 77.86% | 0.972 |
+| nested-fraction | 116 | 79 | 68.10% | 0.961 |
+| overline | 112 | 92 | 82.14% | 0.974 |
+| plain | 100 | 100 | 100.00% | 1.000 |
+| fraction-in-script | 98 | 74 | 75.51% | 0.966 |
+| font-cal | 95 | 72 | 75.79% | 0.970 |
+| root-index | 87 | 0 | 0.00% | 0.843 |
+| stacked-symbol | 25 | 0 | 0.00% | 0.786 |
 
 ## `tex-display-12pt` by construct
 
@@ -103,32 +103,32 @@ Empty extractions: 0 of 760.
 
 | Construct | Selections | Exact | Exact rate | Mean similarity |
 |---|---|---|---|---|
-| script | 617 | 78 | 12.64% | 0.737 |
-| greek | 528 | 72 | 13.64% | 0.741 |
-| function | 336 | 40 | 11.90% | 0.737 |
-| fraction | 242 | 26 | 10.74% | 0.723 |
-| sub+sup | 194 | 10 | 5.15% | 0.725 |
-| tall-delimiter | 142 | 2 | 1.41% | 0.557 |
-| radical | 140 | 6 | 4.29% | 0.677 |
-| limits | 131 | 13 | 9.92% | 0.690 |
-| accent | 129 | 0 | 0.00% | 0.703 |
-| binomial | 97 | 0 | 0.00% | 0.572 |
-| big-operator | 95 | 0 | 0.00% | 0.646 |
-| font-bf | 89 | 0 | 0.00% | 0.655 |
-| text | 89 | 0 | 0.00% | 0.724 |
-| matrix | 81 | 0 | 0.00% | 0.482 |
-| font-bb | 72 | 0 | 0.00% | 0.803 |
-| prime | 62 | 5 | 8.06% | 0.776 |
-| nested-script | 61 | 14 | 22.95% | 0.795 |
-| integral | 54 | 0 | 0.00% | 0.703 |
-| multi-line | 49 | 7 | 14.29% | 0.752 |
-| integral-bounds | 42 | 0 | 0.00% | 0.663 |
-| overline | 42 | 5 | 11.90% | 0.740 |
-| upright-letter | 42 | 0 | 0.00% | 0.668 |
-| root-index | 39 | 0 | 0.00% | 0.572 |
-| cases | 31 | 0 | 0.00% | 0.531 |
-| font-cal | 29 | 0 | 0.00% | 0.719 |
-| nested-fraction | 28 | 2 | 7.14% | 0.668 |
-| fraction-in-script | 26 | 1 | 3.85% | 0.698 |
-| plain | 23 | 13 | 56.52% | 0.848 |
-| stacked-symbol | 8 | 0 | 0.00% | 0.639 |
+| script | 617 | 410 | 66.45% | 0.890 |
+| greek | 528 | 369 | 69.89% | 0.910 |
+| function | 336 | 219 | 65.18% | 0.901 |
+| fraction | 242 | 157 | 64.88% | 0.913 |
+| sub+sup | 194 | 149 | 76.80% | 0.946 |
+| tall-delimiter | 142 | 34 | 23.94% | 0.669 |
+| radical | 140 | 94 | 67.14% | 0.919 |
+| limits | 131 | 110 | 83.97% | 0.963 |
+| accent | 129 | 92 | 71.32% | 0.931 |
+| binomial | 97 | 0 | 0.00% | 0.747 |
+| big-operator | 95 | 80 | 84.21% | 0.964 |
+| font-bf | 89 | 49 | 55.06% | 0.802 |
+| text | 89 | 44 | 49.44% | 0.829 |
+| matrix | 81 | 0 | 0.00% | 0.472 |
+| font-bb | 72 | 54 | 75.00% | 0.951 |
+| prime | 62 | 44 | 70.97% | 0.924 |
+| nested-script | 61 | 44 | 72.13% | 0.939 |
+| integral | 54 | 48 | 88.89% | 0.980 |
+| multi-line | 49 | 31 | 63.27% | 0.896 |
+| integral-bounds | 42 | 36 | 85.71% | 0.975 |
+| overline | 42 | 29 | 69.05% | 0.919 |
+| upright-letter | 42 | 28 | 66.67% | 0.926 |
+| root-index | 39 | 0 | 0.00% | 0.788 |
+| cases | 31 | 0 | 0.00% | 0.615 |
+| font-cal | 29 | 18 | 62.07% | 0.893 |
+| nested-fraction | 28 | 17 | 60.71% | 0.927 |
+| fraction-in-script | 26 | 16 | 61.54% | 0.895 |
+| plain | 23 | 23 | 100.00% | 1.000 |
+| stacked-symbol | 8 | 0 | 0.00% | 0.721 |

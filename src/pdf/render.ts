@@ -23,6 +23,7 @@ import {
   type ViewportLike,
 } from "./textCache";
 import { CachedGlyphMap } from "./glyphMap";
+import { buildPageMathModel, registerPageMathModel, type FontLike, type OpsTable } from "./pageMathModel";
 
 /**
  * M13 (§1.1) detect pdf.js's RenderingCancelledException WITHOUT importing a
@@ -145,6 +146,21 @@ export async function renderPage(
   // text layer and overlays all live inside it.
   stage.style.position = "relative";
   container.appendChild(stage);
+
+  // Glyph identity and rules for LaTeX extraction, straight from the page's
+  // drawing operations. Built on first use and independent of zoom: the model
+  // is in page units, not in rendered pixels.
+  registerPageMathModel(stage, async () => {
+    const opList = await page.getOperatorList();
+    const fontOf = (id: string): FontLike | null => {
+      try {
+        return page.commonObjs.get(id) as FontLike;
+      } catch {
+        return null; // not resolved: that font's glyphs are left to the text layer
+      }
+    };
+    return buildPageMathModel(opList, fontOf, pdfjs.OPS as unknown as OpsTable, page.getViewport({ scale: 1 }));
+  });
 
   const canvas = document.createElement("canvas");
   canvas.style.display = "block";

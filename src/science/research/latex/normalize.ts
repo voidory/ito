@@ -13,6 +13,8 @@
  *   - variant letters (`\epsilon` vs `\varepsilon`, `\phi` vs `\varphi`);
  *   - `\bar` (an accent glyph) vs `\overline` (a rule).
  *   - word spaces inside text: `\text{is even}` is not `\text{iseven}`.
+ * A script after a font group belongs to the group's last character, as it
+ * does on the page: `\mathrm{Te}^b` equals `\mathrm{T}\mathrm{e}^b`.
  * What IS folded, because it is spacing or size only: `\,` `\;` `\quad`,
  * `\left`/`\right`/`\big`, `\displaystyle`, `\limits`, `\dfrac`/`\tfrac`,
  * and a space at either end of a text run (`\text{if }x` equals `\text{if}x`:
@@ -476,9 +478,29 @@ function settleSpaces(n: TexNode): TexNode {
     return kept.length === 0 ? EMPTY : node(n.t, kept);
   }
   if (n.t === "row") {
-    const kept = kids.filter((k) => k.t !== "empty");
+    const flat = kids.filter((k) => k.t !== "empty").flatMap((k) => (k.t === "row" ? k.c : [k]));
+    // Neighbouring groups in one font are one group: `\mathbf{A}\mathbf{B}`
+    // and `\mathbf{AB}` print the same. (Upright runs were merged in `canon`,
+    // which also has to keep their word spaces.)
+    const kept: TexNode[] = [];
+    for (const k of flat) {
+      const prev = kept[kept.length - 1];
+      if (prev && k.t === prev.t && k.t.startsWith("font:") && k.t !== "font:rm") {
+        kept[kept.length - 1] = node(k.t, [...prev.c, ...k.c]);
+      } else kept.push(k);
+    }
     if (kept.length === 0) return EMPTY;
     return kept.length === 1 ? kept[0]! : node("row", kept);
+  }
+  // A script on a font group sits on the group's last character: on the page,
+  // `\mathrm{Te}^b` and `\mathrm{T}\mathrm{e}^b` are the same thing.
+  const base = kids[0];
+  if (n.t === "script" && base && base.t.startsWith("font:") && base.c.length > 1) {
+    const last = base.c[base.c.length - 1]!;
+    return node("row", [
+      node(base.t, base.c.slice(0, -1)),
+      node("script", [node(base.t, [last]), ...kids.slice(1)]),
+    ]);
   }
   return node(n.t, kids);
 }

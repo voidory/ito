@@ -40,6 +40,8 @@ import {
   type MathGlyph,
   type MathRule,
 } from "./mathLayout";
+import { pageMathModelFor, type PageMathModel } from "./pageMathModel";
+import { regionMathGlyphs } from "./texGlyphs";
 
 // ---------------------------------------------------------------------------
 // §2.2(1) LaTeX extraction from a cropped region
@@ -135,15 +137,38 @@ export async function detectRegionRules(
 }
 
 /**
+ * LaTeX for a box, from the page's math model: glyphs identified by font slot
+ * and rules from the PDF's own drawing operations (`pageMathModel.ts`,
+ * `texGlyphs.ts`). Independent of zoom, of the browser's fonts and of any
+ * stored crop. Returns "" when the model has no glyph in the box.
+ */
+export function extractLatexFromModel(model: PageMathModel, normRect: NormalizedRect): string {
+  const { glyphs, rules } = regionMathGlyphs(model, {
+    x0: normRect.x * model.width,
+    y0: normRect.y * model.height,
+    x1: (normRect.x + normRect.width) * model.width,
+    y1: (normRect.y + normRect.height) * model.height,
+  });
+  return glyphs.length === 0 ? "" : glyphsToLatex(glyphs, rules);
+}
+
+/**
  * Draft LaTeX for a box on a rendered page: the one path both the reader's
- * popover and the benchmark run. Rules come from the crop captured when the
- * box was drawn; glyphs from the page's live text layer.
+ * popover and the benchmark run. The page's math model is used when it has
+ * glyphs in the box. Otherwise (a scanned page with an OCR text layer, a page
+ * hydrated from cache) rules come from the crop captured when the box was
+ * drawn and glyphs from the page's live text layer.
  */
 export async function draftLatexFromStage(
   pageStageEl: HTMLElement,
   normRect: NormalizedRect,
   imageDataUrl?: string,
 ): Promise<string> {
+  const model = await pageMathModelFor(pageStageEl);
+  if (model) {
+    const latex = extractLatexFromModel(model, normRect);
+    if (latex.length > 0) return latex;
+  }
   const rules = await detectRegionRules(imageDataUrl, normRect);
   return extractLatexFromRegion(pageStageEl, normRect, undefined, { rules });
 }
