@@ -61,15 +61,16 @@ export const MATH_SYMBOL_TO_LATEX: Readonly<Record<string, string>> = {
   "…": "\\dots", "⋯": "\\cdots", "′": "\\prime", "″": "\\prime\\prime",
   "ℝ": "\\mathbb{R}", "ℂ": "\\mathbb{C}", "ℕ": "\\mathbb{N}", "ℤ": "\\mathbb{Z}", "ℚ": "\\mathbb{Q}",
   "−": "-", "–": "-", "—": "-", "‐": "-",
-  "∆": "\\Delta", "µ": "\\mu", "ϵ": "\\epsilon", "ϕ": "\\phi", "ϑ": "\\theta",
+  "∆": "\\Delta", "µ": "\\mu", "ϵ": "\\epsilon", "ϕ": "\\phi", "ϑ": "\\vartheta",
+  "ϖ": "\\varpi", "ϱ": "\\varrho",
   "%": "\\%", "#": "\\#", "&": "\\&", "$": "\\$", "{": "\\{", "}": "\\}",
 };
 
 const GREEK: Readonly<Record<string, string>> = {
-  α: "\\alpha", β: "\\beta", γ: "\\gamma", δ: "\\delta", ε: "\\epsilon",
+  α: "\\alpha", β: "\\beta", γ: "\\gamma", δ: "\\delta", ε: "\\varepsilon",
   ζ: "\\zeta", η: "\\eta", θ: "\\theta", ι: "\\iota", κ: "\\kappa",
   λ: "\\lambda", μ: "\\mu", ν: "\\nu", ξ: "\\xi", ο: "o", π: "\\pi",
-  ρ: "\\rho", σ: "\\sigma", ς: "\\sigma", τ: "\\tau", υ: "\\upsilon", φ: "\\phi",
+  ρ: "\\rho", σ: "\\sigma", ς: "\\varsigma", τ: "\\tau", υ: "\\upsilon", φ: "\\phi",
   χ: "\\chi", ψ: "\\psi", ω: "\\omega",
   Γ: "\\Gamma", Δ: "\\Delta", Θ: "\\Theta", Λ: "\\Lambda", Ξ: "\\Xi",
   Π: "\\Pi", Σ: "\\Sigma", Φ: "\\Phi", Ψ: "\\Psi", Ω: "\\Omega",
