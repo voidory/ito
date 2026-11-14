@@ -115,6 +115,36 @@ whatever else shares those lines. I did not separate the two causes.
    and a dvips-produced tier, so each of the three is gated rather than found
    by a spike.
 
+## After acting on it
+
+Items 1, 2 and 4 are done, in the commit after this one. The extractor now
+drops the sentence's final mark, equation numbers at either edge, and glyphs
+of a neighbouring line that the box's top or bottom edge cuts through; Latin
+Modern's math fonts are read with the Computer Modern tables. The same script,
+with its column-wide box now stopping at the gutter of a two-column page (it
+had spanned both columns, which overstated the damage):
+
+| | Development papers | Held-out papers |
+|---|---|---|
+| Display, tight box, exact | 403 of 438 (92.0%) | 390 of 439 (88.8%) |
+| Display, column-wide box, exact | 396 of 438 (90.4%) | 385 of 439 (87.7%) |
+| Inline, tight box, exact | 377 of 389 (96.9%) | 307 of 325 (94.5%) |
+| Inline, broken across two lines | 7 | 12 |
+| Inline, wrong | 5 | 6 |
+
+Of the column-wide results before the gutter fix (33.6% and 25.5%), dropping
+right-hand numbers alone gave 66.4% and 59.7%, left-hand numbers 70.5% and
+62.4%, the gutter 85.6% and 84.7%, and a smaller gap plus the cut-glyph rule
+the figures above. What still fails from a column-wide box on development
+papers (7 equations) is a number that touches the equation, and text sharing
+the equation's lines.
+
+These rules were written against development failures. The held-out papers
+moved by the same amounts, which is the check that they are not fitted. The
+three Latin Modern papers are still unmeasured on their own pages (the
+locator matches Computer Modern font names); on harness pages Latin Modern
+scores exactly what Computer Modern does, on both sets.
+
 ## Not verified
 
 - **Bias of the located set.** Only equations typeset plainly could be

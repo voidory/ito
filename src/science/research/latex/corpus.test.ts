@@ -173,6 +173,18 @@ describe("real-paper tiers", () => {
     for (const s of sourcesOf(heldout)) expect(dev.has(s.arxiv), s.arxiv).toBe(false);
   });
 
+  it("sets the same equations with a sentence mark, with a number, through dvips and in Latin Modern", () => {
+    for (const m of [manifest, heldout]) {
+      const ids = (name: string) => m.tiers[name]!.placements.map((p) => p[0]);
+      expect(ids("real-inline-punct")).toEqual(ids("real-inline"));
+      expect(ids("real-display-numbered")).toEqual(ids("real-display"));
+      expect(ids("real-display-dvips")).toEqual(ids("real-display"));
+      expect(ids("real-display-lm")).toEqual(ids("real-display"));
+      // The numbered tier's boxes are as wide as the column.
+      for (const p of m.tiers["real-display-numbered"]!.placements) expect(p[4] - p[2]).toBeGreaterThan(500);
+    }
+  });
+
   it("has a display and an inline tier in each set", () => {
     for (const m of [manifest, heldout]) {
       expect(m.tiers["real-display"]!.placements.length).toBeGreaterThanOrEqual(300);

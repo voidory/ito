@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectHorizontalRules, glyphsToLatex, type MathGlyph, type MathRule } from "./mathLayout";
+import { detectHorizontalRules, dropSentenceMark, glyphsToLatex, type MathGlyph, type MathRule } from "./mathLayout";
 import { convertLatexToMathML, extractLatexFromRegion } from "./scienceOcr";
 
 /**
@@ -205,5 +205,44 @@ describe("extractLatexFromRegion — box selection over a text layer", () => {
   it("skips text that is not horizontal on screen and falls back to the hint", () => {
     const el = stage([{ text: "x", rect: [0.1, 0.1, 0.005, 0.01], geom: "0.1,0.11,0.01,1.5708" }]);
     expect(extractLatexFromRegion(el, { x: 0, y: 0, width: 1, height: 1 }, "α")).toBe("\\alpha");
+  });
+});
+
+describe("what is in the box but not in the formula", () => {
+  it("drops the mark that ends the sentence, and only that", () => {
+    expect(dropSentenceMark("E=mc^2.")).toBe("E=mc^2");
+    expect(dropSentenceMark("x_{i},")).toBe("x_{i}");
+    expect(dropSentenceMark("a,b;")).toBe("a,b");
+    expect(dropSentenceMark("f(x)=0\\,.")).toBe("f(x)=0");
+    // Spacing commands and dots the author wrote stay.
+    expect(dropSentenceMark("a\\,")).toBe("a\\,");
+    expect(dropSentenceMark("a,b,...")).toBe("a,b,...");
+    expect(dropSentenceMark(".")).toBe(".");
+  });
+
+  it("drops an equation number set flush right, clear of the equation", () => {
+    const eq = run("x=y", 100, 100);
+    expect(glyphsToLatex([...eq, ...run("(12)", 400, 100)])).toBe("x=y");
+    expect(glyphsToLatex([...eq, ...run("(2.3)", 400, 100)])).toBe("x=y");
+    expect(glyphsToLatex([...eq, ...run("(A.1)", 400, 100)])).toBe("x=y");
+    // On a line of its own under a wide equation.
+    expect(glyphsToLatex([...eq, ...run("(12)", 400, 114)])).toBe("x=y");
+    // And flush left, as leqno sets it.
+    expect(glyphsToLatex([...run("(12)", 10, 100), ...eq])).toBe("x=y");
+  });
+
+  it("drops the number of each line of a several-line equation", () => {
+    const got = glyphsToLatex([...run("x=y", 100, 100), ...run("(1)", 400, 100), ...run("a=b", 100, 120), ...run("(2)", 400, 120)]);
+    expect(got).not.toMatch(/\(/);
+  });
+
+  it("keeps parentheses that are part of the formula", () => {
+    const f = run("f", 100, 100);
+    expect(glyphsToLatex([...f, ...run("(1)", end(f), 100)])).toBe("f(1)");
+    const eq = run("x=y", 100, 100);
+    // Not a number: a condition.
+    expect(glyphsToLatex([...eq, ...run("(n>1)", 400, 100)])).toMatch(/\(n>1\)$/);
+    // A number alone is the selection.
+    expect(glyphsToLatex(run("(12)", 100, 100))).toBe("(12)");
   });
 });

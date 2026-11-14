@@ -34,9 +34,73 @@ const COMPOSITE_TOLERANCE = 0.09;
 /** Font families whose glyphs are centred on the math axis, not set on the baseline. */
 const AXIS_FAMILIES = new Set(["CMEX"]);
 
-/** Whether this font family has a slot table at all. */
+/** How much of a glyph's height the selection's top or bottom edge may cut off. */
+const CUT_TOLERANCE = 0.25;
+
+/**
+ * Latin Modern is Computer Modern redrawn. Its math fonts keep TeX's math
+ * encodings, so a slot means what it means in the Computer Modern font named
+ * here. Its text fonts come in several encodings under one name (OT1 for the
+ * roman of formulas, T1 for the text of most papers), so a slot alone does not
+ * say which glyph it is; their glyph names are standard, though, and pdf.js
+ * reads the character from them.
+ */
+const LATIN_MODERN: readonly (readonly [RegExp, string, "slot" | "character"])[] = [
+  [/^LMMATHITALIC\d+-REGULAR$/, "CMMI", "slot"],
+  [/^LMMATHITALIC\d+-BOLD$/, "CMMIB", "slot"],
+  [/^LMMATHSYMBOLS\d+-REGULAR$/, "CMSY", "slot"],
+  [/^LMMATHSYMBOLS\d+-BOLD$/, "CMBSY", "slot"],
+  [/^LMMATHEXTENSION\d+-REGULAR$/, "CMEX", "slot"],
+  [/^LMROMAN\d+-REGULAR$/, "CMR", "character"],
+  [/^LMROMAN\d+-BOLD$/, "CMBX", "character"],
+  [/^LMROMAN\d+-ITALIC$/, "CMTI", "character"],
+  [/^LMSANS\d+-REGULAR$/, "CMSS", "character"],
+  [/^LMMONO\d+-REGULAR$/, "CMTT", "character"],
+];
+const resolved = new Map<string, { family: string; by: "slot" | "character" } | null>();
+/** The family whose table reads this font, and whether by slot or by character. */
+function tableOf(family: string): { family: string; by: "slot" | "character" } | null {
+  let hit = resolved.get(family);
+  if (hit === undefined) {
+    hit = null;
+    if (TEX_FONT_SLOTS[family] != null) hit = { family, by: "slot" };
+    else {
+      const alias = LATIN_MODERN.find(([pattern]) => pattern.test(family));
+      if (alias) hit = { family: alias[1], by: alias[2] };
+    }
+    resolved.set(family, hit);
+  }
+  return hit;
+}
+
+/** Whether glyphs of this font family are identified from a slot table. */
 export function hasSlotTable(family: string): boolean {
-  return TEX_FONT_SLOTS[family] != null;
+  return tableOf(family) != null;
+}
+
+/** What pdf.js reports for a character, as the table spells it. */
+const CHARACTER_AS_TEX: Readonly<Record<string, string>> = {
+  Γ: "\\Gamma", Δ: "\\Delta", Θ: "\\Theta", Λ: "\\Lambda", Ξ: "\\Xi", Π: "\\Pi", Σ: "\\Sigma",
+  Υ: "\\Upsilon", Φ: "\\Phi", Ψ: "\\Psi", Ω: "\\Omega", "\u2126": "\\Omega", "\u2206": "\\Delta", "ﬁ": "fi", "ﬂ": "fl", "ﬀ": "ff", "ﬃ": "ffi",
+  "ﬄ": "ffl", "–": "--", "—": "---", "’": "'", "{": "\\{", "}": "\\}",
+  // Math accents are glyphs of the roman font; pdf.js reports the spacing or the combining form.
+  "\u00af": "\\bar", "\u0304": "\\bar", "\u02c6": "\\hat", "\u0302": "\\hat", "\u02dc": "\\tilde",
+  "\u0303": "\\tilde", "\u02c7": "\\check", "\u030c": "\\check", "\u02d8": "\\breve", "\u0306": "\\breve",
+  "\u00b4": "\\acute", "\u0301": "\\acute", "\u0060": "\\grave", "\u0300": "\\grave", "\u02d9": "\\dot",
+  "\u0307": "\\dot", "\u00a8": "\\ddot", "\u0308": "\\ddot", "\u02da": "\\mathring", "\u030a": "\\mathring",
+};
+const byCharacter = new Map<string, Map<string, number>>();
+/** The slot of a table's family that holds this character; undefined when it has none. */
+function slotOfCharacter(family: string, unicode: string): number | undefined {
+  let index = byCharacter.get(family);
+  if (!index) {
+    index = new Map();
+    for (const [slot, entry] of Object.entries(TEX_FONT_SLOTS[family] ?? {})) {
+      if (entry[0] !== "" && !index.has(entry[0])) index.set(entry[0], Number(slot));
+    }
+    byCharacter.set(family, index);
+  }
+  return index.get(CHARACTER_AS_TEX[unicode] ?? unicode);
 }
 
 const ink = new Map<string, Map<number, readonly [number, number]>>();
@@ -83,12 +147,14 @@ interface Item {
 }
 
 function toItem(g: ModelGlyph): Item {
-  const family = g.family;
-  const entry = TEX_FONT_SLOTS[family]?.[g.slot];
-  const extent = inkOf(family, g.slot);
+  const table = tableOf(g.family);
+  const family = table?.family ?? g.family;
+  const slot = table?.by === "character" ? (slotOfCharacter(family, g.unicode) ?? -1) : g.slot;
+  const entry = TEX_FONT_SLOTS[family]?.[slot];
+  const extent = inkOf(family, slot);
   return {
     family,
-    slot: g.slot,
+    slot,
     unicode: g.unicode,
     x0: g.x,
     x1: g.x + Math.max(g.advance, 0),
@@ -208,6 +274,10 @@ export function regionMathGlyphs(
     const cx = (item.x0 + item.x1) / 2;
     const cy = (item.top + item.bottom) / 2;
     if (cx < rect.x0 || cx > rect.x1 || cy < rect.y0 || cy > rect.y1) continue;
+    // A glyph the top or bottom edge cuts well into belongs to the line of
+    // text next to the selection, not to it.
+    const cut = Math.max(rect.y0 - item.top, item.bottom - rect.y1, 0);
+    if (cut > CUT_TOLERANCE * (item.bottom - item.top)) continue;
     inside.push(item);
   }
   const items = mergeAssemblies(mergeComposites(inside));

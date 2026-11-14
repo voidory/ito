@@ -42,19 +42,51 @@
    }
   },
   "real-display": {
-   "n": 611,
-   "exact": 558,
+   "n": 610,
+   "exact": 557,
    "comparable": {
-    "n": 611,
-    "exact": 558
+    "n": 610,
+    "exact": 557
    }
   },
   "real-inline": {
-   "n": 889,
-   "exact": 883,
+   "n": 888,
+   "exact": 882,
    "comparable": {
-    "n": 889,
-    "exact": 883
+    "n": 888,
+    "exact": 882
+   }
+  },
+  "real-inline-punct": {
+   "n": 888,
+   "exact": 882,
+   "comparable": {
+    "n": 888,
+    "exact": 882
+   }
+  },
+  "real-display-numbered": {
+   "n": 610,
+   "exact": 557,
+   "comparable": {
+    "n": 610,
+    "exact": 557
+   }
+  },
+  "real-display-dvips": {
+   "n": 610,
+   "exact": 557,
+   "comparable": {
+    "n": 610,
+    "exact": 557
+   }
+  },
+  "real-display-lm": {
+   "n": 610,
+   "exact": 557,
+   "comparable": {
+    "n": 610,
+    "exact": 557
    }
   }
  }

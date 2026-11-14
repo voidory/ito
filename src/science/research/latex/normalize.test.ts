@@ -186,3 +186,18 @@ describe("scripts on font groups", () => {
     expect(canonicalLatex("\\mathrm{Te}^b")).not.toBe(canonicalLatex("\\mathrm{T}^b\\mathrm{e}"));
   });
 });
+
+describe("the sentence's punctuation", () => {
+  const same = (a: string, b: string) => expect(canonicalLatex(a)).toBe(canonicalLatex(b));
+  it("is not part of the formula it ends", () => {
+    same("E = mc^2.", "E = mc^2");
+    same("x_i,", "x_i");
+    same("f(x) = 0\\,.", "f(x) = 0");
+    same("\\begin{aligned} a &= b, \\\\ c &= d. \\end{aligned}", "\\begin{aligned} a &= b \\\\ c &= d \\end{aligned}");
+  });
+  it("matters anywhere else", () => {
+    expect(canonicalLatex("a,b")).not.toBe(canonicalLatex("ab"));
+    expect(canonicalLatex("x_{i,}")).not.toBe(canonicalLatex("x_i"));
+    expect(canonicalLatex(".")).toBe(".");
+  });
+});

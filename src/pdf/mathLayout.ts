@@ -863,14 +863,98 @@ function usableRules(boxes: Box[], rules: readonly MathRule[]): MathRule[] {
  * found in the same region (see {@link detectHorizontalRules}); with none, a
  * fraction is only inferred from an unambiguous centred stack.
  */
-export function glyphsToLatex(glyphs: readonly MathGlyph[], rules: readonly MathRule[] = []): string {
+export function glyphsToLatex(input: readonly MathGlyph[], rules: readonly MathRule[] = []): string {
+  const glyphs = dropEquationNumbers(input);
   const boxes = applyAccents(toBoxes(glyphs));
   if (boxes.length === 0) return "";
   const good = usableRules(boxes, rules);
   // With no rule to go by, a fraction can only be guessed from a stack. Exact
   // glyphs come with the page's real rules, so no rule means no fraction.
   const guessStacks = good.length === 0 && !boxes.every((b) => b.exact);
-  return build(boxes, good, guessStacks).replace(/\s+/g, " ").trim();
+  return dropSentenceMark(build(boxes, good, guessStacks).replace(/\s+/g, " ").trim());
+}
+
+/**
+ * A comma, full stop, semicolon or colon that ends the formula belongs to the
+ * sentence around it: it sits against the formula, inside any box a reader
+ * draws. `\,`, `\;` and `\:` are spacing commands, not marks.
+ */
+export function dropSentenceMark(latex: string): string {
+  const m = /^(.*?)\s*[,.;:]$/s.exec(latex);
+  if (!m || m[1]!.endsWith("\\")) return latex;
+  const rest = m[1]!.replace(/(?:\s*(?:\\[,;:!]|\\quad|\\qquad))+$/, "");
+  // Two marks in a row are dots the author wrote, not the end of a sentence.
+  if (rest.length === 0 || /[^\\][,.;:]$/.test(rest)) return latex;
+  return rest;
+}
+
+/** What an equation number looks like between its parentheses: 3, 2.14, A.1, 12a, 4'. */
+const EQUATION_NUMBER = /^[A-Z]?\.?\d+(?:[.-]\d+)*[a-z]?'?$/;
+/**
+ * The number stands at least this far from the equation, in ems. TeX itself
+ * leaves a quad or more, moving the number to its own line otherwise.
+ */
+const NUMBER_GAP = 0.9;
+
+/**
+ * Drop equation numbers: a short `(n)` flush with the right edge (or the left,
+ * as `leqno` sets it) and clear space between it and the equation. A box dragged across the column takes the number in, and
+ * it is not part of the formula. Several-line equations carry one a line.
+ */
+export function dropEquationNumbers(glyphs: readonly MathGlyph[]): readonly MathGlyph[] {
+  let rest = glyphs;
+  for (let guard = 0; guard < 40; guard++) {
+    const group = equationNumber(rest);
+    if (!group) break;
+    rest = rest.filter((g) => !group.has(g));
+  }
+  return rest;
+}
+
+function equationNumber(glyphs: readonly MathGlyph[]): Set<MathGlyph> | null {
+  if (glyphs.length < 4) return null;
+  const text = (g: MathGlyph) => g.tex ?? g.ch;
+  const left = Math.min(...glyphs.map((g) => g.x0));
+  const right = Math.max(...glyphs.map((g) => g.x1));
+  const sorted = [...glyphs].sort((a, b) => a.x0 - b.x0);
+  for (let i = 0; i < sorted.length; i++) {
+    const open = sorted[i]!;
+    if (text(open) !== "(") continue;
+    // Walk right along the baseline to the closing parenthesis.
+    const group: MathGlyph[] = [open];
+    let closed = false;
+    for (let j = i + 1; j < sorted.length && group.length <= 9; j++) {
+      const g = sorted[j]!;
+      const last = group[group.length - 1]!;
+      if (Math.abs(g.base - open.base) > 0.1 * open.size) continue;
+      if (g.x0 - last.x1 > 0.3 * open.size || Math.abs(g.size - open.size) > 0.05 * open.size) break;
+      group.push(g);
+      if (text(g) === ")") {
+        closed = true;
+        break;
+      }
+    }
+    if (!closed || !EQUATION_NUMBER.test(group.slice(1, -1).map(text).join(""))) continue;
+    const close = group[group.length - 1]!;
+    // Flush with one edge of the selection: right as LaTeX sets it, left with `leqno`.
+    const atRight = close.x1 >= right - open.size;
+    const atLeft = open.x0 <= left + open.size;
+    if (!atRight && !atLeft) continue;
+    const members = new Set(group);
+    if (members.size === glyphs.length) return null;
+    const top = open.base - 0.75 * open.size;
+    const bottom = open.base + 0.25 * open.size;
+    const gap = NUMBER_GAP * open.size;
+    const crowded = glyphs.some((g) => {
+      if (members.has(g)) return false;
+      const gt = g.top ?? g.base - 0.7 * g.size;
+      const gb = g.bottom ?? g.base + 0.2 * g.size;
+      if (gb < top || gt > bottom) return false; // on another line
+      return atRight ? g.x1 > open.x0 - gap : g.x0 < close.x1 + gap;
+    });
+    if (!crowded) return members;
+  }
+  return null;
 }
 
 /**

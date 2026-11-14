@@ -56,7 +56,7 @@ async function exactCount(name: string): Promise<{ n: number; exact: number }> {
 }
 
 describe("LaTeX extraction over the development corpus, in Node", () => {
-  for (const name of ["tex-display", "tex-inline", "tex-tounicode", "tex-times", "real-display", "real-inline"]) {
+  for (const name of ["tex-display", "tex-inline", "tex-tounicode", "tex-times", "real-display", "real-inline", "real-inline-punct", "real-display-numbered", "real-display-dvips", "real-display-lm"]) {
     it(`${name}: the same count as the browser benchmark reported`, async () => {
       const { n, exact } = await exactCount(name);
       expect({ n, exact }).toEqual({ n: reported.tiers[name]!.n, exact: reported.tiers[name]!.exact });

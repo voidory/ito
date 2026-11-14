@@ -88,6 +88,49 @@ describe("regionMathGlyphs", () => {
     expect(glyphs[0]).toMatchObject({ tex: "(", cls: "open" });
   });
 
+  it("leaves out a glyph that the top or bottom edge of the box cuts well into", () => {
+    const x = g("CMMI", 0x78, 40, 5.7);
+    // x-height ink runs from y = 95.7 to 100. An edge at 96 cuts little; at 98 nearly half.
+    expect(regionMathGlyphs(page([x]), { x0: 0, y0: 96, x1: 612, y1: 120 }).glyphs).toHaveLength(1);
+    expect(regionMathGlyphs(page([x]), { x0: 0, y0: 97.7, x1: 612, y1: 120 }).glyphs).toHaveLength(0);
+    expect(regionMathGlyphs(page([x]), { x0: 0, y0: 80, x1: 612, y1: 98.1 }).glyphs).toHaveLength(0);
+  });
+
+  it("reads Latin Modern's math fonts by slot, as the Computer Modern fonts they redraw", () => {
+    expect(hasSlotTable("LMMATHITALIC10-REGULAR")).toBe(true);
+    const { glyphs } = regionMathGlyphs(
+      page([
+        g("LMMATHEXTENSION10-REGULAR", 88, 50, 14.4, { unicode: "X", y: 90 }),
+        g("LMMATHITALIC7-REGULAR", 15, 70, 4, { size: 7 }),
+        g("LMMATHSYMBOLS10-REGULAR", 50, 80, 6.7),
+      ]),
+      PAGE,
+    );
+    expect(glyphs.map((x) => x.tex)).toEqual(["\\sum", "\\epsilon", "\\in"]);
+  });
+
+  it("reads Latin Modern's text fonts by character, whatever their encoding", () => {
+    // Slot 0 is Gamma in OT1 and a grave accent in T1; the character says which.
+    const { glyphs } = regionMathGlyphs(
+      page([
+        g("LMROMAN10-REGULAR", 0, 40, 6.25, { unicode: "Γ" }),
+        g("LMROMAN10-REGULAR", 97, 50, 5, { unicode: "a" }),
+        g("LMROMAN10-BOLD", 118, 60, 6, { unicode: "v" }),
+        g("LMROMAN10-REGULAR", 22, 70, 5, { unicode: "\u00af" }),
+        g("LMROMAN10-REGULAR", 200, 80, 5, { unicode: "é" }),
+      ]),
+      PAGE,
+    );
+    expect(glyphs.map((x) => [x.tex, x.cls, x.style])).toEqual([
+      ["\\Gamma", "ord", undefined],
+      ["a", "ord", "rm"],
+      ["v", "ord", "bf"],
+      ["\\bar", "accent", undefined],
+      [undefined, undefined, undefined],
+    ]);
+    expect(glyphs[4]!.ch).toBe("é");
+  });
+
   it("keeps the character and no class for a font with no table", () => {
     const { glyphs } = regionMathGlyphs(page([g("NIMBUSROMNO9L-REGU", 120, 40, 5, { unicode: "x" })]), PAGE);
     expect(glyphs[0]!.ch).toBe("x");

@@ -21,6 +21,9 @@ tool, and compares the drafted LaTeX with the ground truth.
   How a run of one font is grouped does not count, because it does not show:
   `\mathbf{AB}` equals `\mathbf{A}\mathbf{B}`, and a script after a font group
   sits on its last character (`\mathrm{Te}^b` equals `\mathrm{T}\mathrm{e}^b`).
+  A comma, full stop, semicolon or colon that ends the formula, or a line of a
+  several-line one, belongs to the sentence and does not count: `E = mc^2.`
+  equals `E = mc^2`. More than half of the real display equations end in one.
 - **Mean similarity** is 1 minus the normalised tree edit distance (`score.ts`),
   so a nearly-right draft scores higher than an empty one.
 
@@ -113,6 +116,10 @@ selection as `[id, page, x0, y0, x1, y1]` in PDF points from the bottom-left.
 | `scanned` | Image-only pages rasterised from the display tier |
 | `real-display` | Display equations from the source of 30 arXiv papers, set by the same harness |
 | `real-inline` | Inline formulas from the same papers, each inside a line of prose |
+| `real-inline-punct` | The same inline formulas with a comma, full stop, semicolon or colon set against each, inside the box |
+| `real-display-numbered` | The same display equations centred and numbered as `equation` sets them, with a box as wide as the column |
+| `real-display-dvips` | The same display equations through `latex`, `dvips` and Ghostscript, which draw rules as image masks |
+| `real-display-lm` | The same display equations in Latin Modern (`lmodern`, T1 text) |
 
 160 equations are hand-picked real formulas (`scripts/math-corpus/curated.mjs`);
 the rest come from a seeded grammar (`scripts/math-corpus/grammar.mjs`) that
@@ -147,6 +154,23 @@ Read the numbers with three limits in mind:
 - **At most 30 display and 30 inline formulas per paper**, spread evenly
   through it, so one long paper cannot dominate.
 
+### Tiers for what surrounds an equation
+
+Four tiers reset the real tiers' equations the way a reader meets them
+(`docs/spikes/real-pages.md` is why they exist). Each should score what its
+plain tier scores; a gap is a defect in how the extractor handles the
+surroundings, not the mathematics.
+
+- **`real-inline-punct`** does not gate the dropping of the mark itself: the
+  metric ignores a final mark either way. A unit test does
+  (`mathLayout.test.ts`). The tier catches a mark being read as something
+  else, such as a subscript.
+- **`real-display-numbered`** scored 0 of 610 before equation numbers were
+  dropped. Numbers are `(3)`, `(2.14)`, `(A.1)` and `(12a)` in turn, beside
+  the equation or on the next line when it is too wide.
+- **`real-display-dvips`** needs `dvips` and `gs` to regenerate.
+- **`real-display-lm`** needs the `lmodern` package.
+
 ### Regenerating
 
 ```bash
@@ -163,7 +187,8 @@ Adding `harvest` fetches papers from arXiv again, which needs network access
 to `arxiv.org` and `oaipmh.arxiv.org`.
 
 Needs `pdflatex` (Debian: `texlive-latex-base texlive-fonts-recommended`),
-`pdftoppm` (`poppler-utils`) and Node 22.18 or later. Output is deterministic:
+`pdftoppm` (`poppler-utils`) and Node 22.18 or later; the real-paper tiers
+also need `dvips`, `gs` (`ghostscript`) and `lmodern`. Output is deterministic:
 the same seed and TeX version give byte-identical files. Changing the corpus
 changes the baseline, so rerun the report and revisit the floors in the same
 commit.

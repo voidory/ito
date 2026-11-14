@@ -648,6 +648,22 @@ function canon(n: TexNode): TexNode {
   return node(n.t, kids);
 }
 
+const SENTENCE_MARKS = new Set([",", ".", ";", ":"]);
+/**
+ * A comma, full stop, semicolon or colon that ends a formula (or a line of a
+ * several-line one) belongs to the sentence around it, not to the formula:
+ * `E = mc^2.` and `E = mc^2` are the same formula. An extractor may drop the
+ * mark or keep it.
+ */
+function dropSentenceMark(n: TexNode): TexNode {
+  if (n.t === "lines") return node("lines", n.c.map(dropSentenceMark));
+  if (n.t !== "row") return n;
+  let end = n.c.length;
+  while (end > 1 && SENTENCE_MARKS.has(n.c[end - 1]!.t) && n.c[end - 1]!.c.length === 0) end--;
+  if (end === n.c.length) return n;
+  return end === 1 ? n.c[0]! : node("row", n.c.slice(0, end));
+}
+
 /** Parse a LaTeX math string into its canonical tree. Never throws. */
 export function parseLatex(src: string): TexNode {
   const stripped = (src ?? "")
@@ -657,7 +673,7 @@ export function parseLatex(src: string): TexNode {
     .replace(/^\\\(|\\\)$/g, "");
   try {
     const p = new Parser(tokenize(stripped));
-    return settleSpaces(canon(node("row", p.row(() => false))));
+    return dropSentenceMark(settleSpaces(canon(node("row", p.row(() => false)))));
   } catch {
     return leaf("unparsed");
   }

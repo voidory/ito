@@ -143,7 +143,26 @@ const bump = (split: string) => {
 };
 const failures: string[] = [];
 const kindTotals = new Map<string, [number, number]>();
+/** The x of the gutter of a two-column page: a strip near the middle that almost no glyph crosses. */
+function gutterOf(model: PageMathModel): number | null {
+  const bins = new Array<number>(Math.ceil(model.width) + 1).fill(0);
+  for (const g of model.glyphs) {
+    for (let x = Math.max(0, Math.floor(g.x)); x <= Math.min(bins.length - 1, Math.floor(g.x + g.advance)); x++) bins[x]!++;
+  }
+  const allowed = model.glyphs.length * 0.004;
+  let best: [number, number] | null = null;
+  let start = -1;
+  for (let x = Math.floor(model.width * 0.4); x <= Math.ceil(model.width * 0.6); x++) {
+    if (bins[x]! <= allowed) {
+      if (start < 0) start = x;
+      if (!best || x - start > best[1] - best[0]) best = [start, x];
+    } else start = -1;
+  }
+  return best && best[1] - best[0] >= 6 && model.glyphs.length > 800 ? (best[0] + best[1]) / 2 : null;
+}
+
 const causes = new Map<string, Map<string, number>>();
+const looseFailures: string[] = [];
 let cmMath = 0;
 let otherMath = 0;
 
@@ -240,13 +259,20 @@ for (const paper of store.papers) {
     kindTotals.set(`${paper.split} ${r.kind}`, k);
     if (r.kind === "display") {
       // As wide as everything on the page: takes in an equation number and margin notes on those lines.
-      const px0 = Math.min(...model.glyphs.map((g) => g.x));
-      const px1 = Math.max(...model.glyphs.map((g) => g.x + g.advance));
+      let px0 = Math.min(...model.glyphs.map((g) => g.x));
+      let px1 = Math.max(...model.glyphs.map((g) => g.x + g.advance));
+      // On a two-column page the box stops at the gutter.
+      const gutter = gutterOf(model);
+      if (gutter != null && x1 < gutter) px1 = gutter;
+      else if (gutter != null && x0 > gutter) px0 = gutter;
       looseN++;
       t.looseN++;
-      if (scoreEquation(r.latex, extractLatexFromModel(model, rect(px0, px1))).exact) {
+      const wide = extractLatexFromModel(model, rect(px0, px1));
+      if (scoreEquation(r.latex, wide).exact) {
         loose++;
         t.loose++;
+      } else if (okTight && paper.split === "dev") {
+        looseFailures.push(`${paper.id}\n  E: ${r.latex}\n  G: ${wide}`);
       }
     }
   }
@@ -268,6 +294,10 @@ console.log("\nwhat happened to each equation found, from a tight box:");
 for (const [k, c] of causes) {
   const n = [...c.values()].reduce((a, b) => a + b, 0);
   console.log(`  ${k} (${n}): ${[...c].sort((a, b) => b[1] - a[1]).map(([name, v]) => `${name} ${v} (${pct(v, n)})`).join(", ")}`);
+}
+if (process.env.ITO_LOOSE) {
+  console.log(`\nexact from a tight box but not from a column-wide one, development papers (${looseFailures.length}):`);
+  for (const f of looseFailures.slice(0, Number(process.env.ITO_LOOSE))) console.log(f);
 }
 if (failures.length > 0) {
   console.log(`\nfailures from a tight box, development papers (${failures.length}):`);

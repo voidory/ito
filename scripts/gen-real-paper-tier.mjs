@@ -34,7 +34,8 @@ import { gunzipSync } from "node:zlib";
 import { TEX_COMPOSITES, TEX_FONT_SLOTS } from "../src/pdf/texFontSlots.ts";
 import { canonicalLatex, parseLatex, treeSize } from "../src/science/research/latex/normalize.ts";
 import {
-  MAX_DISPLAY_WIDTH, PAD_DISPLAY, PAD_INLINE_X, PAD_INLINE_Y, placements, texSource, tier,
+  MARK_WIDTH, MAX_DISPLAY_WIDTH, PAD_DISPLAY, PAD_INLINE_X, PAD_INLINE_Y, columnPlacements, compile, placements,
+  texSource, tier,
 } from "./math-corpus/typeset.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -353,7 +354,8 @@ function prepare(raw, macros, kind) {
 
 /** Compile; on errors return the ids of the offending equations instead of the boxes. */
 function tryCompile(work, name, equations, options) {
-  const tex = texSource(equations, { ...options, preamble: PREAMBLE });
+  const { preambleBefore = "", ...rest } = options;
+  const tex = texSource(equations, { ...rest, preamble: `${preambleBefore}${PREAMBLE}` });
   writeFileSync(join(work, `${name}.tex`), tex);
   try {
     execFileSync("pdflatex", ["-interaction=nonstopmode", "-no-shell-escape", `${name}.tex`], { cwd: work, stdio: "pipe", timeout: 180_000 });
@@ -535,9 +537,22 @@ function build() {
     if (d.equations.length !== display.length || i.equations.length !== inline.length) {
       throw new Error(`${split}: some stored equations no longer compile; run the harvest again`);
     }
+    // The same equations as a reader meets them: a sentence's mark against the
+    // formula, a number beside the equation with a box as wide as the column,
+    // and the older dvips route to PDF.
+    const marked = compile(work, "real-inline-punct", texSource(inline, { inline: true, marks: true, preamble: PREAMBLE }));
+    const numbered = compile(work, "real-display-numbered", texSource(display, { numbered: true, preamble: PREAMBLE }));
+    const dvips = compile(work, "real-display-dvips", texSource(display, { preamble: PREAMBLE, dvi: true }), { dvips: true });
+    // Latin Modern as papers load it: T1 text, the math fonts in TeX's own encodings.
+    const lm = compileClean(work, "real-display-lm", display, { preambleBefore: String.raw`\usepackage[T1]{fontenc}\usepackage{lmodern}` });
+    const lmDisplay = lm.equations;
     const out = resolve(LATEX_DIR, dir);
     writeFileSync(join(out, "real-display.pdf"), d.pdf);
     writeFileSync(join(out, "real-inline.pdf"), i.pdf);
+    writeFileSync(join(out, "real-inline-punct.pdf"), marked.pdf);
+    writeFileSync(join(out, "real-display-numbered.pdf"), numbered.pdf);
+    writeFileSync(join(out, "real-display-dvips.pdf"), dvips.pdf);
+    writeFileSync(join(out, "real-display-lm.pdf"), lm.pdf);
     const manual = {
       note: "Written by `node scripts/gen-real-paper-tier.mjs`; merged into manifest.json by scripts/gen-math-corpus.mjs. Do not edit by hand.",
       sources: papers.map((p) => ({ arxiv: p.id, title: p.title, authors: p.authors.join(", "), licence: p.licence })),
@@ -552,6 +567,26 @@ function build() {
           "real-inline.pdf",
           `inline formulas from the same ${papers.length} papers, each inside a line of prose`,
           placements(inline, i.boxes, PAD_INLINE_X, PAD_INLINE_Y),
+        ),
+        "real-inline-punct": tier(
+          "real-inline-punct.pdf",
+          "the same inline formulas, each with a comma, full stop, semicolon or colon set against it and inside the box",
+          placements(inline, marked.boxes, PAD_INLINE_X, PAD_INLINE_Y, MARK_WIDTH),
+        ),
+        "real-display-numbered": tier(
+          "real-display-numbered.pdf",
+          "the same display equations, centred and numbered as `equation` sets them, with a box as wide as the text column",
+          columnPlacements(display, numbered.boxes, PAD_DISPLAY),
+        ),
+        "real-display-dvips": tier(
+          "real-display-dvips.pdf",
+          "the same display equations by the older route (latex, dvips, Ghostscript), which draws rules as image masks",
+          placements(display, dvips.boxes, PAD_DISPLAY, PAD_DISPLAY),
+        ),
+        "real-display-lm": tier(
+          "real-display-lm.pdf",
+          "the same display equations in Latin Modern (lmodern with T1 text), less any with a glyph Latin Modern lacks",
+          placements(lmDisplay, lm.boxes, PAD_DISPLAY, PAD_DISPLAY),
         ),
       },
     };
