@@ -317,17 +317,6 @@ function reducedMotion(suppressMotion: boolean): boolean {
 }
 
 /**
- * A lightly-uneven rounded corner spec. Four slightly different radii give the
- * soft, hand-drawn feel the spec asks for without any ribbon curl. Seeded by
- * the fragment index so it is stable across re-renders (not jittering).
- */
-function unevenRadius(seed: number): string {
-  const base = 6;
-  const jitter = (n: number) => base + ((Math.sin(seed * 12.9898 + n * 78.233) + 1) * 2.5);
-  return `${jitter(1).toFixed(1)}px ${jitter(2).toFixed(1)}px ${jitter(3).toFixed(1)}px ${jitter(4).toFixed(1)}px`;
-}
-
-/**
  * Create (or replace) the overlay element for an annotation inside `layer`,
  * which must be positioned (relative/absolute) and sized to the page box.
  * Returns the created container element.
@@ -354,6 +343,9 @@ export function renderHighlightOverlay(
 
   const animate = opts.animate && !reducedMotion(opts.suppressMotion);
   const cssColor = COLOR_CSS[opts.color] ?? COLOR_CSS["yellow"]!;
+  // Dynamic colour is data; the stylesheet owns the visual treatment.
+  container.style.setProperty("--ito-highlight-fill", cssColor);
+  container.style.setProperty("--ito-highlight-solid", solidify(opts.color));
 
   if (opts.areaBox && opts.rects[0]) {
     container.dataset.area = "true";
@@ -368,9 +360,6 @@ export function renderHighlightOverlay(
       top: `${r.y * 100}%`,
       width: `${r.width * 100}%`,
       height: `${r.height * 100}%`,
-      border: `2px solid ${solidify(opts.color)}`,
-      background: cssColor,
-      borderRadius: "4px",
       pointerEvents: "auto",
       boxSizing: "border-box",
     } satisfies Partial<CSSStyleDeclaration>);
@@ -378,18 +367,8 @@ export function renderHighlightOverlay(
       const label = document.createElement("span");
       label.className = "ito-highlight-area-label";
       label.textContent = opts.areaLabel;
-      Object.assign(label.style, {
-        position: "absolute",
-        left: "0",
-        top: "-1.1em",
-        fontSize: "0.7rem",
-        color: solidify(opts.color),
-        background: "rgba(255,255,255,0.85)",
-        padding: "0 0.2rem",
-        borderRadius: "3px",
-        whiteSpace: "nowrap",
-        pointerEvents: "none",
-      } satisfies Partial<CSSStyleDeclaration>);
+      // Label placement and appearance are owned by editor.css.
+      label.style.pointerEvents = "none";
       box.appendChild(label);
     }
     container.appendChild(box);
@@ -399,8 +378,6 @@ export function renderHighlightOverlay(
     Object.assign(border.style, {
       position: "absolute",
       inset: "2%",
-      border: `3px solid ${solidify(opts.color)}`,
-      borderRadius: "10px",
       pointerEvents: "auto",
     } satisfies Partial<CSSStyleDeclaration>);
     container.appendChild(border);
@@ -419,9 +396,6 @@ export function renderHighlightOverlay(
         top: isUnderline ? `${(r.y + r.height) * 100}%` : `${r.y * 100}%`,
         width: `${r.width * 100}%`,
         height: isUnderline ? "0" : `${r.height * 100}%`,
-        background: isUnderline ? "transparent" : cssColor,
-        borderBottom: isUnderline ? `2px solid ${solidify(opts.color)}` : "none",
-        borderRadius: isUnderline ? "0" : unevenRadius(i),
         pointerEvents: "auto",
         // Keep glyphs legible: the overlay sits behind the text layer.
         zIndex: "0",
