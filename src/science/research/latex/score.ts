@@ -204,3 +204,39 @@ export function pairedGapInterval(onlyA: number, onlyB: number, n: number): { ga
   const half = (z * Math.sqrt(Math.max(0, onlyA + onlyB - (onlyA - onlyB) ** 2 / n))) / n;
   return { gap, lower: Math.max(-1, gap - half), upper: Math.min(1, gap + half) };
 }
+
+/**
+ * A 95% interval for an exact-match rate when equations come in clusters
+ * (papers) that fail together: resample whole clusters, not equations. The
+ * usual interval treats each equation as independent and comes out too
+ * narrow. Deterministic: the resampling uses a fixed seed.
+ */
+export function clusterInterval(
+  clusters: readonly { readonly n: number; readonly exact: number }[],
+  resamples = 4000,
+): { rate: number; lower: number; upper: number } {
+  const n = clusters.reduce((a, c) => a + c.n, 0);
+  const rate = n > 0 ? clusters.reduce((a, c) => a + c.exact, 0) / n : 0;
+  if (clusters.length < 2) return { rate, lower: 0, upper: 1 };
+  // mulberry32
+  let state = 0x9e3779b9;
+  const next = (): number => {
+    state = (state + 0x6d2b79f5) | 0;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const rates: number[] = [];
+  for (let r = 0; r < resamples; r++) {
+    let total = 0;
+    let exact = 0;
+    for (let i = 0; i < clusters.length; i++) {
+      const c = clusters[Math.floor(next() * clusters.length)]!;
+      total += c.n;
+      exact += c.exact;
+    }
+    rates.push(total > 0 ? exact / total : 0);
+  }
+  rates.sort((a, b) => a - b);
+  return { rate, lower: rates[Math.floor(0.025 * resamples)]!, upper: rates[Math.ceil(0.975 * resamples) - 1]! };
+}

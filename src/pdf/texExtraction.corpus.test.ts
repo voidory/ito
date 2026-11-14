@@ -22,14 +22,15 @@ const manifest = JSON.parse(readFileSync(resolve(ROOT, "corpus/manifest.json"), 
   equations: Record<string, string>;
   tiers: Record<string, { pdf: string; pageWidth: number; pageHeight: number; placements: [string, number, number, number, number, number][] }>;
 };
+const heldout = JSON.parse(readFileSync(resolve(ROOT, "corpus-heldout/manifest.json"), "utf8")) as typeof manifest;
 const reported = JSON.parse(readFileSync(resolve(ROOT, "BENCHMARK.json"), "utf8")) as {
   tiers: Record<string, { n: number; exact: number }>;
 };
 
 /** What the extractor drafts for some equations of a tier, by id. */
-async function drafts(name: string, ids: readonly string[]): Promise<Map<string, string>> {
-  const tier = manifest.tiers[name]!;
-  const doc = await pdfjs.getDocument({ data: new Uint8Array(readFileSync(resolve(ROOT, "corpus", tier.pdf))), verbosity: 0 }).promise;
+async function drafts(name: string, ids: readonly string[], set: "corpus" | "corpus-heldout" = "corpus"): Promise<Map<string, string>> {
+  const tier = (set === "corpus" ? manifest : heldout).tiers[name]!;
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(readFileSync(resolve(ROOT, set, tier.pdf))), verbosity: 0 }).promise;
   const out = new Map<string, string>();
   for (const [id, pageIndex, x0, y0, x1, y1] of tier.placements) {
     if (!ids.includes(id)) continue;
@@ -113,5 +114,24 @@ describe("structure that spans lines (Phase 3)", () => {
     expect(got.get("rd0124")).toContain("\\sum_{y=1}^g\\prod_{i=1}^k");
     expect(got.get("rd0013")).toMatch(/^\\liminf_\{\\epsilon\\searrow 0\}/);
     expect(got.get("rd0356")).toContain("\\int_{x_1}^{x_2}\\int_{y_1}^{y_2}");
+  }, 60_000);
+});
+
+describe("notation met in the second set of papers", () => {
+  it("reads what the first set of papers never showed", async () => {
+    // The held-out set's real-paper tiers, opened for development once the sealed set existed.
+    const ids = ["qd0436", "qd0244", "qd0070", "qd0367", "qd0439", "qd0481", "qd0223"];
+    const got = await drafts("real-display", ids, "corpus-heldout");
+    for (const id of ids) expect(scoreEquation(heldout.equations[id]!, got.get(id)!).exact, `${id}: ${got.get(id)}`).toBe(true);
+    // The comma after `cases` ends the sentence; it is not a third row.
+    expect(got.get("qd0436")).toMatch(/\\end\{cases\}$/);
+    // Spaces inside a binomial are not columns.
+    expect(got.get("qd0244")).toContain("\\binom{2l}{");
+    // Something set under a binary operator.
+    expect(got.get("qd0070")).toContain("\\underset{kH}{\\otimes}");
+    // Bold italic text.
+    expect(got.get("qd0367")).toContain("\\boldsymbol{p}");
+    // A wide accent over one capital.
+    expect(got.get("qd0439")).toMatch(/^\\widetilde\{X\}/);
   }, 60_000);
 });

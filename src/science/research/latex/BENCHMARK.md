@@ -10,18 +10,18 @@ Metric: **exact match** of the canonical structure tree (`normalize.ts`), so spe
 
 | Tier | Selections | Exact | Exact rate | Mean similarity | Target | CI floor | Best provable |
 |---|---|---|---|---|---|---|---|
-| `tex-display` | 3460 | 3401 | 98.29% | 0.997 | 99.90% | 69.00% | 99.91% |
-| `tex-inline` | 2605 | 2538 | 97.43% | 0.997 | 99.90% | 83.00% | 99.89% |
+| `tex-display` | 3460 | 3401 | 98.29% | 0.997 | 99.90% | 98.00% | 99.91% |
+| `tex-inline` | 2605 | 2538 | 97.43% | 0.997 | 99.90% | 97.00% | 99.89% |
 | `tex-times` | 760 | 317 | 41.71% | 0.849 | n/a | 41.00% | 99.61% |
-| `tex-tounicode` | 760 | 749 | 98.55% | 0.998 | 99.90% | 73.00% | 99.61% |
+| `tex-tounicode` | 760 | 749 | 98.55% | 0.998 | 99.90% | 98.00% | 99.61% |
 | `scanned` | 110 | 0 | 0.00% | 0.000 | n/a | 0.00% | 97.31% |
-| `real-display` | 610 | 597 | 97.87% | 0.998 | 99.90% | 91.00% | 99.51% |
+| `real-display` | 610 | 598 | 98.03% | 0.998 | 99.90% | 97.00% | 99.51% |
 | `real-inline` | 888 | 882 | 99.32% | 0.999 | 99.90% | 99.00% | 99.66% |
 | `real-inline-punct` | 888 | 882 | 99.32% | 0.999 | 99.90% | 99.00% | 99.66% |
-| `real-display-numbered` | 610 | 597 | 97.87% | 0.998 | 99.90% | 91.00% | 99.51% |
-| `real-display-dvips` | 610 | 597 | 97.87% | 0.998 | 99.90% | 91.00% | 99.51% |
-| `real-display-lm` | 610 | 597 | 97.87% | 0.998 | 99.90% | 91.00% | 99.51% |
-| **all target tiers** | 11041 | 10840 | 98.18% | 0.998 |  |  | 99.97% |
+| `real-display-numbered` | 610 | 598 | 98.03% | 0.998 | 99.90% | 97.00% | 99.51% |
+| `real-display-dvips` | 610 | 598 | 98.03% | 0.998 | 99.90% | 97.00% | 99.51% |
+| `real-display-lm` | 610 | 598 | 98.03% | 0.998 | 99.90% | 97.00% | 99.51% |
+| **all target tiers** | 11041 | 10844 | 98.22% | 0.998 |  |  | 99.97% |
 
 The **target** of 99.9% exact match is claimed for pdfLaTeX with Computer Modern and AMS fonts only; other font families and scanned pages get their own targets once their baselines are understood. *Best provable* is the highest success rate a tier of that size could demonstrate at 95% confidence with zero failures. A tier must be larger than about 3,000 selections before a 99.9% claim is even testable.
 
@@ -216,22 +216,22 @@ Empty extractions: 0 of 610.
 
 | Construct | Selections | Exact | Exact rate | Mean similarity |
 |---|---|---|---|---|
-| script | 577 | 564 | 97.75% | 0.998 |
-| greek | 454 | 444 | 97.80% | 0.998 |
+| script | 577 | 565 | 97.92% | 0.998 |
+| greek | 454 | 445 | 98.02% | 0.999 |
 | fraction | 261 | 255 | 97.70% | 0.998 |
 | sub+sup | 181 | 175 | 96.69% | 0.998 |
 | limits | 159 | 154 | 96.86% | 0.997 |
-| accent | 142 | 136 | 95.77% | 0.994 |
+| accent | 142 | 137 | 96.48% | 0.995 |
 | text | 132 | 127 | 96.21% | 0.996 |
-| nested-script | 115 | 109 | 94.78% | 0.993 |
+| nested-script | 114 | 109 | 95.61% | 0.994 |
 | function | 111 | 110 | 99.10% | 1.000 |
 | big-operator | 108 | 103 | 95.37% | 0.995 |
 | tall-delimiter | 101 | 96 | 95.05% | 0.995 |
-| font-cal | 99 | 96 | 96.97% | 0.996 |
+| font-cal | 99 | 97 | 97.98% | 0.997 |
 | font-bf | 92 | 91 | 98.91% | 0.998 |
 | integral | 61 | 58 | 95.08% | 0.997 |
 | upright-letter | 61 | 58 | 95.08% | 0.996 |
-| prime | 47 | 43 | 91.49% | 0.990 |
+| prime | 47 | 44 | 93.62% | 0.991 |
 | font-bb | 46 | 45 | 97.83% | 0.996 |
 | radical | 46 | 46 | 100.00% | 1.000 |
 | multi-line | 39 | 39 | 100.00% | 1.000 |
@@ -322,22 +322,22 @@ Empty extractions: 0 of 610.
 
 | Construct | Selections | Exact | Exact rate | Mean similarity |
 |---|---|---|---|---|
-| script | 577 | 564 | 97.75% | 0.998 |
-| greek | 454 | 444 | 97.80% | 0.998 |
+| script | 577 | 565 | 97.92% | 0.998 |
+| greek | 454 | 445 | 98.02% | 0.999 |
 | fraction | 261 | 255 | 97.70% | 0.998 |
 | sub+sup | 181 | 175 | 96.69% | 0.998 |
 | limits | 159 | 154 | 96.86% | 0.997 |
-| accent | 142 | 136 | 95.77% | 0.994 |
+| accent | 142 | 137 | 96.48% | 0.995 |
 | text | 132 | 127 | 96.21% | 0.996 |
-| nested-script | 115 | 109 | 94.78% | 0.993 |
+| nested-script | 114 | 109 | 95.61% | 0.994 |
 | function | 111 | 110 | 99.10% | 1.000 |
 | big-operator | 108 | 103 | 95.37% | 0.995 |
 | tall-delimiter | 101 | 96 | 95.05% | 0.995 |
-| font-cal | 99 | 96 | 96.97% | 0.996 |
+| font-cal | 99 | 97 | 97.98% | 0.997 |
 | font-bf | 92 | 91 | 98.91% | 0.998 |
 | integral | 61 | 58 | 95.08% | 0.997 |
 | upright-letter | 61 | 58 | 95.08% | 0.996 |
-| prime | 47 | 43 | 91.49% | 0.990 |
+| prime | 47 | 44 | 93.62% | 0.991 |
 | font-bb | 46 | 45 | 97.83% | 0.996 |
 | radical | 46 | 46 | 100.00% | 1.000 |
 | multi-line | 39 | 39 | 100.00% | 1.000 |
@@ -360,22 +360,22 @@ Empty extractions: 0 of 610.
 
 | Construct | Selections | Exact | Exact rate | Mean similarity |
 |---|---|---|---|---|
-| script | 577 | 564 | 97.75% | 0.998 |
-| greek | 454 | 444 | 97.80% | 0.998 |
+| script | 577 | 565 | 97.92% | 0.998 |
+| greek | 454 | 445 | 98.02% | 0.999 |
 | fraction | 261 | 255 | 97.70% | 0.998 |
 | sub+sup | 181 | 175 | 96.69% | 0.998 |
 | limits | 159 | 154 | 96.86% | 0.997 |
-| accent | 142 | 136 | 95.77% | 0.994 |
+| accent | 142 | 137 | 96.48% | 0.995 |
 | text | 132 | 127 | 96.21% | 0.996 |
-| nested-script | 115 | 109 | 94.78% | 0.993 |
+| nested-script | 114 | 109 | 95.61% | 0.994 |
 | function | 111 | 110 | 99.10% | 1.000 |
 | big-operator | 108 | 103 | 95.37% | 0.995 |
 | tall-delimiter | 101 | 96 | 95.05% | 0.995 |
-| font-cal | 99 | 96 | 96.97% | 0.996 |
+| font-cal | 99 | 97 | 97.98% | 0.997 |
 | font-bf | 92 | 91 | 98.91% | 0.998 |
 | integral | 61 | 58 | 95.08% | 0.997 |
 | upright-letter | 61 | 58 | 95.08% | 0.996 |
-| prime | 47 | 43 | 91.49% | 0.990 |
+| prime | 47 | 44 | 93.62% | 0.991 |
 | font-bb | 46 | 45 | 97.83% | 0.996 |
 | radical | 46 | 46 | 100.00% | 1.000 |
 | multi-line | 39 | 39 | 100.00% | 1.000 |
@@ -398,22 +398,22 @@ Empty extractions: 0 of 610.
 
 | Construct | Selections | Exact | Exact rate | Mean similarity |
 |---|---|---|---|---|
-| script | 577 | 564 | 97.75% | 0.998 |
-| greek | 454 | 444 | 97.80% | 0.998 |
+| script | 577 | 565 | 97.92% | 0.998 |
+| greek | 454 | 445 | 98.02% | 0.999 |
 | fraction | 261 | 255 | 97.70% | 0.998 |
 | sub+sup | 181 | 175 | 96.69% | 0.998 |
 | limits | 159 | 154 | 96.86% | 0.997 |
-| accent | 142 | 136 | 95.77% | 0.994 |
+| accent | 142 | 137 | 96.48% | 0.995 |
 | text | 132 | 127 | 96.21% | 0.996 |
-| nested-script | 115 | 109 | 94.78% | 0.993 |
+| nested-script | 114 | 109 | 95.61% | 0.994 |
 | function | 111 | 110 | 99.10% | 1.000 |
 | big-operator | 108 | 103 | 95.37% | 0.995 |
 | tall-delimiter | 101 | 96 | 95.05% | 0.995 |
-| font-cal | 99 | 96 | 96.97% | 0.996 |
+| font-cal | 99 | 97 | 97.98% | 0.997 |
 | font-bf | 92 | 91 | 98.91% | 0.998 |
 | integral | 61 | 58 | 95.08% | 0.997 |
 | upright-letter | 61 | 58 | 95.08% | 0.996 |
-| prime | 47 | 43 | 91.49% | 0.990 |
+| prime | 47 | 44 | 93.62% | 0.991 |
 | font-bb | 46 | 45 | 97.83% | 0.996 |
 | radical | 46 | 46 | 100.00% | 1.000 |
 | multi-line | 39 | 39 | 100.00% | 1.000 |

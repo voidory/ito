@@ -416,6 +416,18 @@ column-wide box 95.7% and 90.7%.
   failures and moved development by 12 equations and held-out by 2. The
   generated tiers show no gap. Before more rules go in, the held-out real
   failures need a fresh set of papers to be read against, not these.
+- **What followed.** A sealed set of 30 more papers was harvested
+  (`corpus-sealed/`, `BENCHMARK-SEALED.md`), and the held-out papers'
+  failures were then read: 43 display failures, nearly all notation the
+  development papers never showed, and bunched by paper (ten were one
+  paper's `\mathop{\otimes}\limits`, six another's `^{'}` for a prime, four
+  a third's bold italic text). Rules for those took the held-out
+  `real-display` tier from 92.70% to 97.62% and the sealed one from 92.88%
+  to 93.16%. So on unseen papers the extractor is exact for about 93% of
+  display equations (89% to 96%, resampling papers) and 99% of inline ones,
+  and reading failures paper by paper does not move that. Getting further
+  needs either many more papers per round or rules of a more general kind;
+  the 99.9% target should be restated against the sealed set.
 - **Not done:** the intermediate tree (task 1), scored search (2 and 3),
   `\left`/`\right` (4), `\tag` output (7: numbers are dropped), accents
   over several glyphs, pre-scripts, and one-row matrices, which print exactly

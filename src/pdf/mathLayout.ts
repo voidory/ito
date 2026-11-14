@@ -516,7 +516,9 @@ function makeLine(large: Box[]): Line {
  */
 function lineBaseline(large: Box[]): number {
   if (!large.every((b) => b.exact || b.kind !== "glyph")) return median(large.map((b) => b.base));
-  const glyphs = large.filter((b) => !isTall(b) && b.kind !== "frac" && b.kind !== "grid");
+  // A prime is drawn raised: inside a superscript it is as large as its
+  // neighbours and still not on their baseline.
+  const glyphs = large.filter((b) => !isTall(b) && b.kind !== "frac" && b.kind !== "grid" && b.tex !== "\\prime");
   const pool = glyphs.length > 0 ? glyphs : large;
   return pool.reduce((a, b) => (b.x0 < a.x0 ? b : a)).base;
 }
@@ -753,7 +755,7 @@ function lineToTex(line: Line): string {
     // at the smallest size it is no smaller than its base, only shifted.
     const tol = b.kind === "frac" || b.kind === "grid" ? 0.3
       : isTall(b) ? (b.size >= 0.85 * s ? 0.35 : -1)
-      : b.exact ? (b.size <= 0.85 * s ? -1 : 0.14)
+      : b.exact ? (b.size <= 0.85 * s ? -1 : b.tex === "\\prime" ? 0.3 : 0.14)
       : b.size <= 0.85 * s ? 0.08 : 0.28;
     if ((line.large.has(b) && !b.exact) || isAnchor(b) || Math.abs(d) <= tol) mainsRaw.push(b);
     else scripts.push(b);
@@ -775,7 +777,9 @@ function lineToTex(line: Line): string {
       // A limit under an operator lies wholly below the baseline, which no
       // subscript does, and is one piece however its parts are spaced.
       const under = drawn && a.top > line.base + 0.1 * s && b.top > line.base + 0.1 * s;
-      const near = under ? 0.45 : drawn ? 0.2 : 0.3;
+      // On one baseline it may hold a word space or a `\mod`.
+      const level = Math.abs(a.base - b.base) < 0.25 * Math.max(a.size, b.size);
+      const near = under ? (level ? 1.3 : 0.45) : drawn ? 0.2 : 0.3;
       if (gap < near * s && Math.abs(a.base - b.base) < 0.45 * Math.max(a.size, b.size)) {
         parent[find(i)] = find(j);
       }
@@ -837,9 +841,10 @@ function lineToTex(line: Line): string {
         root.tex = `\\sqrt[${build(g, [], false)}]${root.tex.slice(5)}`;
         continue;
       }
-      // Something centred over or under a relation is stacked on it (`\overset`).
+      // Something centred over or under a relation or a binary operator is
+      // stacked on it (`\overset`, `\mathop{\otimes}\limits_X`).
       const rel = mains.find(
-        (m) => m.kind === "glyph" && m.exact && m.cls === "rel" && c > m.x0 && c < m.x1 &&
+        (m) => m.kind === "glyph" && m.exact && (m.cls === "rel" || m.cls === "bin") && c > m.x0 && c < m.x1 &&
           (isAbove ? bb.bottom <= m.top + 0.15 * s : bb.top >= m.bottom - 0.15 * s),
       );
       if (rel) {
@@ -1064,7 +1069,16 @@ function applyGrids(input: Box[], inputRules: readonly MathRule[]): { boxes: Box
     if (!close && !(open.tex === "\\{" && open.bottom - open.top > 1.8 * s)) continue;
     const between = (x: number): boolean => x > open.x1 - 0.05 * s && (close ? x < close.x0 + 0.05 * s : true);
     const within = (x: number, y: number): boolean => between(x) && y > open.top - 0.02 * s && y < open.bottom + 0.02 * s;
-    const content = boxes.filter((b) => b !== open && b !== close && within(cx(b), (b.top + b.bottom) / 2));
+    let content = boxes.filter((b) => b !== open && b !== close && within(cx(b), (b.top + b.bottom) / 2));
+    if (!close) {
+      // The comma or full stop after `cases` stands on the line the brace is
+      // centred on, to the right of every row: it ends the sentence.
+      const axis = (open.top + open.bottom) / 2 + 0.25 * s;
+      const last = content.reduce((a, b) => (b.x0 > a.x0 ? b : a), content[0]!);
+      if (last && /^[,.;:]$/.test(last.tex) && Math.abs(last.base - axis) < 0.25 * s && content.every((b) => b === last || b.x1 <= last.x0 + 0.05 * s)) {
+        content = content.filter((b) => b !== last);
+      }
+    }
     // Delimiters round a grid are as tall as the grid. Ink that crosses their
     // top or bottom means they stand inside something taller, a fraction say.
     const crosses = (b: Box, y: number): boolean => b.top < y - 0.15 * s && b.bottom > y + 0.15 * s;
@@ -1094,9 +1108,21 @@ function applyGrids(input: Box[], inputRules: readonly MathRule[]): { boxes: Box
 
     let tex: string;
     const rowGap = rowBaselineGap(content, contentRules, cuts);
-    if (close && open.tex === "(" && cells.length === 2 && columnStarts.length === 1 && (cs < 0.85 * s || rowGap > 1.28 * cs)) {
+    // A row that fills one column and is centred on the whole is not a row of
+    // a matrix: `\binom{2l}{i\quad j\quad k}` has spaces, not columns.
+    const middle = (bbox(content).x0 + bbox(content).x1) / 2;
+    const centredRow = rows.some((row, i) => {
+      if (cells[i]!.filter((c) => c.length > 0).length !== 1 || row.boxes.length === 0) return false;
+      const bb = bbox(row.boxes);
+      return Math.abs((bb.x0 + bb.x1) / 2 - middle) < 0.5 * cs;
+    });
+    const whole = (row: { boxes: Box[]; rules: MathRule[] }): string => build(row.boxes, usableRules(row.boxes, row.rules), false);
+    if (
+      close && open.tex === "(" && cells.length === 2 && (cs < 0.85 * s || rowGap > 1.28 * cs) &&
+      (columnStarts.length === 1 || centredRow)
+    ) {
       // The rows of a binomial stand apart as a fraction's do; a matrix keeps the line spacing.
-      tex = `\\binom{${cells[0]![0]}}{${cells[1]![0]}}`;
+      tex = `\\binom{${whole(rows[0]!)}}{${whole(rows[1]!)}}`;
     } else {
       const body = cells.map((row) => row.join(" & ")).join(" \\\\ ");
       const env = !close ? "cases" : GRID_ENVIRONMENT[open.tex];
@@ -1314,15 +1340,29 @@ function applyAccents(input: Box[]): Box[] {
       const w = (acc.x1 - acc.x0) / s;
       const min = w < 0.8 ? 0 : w - 0.2; // an italic correction counts as width
       const max = w < 0.8 ? 1.03 : w < 1.2 ? 1.47 : Infinity;
+      // Of the runs it could cover, the one it is best centred on; the wider
+      // of two equally good ones.
       let best: Box[] = [];
+      let bestOff = Infinity;
       for (let i = 0; i < row.length; i++) {
         for (let j = i; j < row.length; j++) {
           const run = row.slice(i, j + 1);
           const bb = bbox(run);
           const width = (bb.x1 - bb.x0) / s;
-          if (Math.abs(cx(bb) - cx(acc)) > 0.12 * s || width < min || width > max) continue;
-          if (best.length === 0 || bb.x1 - bb.x0 > bbox(best).x1 - bbox(best).x0) best = run;
+          const off = Math.abs(cx(bb) - cx(acc));
+          if (off > 0.12 * s || width < min || width > max) continue;
+          if (off < bestOff - 0.03 * s || (off < bestOff + 0.03 * s && bb.x1 - bb.x0 > bbox(best).x1 - bbox(best).x0)) {
+            best = run;
+            bestOff = Math.min(bestOff, off);
+          }
         }
+      }
+      // An accent is over something: failing a run, the one box nearest under it.
+      if (best.length === 0) {
+        const nearest = row
+          .filter((b) => cx(acc) > b.x0 - 0.1 * s && cx(acc) < b.x1 + 0.1 * s)
+          .sort((p, q) => Math.abs(cx(p) - cx(acc)) - Math.abs(cx(q) - cx(acc)))[0];
+        if (nearest) best = [nearest];
       }
       bases = best;
     } else {

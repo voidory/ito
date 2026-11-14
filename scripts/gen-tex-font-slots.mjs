@@ -157,6 +157,10 @@ for (const [cmd, style, atoms] of STYLES) {
     ask(`$${cmd}{${a}}$`, "symbol", TEXT_EMIT[a] ?? a, "ord", { style });
   }
 }
+// Bold italic text (`\textbf{\textit{p}}`) is a font of its own, read as bold italic.
+for (const a of ALNUM) ask(`$\\textbf{\\textit{${a}}}$`, "symbol", a, "ord", { style: "bm" });
+// The typewriter font draws the underscore as a glyph; the others rule it.
+ask("$\\texttt{\\_}$", "symbol", "\\_", "ord", { style: "tt" });
 for (const name of ACCENTS) ask(`$\\${name}{x}$`, "accent", `\\${name}`, "accent");
 // Accents in the bold fonts are other slots: `\boldsymbol{\hat{x}}`, `\mathbf{\hat{x}}`.
 for (const wrap of ["\\boldsymbol", "\\mathbf"]) {

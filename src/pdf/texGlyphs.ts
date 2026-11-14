@@ -54,6 +54,7 @@ const LATIN_MODERN: readonly (readonly [RegExp, string, "slot" | "character"])[]
   [/^LMROMAN\d+-REGULAR$/, "CMR", "character"],
   [/^LMROMAN\d+-BOLD$/, "CMBX", "character"],
   [/^LMROMAN\d+-ITALIC$/, "CMTI", "character"],
+  [/^LMROMAN\d+-BOLDITALIC$/, "CMBXTI", "character"],
   [/^LMSANS\d+-REGULAR$/, "CMSS", "character"],
   [/^LMMONO\d+-REGULAR$/, "CMTT", "character"],
 ];

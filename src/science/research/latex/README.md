@@ -80,9 +80,11 @@ It writes [`BENCHMARK-HELDOUT.md`](BENCHMARK-HELDOUT.md). Rules of use:
 - **Run it at phase gates only**, straight after `npm run benchmark:latex:report`
   (it compares against the `BENCHMARK.json` that run writes). Not during
   development.
-- **Do not look at individual failures.** The report holds aggregates only and
-  the runner refuses `ITO_LATEX_BENCH_DUMP` for this set. Opening the PDFs to
-  see what failed defeats the purpose.
+- **Do not look at individual failures of the generated tiers.** The report
+  holds aggregates only and the runner refuses `ITO_LATEX_BENCH_DUMP` for this
+  set. Opening the PDFs to see what failed defeats the purpose. The set's
+  real-paper tiers are the exception: they were opened for development when
+  the sealed set was made (below), and no longer measure fitting.
 - It has targets but no floors, and is not part of the push gate. The CI
   workflow runs it on manual dispatch with the `heldout` box ticked, and
   uploads the three report files.
@@ -101,6 +103,42 @@ side look worse.
 
 Regenerate with `node scripts/gen-math-corpus.mjs heldout`. Doing so after
 looking at results spends the set: a new seed is then a new, unseen set.
+
+## Sealed set
+
+`corpus-sealed/` holds 1,579 equations from 30 more arXiv papers (CC BY 4.0
+or CC0, another date window), none of them in either other set. It has the
+six real-paper tiers and nothing else.
+
+```bash
+npm run benchmark:latex:sealed
+```
+
+It writes [`BENCHMARK-SEALED.md`](BENCHMARK-SEALED.md). It exists because the
+real-paper tiers of the other two sets are no longer unseen:
+
+- **The development papers' failures were read from the start.** By the end of
+  Phase 3's first slice the development `real-display` tier stood at 97.9% and
+  the held-out one at 92.7%, a gap whose interval excluded zero.
+- **The held-out papers' failures were read once this set existed**, and rules
+  written against them. Their `real-display` tier went from 92.7% to 97.6%.
+- **This set's failures have not been read.** Measured before and after those
+  rules it stood at 92.9% and 93.2%. Rules written against one set of papers
+  barely carry to the next: what fails is each paper's own notation.
+
+Rules of use, stricter than the held-out set's:
+
+- **Gates only, and count the looks.** Two so far, both recorded above.
+- **Aggregates only.** No dump, no failures, no breakdown by construct, which
+  would say where to look. `scripts/dev/latex-score.ts` gives counts for it
+  and refuses anything else.
+- **Intervals are by paper.** A paper's equations share its notation and fail
+  together, so the report resamples whole papers. On 30 papers the interval
+  for `real-display` is about seven points wide; treating its 716 equations
+  as independent would claim under four.
+- When it is spent, harvest another: `node scripts/gen-real-paper-tier.mjs
+  harvest sealed` with a new window in the script, after moving this set's
+  papers into the main store.
 
 ## Corpus
 

@@ -43,10 +43,10 @@
   },
   "real-display": {
    "n": 610,
-   "exact": 597,
+   "exact": 598,
    "comparable": {
     "n": 610,
-    "exact": 597
+    "exact": 598
    }
   },
   "real-inline": {
@@ -67,26 +67,26 @@
   },
   "real-display-numbered": {
    "n": 610,
-   "exact": 597,
+   "exact": 598,
    "comparable": {
     "n": 610,
-    "exact": 597
+    "exact": 598
    }
   },
   "real-display-dvips": {
    "n": 610,
-   "exact": 597,
+   "exact": 598,
    "comparable": {
     "n": 610,
-    "exact": 597
+    "exact": 598
    }
   },
   "real-display-lm": {
    "n": 610,
-   "exact": 597,
+   "exact": 598,
    "comparable": {
     "n": 610,
-    "exact": 597
+    "exact": 598
    }
   }
  }

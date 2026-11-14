@@ -319,7 +319,14 @@ class Parser {
       if (!t) break;
       if (t.k === "sup") {
         this.i++;
-        sup.push(this.arg());
+        const arg = this.arg();
+        // `x^{'}`: the apostrophe is the prime itself, not a prime on nothing.
+        const marks =
+          arg.t === "row" && arg.c.length > 0 && arg.c.every((k) => k.t === "script" && k.c[0]!.t === "empty" && k.c[1]!.c.length === 0 && k.c[2]!.c.every((m) => m.t === "\\prime"))
+            ? arg.c.flatMap((k) => k.c[2]!.c)
+            : null;
+        if (marks) sup.push(...marks);
+        else sup.push(arg);
       } else if (t.k === "sub") {
         this.i++;
         sub.push(this.arg());
@@ -360,6 +367,26 @@ class Parser {
     if (IGNORED_WITH_ARG.has(name)) {
       this.arg();
       return null;
+    }
+    if (name === "mathop") {
+      // `\mathop{\otimes}\limits_{X}` sets X under the symbol, as `\underset`
+      // does (`\limits` itself is dropped with the other layout commands; a
+      // displayed `\mathop` takes limits without it).
+      const inner = this.arg();
+      const symbol = inner.t === "row" && inner.c.length === 1 ? inner.c[0]! : inner;
+      if (BIG_OPS.has(symbol.t) || INTEGRALS.has(symbol.t) || symbol.t.startsWith("fn:") || symbol.c.length > 0) return inner;
+      let out = inner;
+      for (;;) {
+        const t = this.peek();
+        if (t?.k === "sub") {
+          this.i++;
+          out = node("under", [out, this.arg()]);
+        } else if (t?.k === "sup") {
+          this.i++;
+          out = node("over", [out, this.arg()]);
+        } else break;
+      }
+      return out;
     }
     if (TRANSPARENT.has(name)) return this.arg();
     if (FRACS.has(name)) return node("frac", [this.arg(), this.arg()]);
@@ -506,6 +533,8 @@ function fontOn(font: string, symbol: string): string | null {
 
 /** Apply a font to every character under `n` that it changes. An inner font command wins. */
 function pushFont(font: string, n: TexNode): TexNode {
+  // Bold round italic, or italic round bold, is bold italic: `\textbf{\textit{p}}`.
+  if ((font === "bf" && n.t === "font:it") || (font === "it" && n.t === "font:bf")) return node("font:bm", [...n.c]);
   if (n.t.startsWith("font:")) return n;
   if (n.c.length === 0) {
     const f = fontOn(font, n.t);
@@ -596,6 +625,17 @@ function canon(n: TexNode): TexNode {
       const rows = lines.filter((l) => l.length > 0).map((l) => canon(node("row", l)));
       return rows.length === 1 ? rows[0]! : node("lines", rows);
     }
+    // `r'{}_A^{(p)}`: scripts set on nothing right after a primed symbol are
+    // that symbol's own scripts, which is how they print.
+    for (let i = merged.length - 1; i > 0; i--) {
+      const here = merged[i]!;
+      const prev = merged[i - 1]!;
+      const primes = (n: TexNode): boolean => n.t === "\\prime" || (n.t === "row" && n.c.length > 0 && n.c.every((k) => k.t === "\\prime"));
+      if (here.t !== "script" || here.c[0]!.t !== "empty" || prev.t !== "script" || prev.c[1]!.t !== "empty" || !primes(prev.c[2]!)) continue;
+      const marks = prev.c[2]!.t === "row" ? prev.c[2]!.c : [prev.c[2]!];
+      const sup = here.c[2]!.t === "empty" ? [] : here.c[2]!.t === "row" ? here.c[2]!.c : [here.c[2]!];
+      merged.splice(i - 1, 2, canon(node("script", [prev.c[0]!, here.c[1]!, node("row", [...marks, ...sup])])));
+    }
     const clean = merged.filter((k) => k.t !== "&");
     if (clean.length === 0) return EMPTY;
     return clean.length === 1 ? clean[0]! : node("row", clean);
@@ -625,6 +665,15 @@ function canon(n: TexNode): TexNode {
       } else if (sup.t === "empty" && sub2.t === "empty") {
         base = b2;
         sup = sup2;
+      }
+    }
+    // `{A'}_v^{(a)}`: the prime and the superscript share one raised line.
+    if (base.t === "script" && sup.t !== "empty") {
+      const [b2, sub2, sup2] = base.c as [TexNode, TexNode, TexNode];
+      const marks = sup2.t === "\\prime" ? [sup2] : sup2.t === "row" && sup2.c.length > 0 && sup2.c.every((k) => k.t === "\\prime") ? sup2.c : null;
+      if (marks && sub2.t === "empty") {
+        base = b2;
+        sup = canon(node("row", [...marks, ...(sup.t === "row" ? sup.c : [sup])]));
       }
     }
     if (sub.t === "empty" && sup.t === "empty") return base;

@@ -26,7 +26,7 @@
 // arXiv asks automated clients to go slowly: one request every three seconds.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -40,15 +40,23 @@ import {
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const LATEX_DIR = resolve(HERE, "../src/science/research/latex");
-const STORE = resolve(HERE, "math-corpus/real-papers.json");
+const MAIN_STORE = resolve(HERE, "math-corpus/real-papers.json");
+const SEALED_STORE = resolve(HERE, "math-corpus/real-papers-sealed.json");
+/**
+ * `harvest sealed` fetches the sealed set: thirty more papers from another
+ * window, none of them in the main store, kept apart in their own file and
+ * corpus (corpus-sealed/). Nobody reads its failures; it exists to say how
+ * the extractor does on papers it was never developed against.
+ */
+const SEALED = process.argv[3] === "sealed";
+const STORE = SEALED ? SEALED_STORE : MAIN_STORE;
 
-/** Papers wanted per arXiv set; half go to each corpus. */
-const QUOTAS = [
-  ["math", 16], ["physics:hep-th", 8], ["physics:quant-ph", 8], ["physics:cond-mat", 6],
-  ["physics:astro-ph", 6], ["cs", 10], ["stat", 6],
-];
+/** Papers wanted per arXiv set; in the main store half go to each corpus. */
+const QUOTAS = SEALED
+  ? [["math", 8], ["physics:hep-th", 4], ["physics:quant-ph", 4], ["physics:cond-mat", 3], ["physics:astro-ph", 3], ["cs", 5], ["stat", 3]]
+  : [["math", 16], ["physics:hep-th", 8], ["physics:quant-ph", 8], ["physics:cond-mat", 6], ["physics:astro-ph", 6], ["cs", 10], ["stat", 6]];
 /** Records last touched in this window are the candidates: fixed, so a re-harvest finds the same papers. */
-const WINDOW = { from: "2024-03-04", until: "2024-03-06" };
+const WINDOW = SEALED ? { from: "2024-09-09", until: "2024-09-11" } : { from: "2024-03-04", until: "2024-03-06" };
 const LICENCES = new Set([
   "http://creativecommons.org/licenses/by/4.0/",
   "http://creativecommons.org/publicdomain/zero/1.0/",
@@ -423,6 +431,13 @@ async function harvest() {
   const commands = new Map();
   const totals = { papersTried: 0, noSource: 0, tooFew: 0, found: 0, usable: 0, compiled: 0 };
   const count = (map, key) => map.set(key, (map.get(key) ?? 0) + 1);
+  // The sealed set takes no paper and no equation that the main store has.
+  const taken = new Set();
+  if (SEALED) {
+    const main = JSON.parse(readFileSync(MAIN_STORE, "utf8"));
+    for (const p of main.papers) taken.add(p.id);
+    for (const e of main.equations) seen.add(canonicalLatex(e.latex));
+  }
 
   for (const [set, quota] of QUOTAS) {
     const candidates = await listPapers(set);
@@ -430,7 +445,7 @@ async function harvest() {
     let accepted = 0;
     for (const paper of candidates) {
       if (accepted >= quota) break;
-      if (papers.some((p) => p.id === paper.id)) continue;
+      if (papers.some((p) => p.id === paper.id) || taken.has(paper.id)) continue;
       totals.papersTried++;
       const files = await fetchSource(paper.id);
       if (!files) {
@@ -470,7 +485,7 @@ async function harvest() {
       const inline = compileClean(work, "probe-i", spread(usable.inline, PER_PAPER * 3), { inline: true });
       const fitsI = inline.equations.filter((e) => inline.boxes.get(e.id).wd <= 230 && inline.boxes.get(e.id).ht + inline.boxes.get(e.id).dp <= 14);
       totals.compiled += fitsD.length + fitsI.length;
-      const split = accepted % 2 === 0 ? "dev" : "heldout";
+      const split = SEALED ? "sealed" : accepted % 2 === 0 ? "dev" : "heldout";
       papers.push({ ...paper, set, split });
       for (const [kind, list] of [["display", spread(fitsD, PER_PAPER)], ["inline", spread(fitsI, PER_PAPER)]]) {
         for (const e of list) {
@@ -506,7 +521,12 @@ async function harvest() {
 // ---------------------------------------------------------------------------
 
 function build() {
-  const store = JSON.parse(readFileSync(STORE, "utf8"));
+  const store = JSON.parse(readFileSync(MAIN_STORE, "utf8"));
+  if (existsSync(SEALED_STORE)) {
+    const sealed = JSON.parse(readFileSync(SEALED_STORE, "utf8"));
+    store.papers.push(...sealed.papers);
+    store.equations.push(...sealed.equations);
+  }
   const work = mkdtempSync(join(tmpdir(), "ito-real-"));
   // An equation that either corpus already has from the grammar or the
   // curated list would be a duplicate there, and a leak between the two sets.
@@ -514,11 +534,12 @@ function build() {
   for (const dir of ["corpus", "corpus-heldout"]) {
     const manifest = JSON.parse(readFileSync(resolve(LATEX_DIR, dir, "manifest.json"), "utf8"));
     for (const [id, latex] of Object.entries(manifest.equations)) {
-      if (!/^[rq][di]\d/.test(id)) taken.add(canonicalLatex(latex));
+      if (!/^[rqs][di]\d/.test(id)) taken.add(canonicalLatex(latex));
     }
   }
-  for (const [split, dir, prefix] of [["dev", "corpus", "r"], ["heldout", "corpus-heldout", "q"]]) {
+  for (const [split, dir, prefix] of [["dev", "corpus", "r"], ["heldout", "corpus-heldout", "q"], ["sealed", "corpus-sealed", "s"]]) {
     const papers = store.papers.filter((p) => p.split === split);
+    if (papers.length === 0) continue;
     const ids = new Set(papers.map((p) => p.id));
     const mine = store.equations.filter((e) => {
       const key = canonicalLatex(e.latex);
@@ -530,6 +551,7 @@ function build() {
       return true;
     });
     const number = (list) => list.map((e, i) => ({ ...e, id: `${prefix}${e.kind[0]}${String(i + 1).padStart(4, "0")}` }));
+    mkdirSync(resolve(LATEX_DIR, dir), { recursive: true });
     const display = number(mine.filter((e) => e.kind === "display"));
     const inline = number(mine.filter((e) => e.kind === "inline"));
     const d = compileClean(work, "real-display", display);
@@ -592,7 +614,23 @@ function build() {
     };
     const json = JSON.stringify(manual, null, 1)
       .replace(/\[\n\s+("[^"]+"),\n\s+(\d+),\n\s+([-\d.]+),\n\s+([-\d.]+),\n\s+([-\d.]+),\n\s+([-\d.]+)\n\s+\]/g, "[$1,$2,$3,$4,$5,$6]");
-    writeFileSync(join(out, "manual-tiers.json"), json + "\n");
+    if (split === "sealed") {
+      // The sealed set has no generated tiers: this is its whole manifest.
+      // Which paper each equation is from lets the report treat a paper, not
+      // an equation, as the unit that was sampled.
+      const whole = {
+        version: 1,
+        set: "sealed",
+        note: "Sealed set, written by `node scripts/gen-real-paper-tier.mjs`. Equations from papers that neither other set uses. Measured at gates and reported in aggregate only; do not inspect individual failures. Boxes are PDF points, origin bottom-left: [id, page, x0, y0, x1, y1].",
+        sources: manual.sources,
+        paperOf: Object.fromEntries([...display, ...inline].map((e) => [e.id, e.paper])),
+        tiers: manual.tiers,
+        equations: manual.equations,
+      };
+      const text = JSON.stringify(whole, null, 1)
+        .replace(/\[\n\s+("[^"]+"),\n\s+(\d+),\n\s+([-\d.]+),\n\s+([-\d.]+),\n\s+([-\d.]+),\n\s+([-\d.]+)\n\s+\]/g, "[$1,$2,$3,$4,$5,$6]");
+      writeFileSync(join(out, "manifest.json"), text + "\n");
+    } else writeFileSync(join(out, "manual-tiers.json"), json + "\n");
     console.log(`${split}: ${papers.length} papers, ${display.length} display and ${inline.length} inline equations -> ${out}`);
   }
   rmSync(work, { recursive: true, force: true });
@@ -613,7 +651,7 @@ function build() {
     ...store.papers.map((p) => {
       const licence = p.licence.includes("publicdomain") ? `[CC0 1.0](${p.licence})` : `[CC BY 4.0](${p.licence})`;
       const cell = (t) => t.replace(/\|/g, "\\|");
-      return `| [${p.id}](https://arxiv.org/abs/${p.id}) | ${cell(p.title)} | ${cell(p.authors.join(", "))} | ${licence} | ${p.split === "dev" ? "development" : "held-out"} |`;
+      return `| [${p.id}](https://arxiv.org/abs/${p.id}) | ${cell(p.title)} | ${cell(p.authors.join(", "))} | ${licence} | ${p.split === "dev" ? "development" : p.split === "heldout" ? "held-out" : "sealed"} |`;
     }),
     "",
   ];

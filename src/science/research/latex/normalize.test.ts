@@ -201,3 +201,28 @@ describe("the sentence's punctuation", () => {
     expect(canonicalLatex(".")).toBe(".");
   });
 });
+
+describe("notations that print alike", () => {
+  const same = (a: string, b: string) => expect(canonicalLatex(a)).toBe(canonicalLatex(b));
+  it("reads an apostrophe in a superscript as the prime it is", () => {
+    same("\\lambda^{'}", "\\lambda'");
+    same("\\psi^{''}", "\\psi^{\\prime\\prime}");
+    same("v^{'}_{w}", "v_w^{\\prime}");
+  });
+  it("gives scripts set on nothing after a primed symbol to that symbol", () => {
+    same("r'{}_A^{(p)}", "r_A^{\\prime(p)}");
+    same("{A'}_v^{(a)}", "A_v^{\\prime(a)}");
+    // A pre-script is not that: it belongs to what follows.
+    expect(canonicalLatex("r^{2}{}_2F_1")).not.toBe(canonicalLatex("r_2^{2}F_1"));
+  });
+  it("reads `\\mathop{..}\\limits` on a plain symbol as a symbol with something under it", () => {
+    same("1 \\mathbin{\\mathop{\\otimes}\\limits_{X}} I", "1\\underset{X}{\\otimes}I");
+    // Operators and functions that take limits anyway are unchanged.
+    same("\\mathop{\\sum}\\limits_{i}x", "\\sum_i x");
+    same("\\mathop{\\max}_{i}x", "\\max_i x");
+  });
+  it("takes bold round italic for bold italic", () => {
+    same("\\textbf{\\textit{p}}", "\\boldsymbol{p}");
+    expect(canonicalLatex("\\textbf{p}")).not.toBe(canonicalLatex("\\boldsymbol{p}"));
+  });
+});

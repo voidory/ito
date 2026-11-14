@@ -3,7 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { canonicalLatex, constructsOf, parseLatex } from "./normalize";
-import { failureRateUpperBound } from "./score";
+import { clusterInterval, failureRateUpperBound } from "./score";
 
 /**
  * Integrity of the committed benchmark corpus. These are the acceptance
@@ -190,5 +190,65 @@ describe("real-paper tiers", () => {
       expect(m.tiers["real-display"]!.placements.length).toBeGreaterThanOrEqual(300);
       expect(m.tiers["real-inline"]!.placements.length).toBeGreaterThanOrEqual(300);
     }
+  });
+});
+
+describe("sealed set", () => {
+  const sealed = JSON.parse(readFileSync(resolve(HERE, "corpus-sealed/manifest.json"), "utf8")) as typeof manifest & {
+    set: string;
+    paperOf: Record<string, string>;
+    sources: { arxiv: string; licence: string }[];
+  };
+  const sealedTargets = (thresholds as unknown as { sealed: Record<string, { target: number | null }> }).sealed;
+
+  it("has its PDFs, a target for every tier and in-page boxes for known equations", () => {
+    expect(sealed.set).toBe("sealed");
+    for (const [name, tier] of Object.entries(sealed.tiers)) {
+      expect(existsSync(resolve(HERE, "corpus-sealed", tier.pdf)), `${name} pdf`).toBe(true);
+      expect(sealedTargets[name], `${name} target`).toBeDefined();
+      expect(tier.placements.length).toBeGreaterThanOrEqual(300);
+      for (const [id, , x0, y0, x1, y1] of tier.placements) {
+        expect(sealed.equations[id], `${name} ${id}`).toBeDefined();
+        expect(sealed.paperOf[id], `${name} ${id} paper`).toBeDefined();
+        expect(x0 >= 0 && y0 >= 0 && x1 <= tier.pageWidth && y1 <= tier.pageHeight && x1 > x0 && y1 > y0, `${name} ${id} box`).toBe(true);
+      }
+    }
+  });
+
+  it("shares no paper and no equation with either other set", () => {
+    const papers = new Set(sealed.sources.map((s) => s.arxiv));
+    expect(papers.size).toBeGreaterThanOrEqual(25);
+    for (const m of [manifest, heldout]) {
+      for (const s of (m as unknown as { sources: { arxiv: string }[] }).sources) expect(papers.has(s.arxiv), s.arxiv).toBe(false);
+    }
+    const others = new Set([...Object.values(manifest.equations), ...Object.values(heldout.equations)].map((l) => canonicalLatex(l)));
+    const seen = new Set<string>();
+    for (const [id, latex] of Object.entries(sealed.equations)) {
+      const key = canonicalLatex(latex);
+      expect(others.has(key), `${id} is in another set`).toBe(false);
+      expect(seen.has(key), `${id} duplicates another sealed equation`).toBe(false);
+      seen.add(key);
+    }
+    for (const s of sealed.sources) {
+      expect(["http://creativecommons.org/licenses/by/4.0/", "http://creativecommons.org/publicdomain/zero/1.0/"]).toContain(s.licence);
+    }
+  });
+});
+
+describe("clusterInterval", () => {
+  it("is wider than an interval that takes equations as independent when papers differ", () => {
+    // Ten papers of 30 equations: nine perfect, one half wrong.
+    const papers = [...Array.from({ length: 9 }, () => ({ n: 30, exact: 30 })), { n: 30, exact: 15 }];
+    const ci = clusterInterval(papers);
+    expect(ci.rate).toBeCloseTo(0.95);
+    expect(ci.lower).toBeLessThan(0.9);
+    expect(ci.upper).toBe(1);
+    // Deterministic.
+    expect(clusterInterval(papers)).toEqual(ci);
+  });
+  it("collapses to the rate when every paper scores the same", () => {
+    const ci = clusterInterval(Array.from({ length: 8 }, () => ({ n: 10, exact: 9 })));
+    expect(ci.lower).toBeCloseTo(0.9);
+    expect(ci.upper).toBeCloseTo(0.9);
   });
 });
