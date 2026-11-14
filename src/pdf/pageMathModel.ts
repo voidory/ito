@@ -345,6 +345,18 @@ export function buildPageMathModel(
       case ops.endPath:
         path = null;
         break;
+      case ops.paintSolidColorImageMask: {
+        // dvips draws every rule as a one-pixel image mask stretched to the
+        // rule's size, so PDFs made from PostScript have no paths at all:
+        // the rule is the unit square under the current transform.
+        const [ax, ay] = apply([0, 0], st.ctm);
+        const [bx, by] = apply([1, 1], st.ctm);
+        const width = Math.abs(bx - ax);
+        const height = Math.abs(by - ay);
+        if (width >= height) addRule(ax, (ay + by) / 2, bx, (ay + by) / 2, height);
+        else addRule((ax + bx) / 2, ay, (ax + bx) / 2, by, width);
+        break;
+      }
       default:
         break;
     }

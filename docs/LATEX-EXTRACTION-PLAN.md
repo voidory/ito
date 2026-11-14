@@ -1,6 +1,10 @@
 # Box-selection LaTeX extraction: plan to professional grade
 
-Status: Phases 1 and 2 and the real-paper tiers are built. Phase 3 is next.
+Status: Phases 1 and 2 and the real-paper tiers are built. A check on the
+papers' own PDFs (`docs/spikes/real-pages.md`) changed what comes next: before
+Phase 3, trim the sentence's punctuation and the equation number from a
+selection, and add tiers for both and for dvips-produced PDFs. On real pages
+those cost more than everything Phase 3 would fix.
 Phases 3 to 6 are proposals.
 
 ## Target

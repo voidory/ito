@@ -16,7 +16,7 @@ const OPS: OpsTable = Object.fromEntries(
     "setTextRise", "setLeadingMoveText", "moveText", "setTextMatrix", "nextLine", "showText",
     "constructPath", "stroke", "closeStroke", "fill", "eoFill", "fillStroke", "eoFillStroke",
     "closeFillStroke", "closeEOFillStroke", "endPath", "moveTo", "lineTo", "rectangle", "curveTo",
-    "curveTo2", "curveTo3",
+    "curveTo2", "curveTo3", "paintSolidColorImageMask",
   ].map((name, i) => [name, i + 1]),
 );
 // A US Letter page: PDF y grows upwards, the model's y grows downwards.
@@ -137,6 +137,20 @@ describe("buildPageMathModel: rules", () => {
     expect(m.rules).toHaveLength(1);
     expect(m.rules[0]!.thickness).toBeCloseTo(0.4);
     expect(m.rules[0]!.y).toBeCloseTo(792 - 500.2);
+  });
+
+  it("reads a rule drawn as a stretched one-pixel image mask, as dvips does", () => {
+    const m = model([
+      ["save", []],
+      ["transform", [40, 0, 0, 0.4, 100, 500]],
+      ["paintSolidColorImageMask", []],
+      ["restore", []],
+    ]);
+    expect(m.rules).toHaveLength(1);
+    expect(m.rules[0]!.x0).toBeCloseTo(100);
+    expect(m.rules[0]!.x1).toBeCloseTo(140);
+    expect(m.rules[0]!.y).toBeCloseTo(792 - 500.2);
+    expect(m.rules[0]!.thickness).toBeCloseTo(0.4);
   });
 
   it("keeps vertical rules apart from horizontal ones", () => {

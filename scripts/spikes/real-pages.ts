@@ -143,6 +143,9 @@ const bump = (split: string) => {
 };
 const failures: string[] = [];
 const kindTotals = new Map<string, [number, number]>();
+const causes = new Map<string, Map<string, number>>();
+let cmMath = 0;
+let otherMath = 0;
 
 console.log("paper       split    pages  glyphs  covered  math fonts            found  tight exact  loose exact");
 for (const paper of store.papers) {
@@ -171,6 +174,9 @@ for (const paper of store.papers) {
   const mathFonts = top.filter(([f]) => /MI|SY|EX|MATH|SYM/i.test(f)).slice(0, 3).map(([f]) => f).join(",") || "(none seen)";
   const isCm = covered / Math.max(1, glyphs) > 0.9;
   if (isCm) t.cm++;
+  // Whatever the text is set in, is the mathematics in the Computer Modern math fonts?
+  if ((families.get("CMMI") ?? 0) > 0 && (families.get("CMSY") ?? 0) > 0 && !top.some(([f, n]) => n > 200 && !hasSlotTable(f) && /MATH|MI\b|SY\b|SYMBOL/i.test(f))) cmMath++;
+  else otherMath++;
 
   // 2 and 3. Locate each of the tier's equations and extract it.
   const mine = refs.filter((r) => r.paper === paper.id);
@@ -209,12 +215,24 @@ for (const paper of store.papers) {
       width: (ax1 - ax0 + 2 * pad) / model.width,
       height: (y1 - y0 + 2 * pad) / model.height,
     });
-    const okTight = scoreEquation(r.latex, extractLatexFromModel(model, rect(x0, x1))).exact;
+    // An inline formula that TeX broke across two lines cannot be taken with one rectangle at all.
+    // A line break shows as the pen jumping down a line and back to the left margin.
+    const wrapped =
+      r.kind === "inline" &&
+      part.some((g, i) => i > 0 && g.y - part[i - 1]!.y > 0.9 * g.size && part[i - 1]!.x - g.x > 20);
+    const got = wrapped ? "" : extractLatexFromModel(model, rect(x0, x1));
+    const okTight = !wrapped && scoreEquation(r.latex, got).exact;
+    // The sentence's comma or full stop sits right against a formula, inside any box a reader would draw.
+    const punctuated = !wrapped && !okTight && [",", ".", ";", ":"].some((mark) => scoreEquation(`${r.latex}${mark}`, got).exact);
+    const cause = wrapped ? "broken across two lines" : okTight ? "exact" : punctuated ? "exact but for the sentence's punctuation" : "wrong";
+    const c = causes.get(`${paper.split} ${r.kind}`) ?? new Map<string, number>();
+    c.set(cause, (c.get(cause) ?? 0) + 1);
+    causes.set(`${paper.split} ${r.kind}`, c);
     if (okTight) {
       tight++;
       t.tight++;
-    } else if (paper.split === "dev") {
-      failures.push(`${paper.id} ${r.kind}\n  E: ${r.latex}\n  G: ${extractLatexFromModel(model, rect(x0, x1))}`);
+    } else if (cause === "wrong" && paper.split === "dev") {
+      failures.push(`${paper.id} ${r.kind}\n  E: ${r.latex}\n  G: ${got}`);
     }
     const k = kindTotals.get(`${paper.split} ${r.kind}`) ?? [0, 0];
     k[0]++;
@@ -245,6 +263,12 @@ for (const [split, t] of totals) {
   console.log(`  exact from a column-wide box (display only): ${t.loose} of ${t.looseN} (${pct(t.loose, t.looseN)})`);
 }
 for (const [k, [n, ok]] of kindTotals) console.log(`  ${k}: ${ok} of ${n} (${pct(ok, n)})`);
+console.log(`\nmathematics set in the Computer Modern math fonts: ${cmMath} papers; in other math fonts: ${otherMath}`);
+console.log("\nwhat happened to each equation found, from a tight box:");
+for (const [k, c] of causes) {
+  const n = [...c.values()].reduce((a, b) => a + b, 0);
+  console.log(`  ${k} (${n}): ${[...c].sort((a, b) => b[1] - a[1]).map(([name, v]) => `${name} ${v} (${pct(v, n)})`).join(", ")}`);
+}
 if (failures.length > 0) {
   console.log(`\nfailures from a tight box, development papers (${failures.length}):`);
   for (const f of failures.slice(0, Number(process.env.ITO_SHOW ?? 40))) console.log(f);
