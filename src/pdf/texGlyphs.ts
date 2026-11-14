@@ -41,7 +41,7 @@ export function hasSlotTable(family: string): boolean {
 
 const ink = new Map<string, Map<number, readonly [number, number]>>();
 /** Lowest and highest ink of a slot, in ems above the baseline; null when unknown. */
-function inkOf(family: string, slot: number): readonly [number, number] | null {
+export function inkOf(family: string, slot: number): readonly [number, number] | null {
   let fam = ink.get(family);
   if (!fam) {
     fam = new Map();
