@@ -145,6 +145,11 @@ three Latin Modern papers are still unmeasured on their own pages (the
 locator matches Computer Modern font names); on harness pages Latin Modern
 scores exactly what Computer Modern does, on both sets.
 
+After Phase 3's first slice (rows, grids, limits), the same script gives
+display from a tight box 97.3% on development papers and 91.8% on held-out
+ones, and from a column-wide box 95.7% and 90.7%. The widening difference
+between the two sets is the fitting that the plan's Phase 3 status describes.
+
 ## Not verified
 
 - **Bias of the located set.** Only equations typeset plainly could be

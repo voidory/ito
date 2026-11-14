@@ -5,7 +5,8 @@ papers' own PDFs (`docs/spikes/real-pages.md`) put four things ahead of Phase
 3, all now done: the sentence's punctuation and the equation number are
 dropped from a selection, Latin Modern is read with the Computer Modern
 tables, and each of these, and dvips-produced PDFs, has a gated tier.
-Phase 3 is in progress. Phases 4 to 6 are proposals.
+Phase 3's first slice (rows, grids, limits, root indices, stacked symbols)
+is built; its status is under "Phase 3". Phases 4 to 6 are proposals.
 
 ## Target
 
@@ -24,6 +25,7 @@ Measured, pooled over 6,825 selections on the three target tiers:
 |---|---|---|---|---|
 | Before Phase 2 | 19.19% | 18.96% | 21.97% | 19.41% |
 | After Phase 2 | 69.16% | 83.45% | 73.16% | 75.06% |
+| After Phase 3, first slice | 98.29% | 97.43% | 98.55% | 98.00% |
 
 Outside the target: Times 41.58% (was 22.76%), scanned pages 0%.
 
@@ -376,6 +378,49 @@ reaching across lines, then limits under function names and neighbouring
 operators, then the accent cases. Root indices and pre-scripts come last: they
 are in the generated tiers and absent from the real one. The scored search
 (2 and 3) only if what remains needs it.
+
+### Status: first slice built, without the tree
+
+Built inside `mathLayout.ts`, for selections whose glyphs are all identified:
+
+- **Rows before rules.** A selection is divided into rows from its baselines
+  (full-size glyphs that no fraction bar holds, and bars that are not inside
+  another), cut through the widest white band between two baselines. Each row
+  is then laid out alone, so a fraction cannot reach into the next line.
+- **Grids.** A pair of delimiters, or a lone tall left brace, whose contents
+  stand in two or more rows becomes `\binom`, a matrix environment or
+  `cases`; columns are the gaps in what all rows together cover. Innermost
+  pairs first.
+- **Limits.** A limit under an operator is one piece however it is spaced,
+  two operators side by side each keep their own, and `\liminf`, `\limsup`,
+  `\int\limits` and `\arg\!\min` carry theirs.
+- **Root indices and stacked symbols** (`\sqrt[n]`, `\overset`, `\underset`).
+
+Results, exact match:
+
+| Tier | Before | Development | Held-out |
+|---|---|---|---|
+| `tex-display` | 69.16% | 98.29% | 97.67% |
+| `tex-inline` | 83.45% | 97.43% | 97.54% |
+| `tex-tounicode` / 12pt | 73.16% | 98.55% | 98.16% |
+| `real-display` | 91.31% | 97.87% | 92.70% (was 88.29%) |
+| `real-inline` | 99.32% | 99.32% | 98.72% |
+
+On the papers' own pages (`scripts/spikes/real-pages.ts`): display from a
+tight box 97.3% on development papers and 91.8% on held-out ones; from a
+column-wide box 95.7% and 90.7%.
+
+- **The real display tier is now fitted to the development papers.** Its
+  held-out gap is +5.17 points (2.81 to 7.72), the first gap whose interval
+  excludes zero. The limit rules were written against the development
+  failures and moved development by 12 equations and held-out by 2. The
+  generated tiers show no gap. Before more rules go in, the held-out real
+  failures need a fresh set of papers to be read against, not these.
+- **Not done:** the intermediate tree (task 1), scored search (2 and 3),
+  `\left`/`\right` (4), `\tag` output (7: numbers are dropped), accents
+  over several glyphs, pre-scripts, and one-row matrices, which print exactly
+  like spaced items in parentheses (37 of the 59 `tex-display` failures; no
+  real equation has one).
 
 ### Tasks
 

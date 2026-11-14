@@ -26,6 +26,31 @@ const reported = JSON.parse(readFileSync(resolve(ROOT, "BENCHMARK.json"), "utf8"
   tiers: Record<string, { n: number; exact: number }>;
 };
 
+/** What the extractor drafts for some equations of a tier, by id. */
+async function drafts(name: string, ids: readonly string[]): Promise<Map<string, string>> {
+  const tier = manifest.tiers[name]!;
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(readFileSync(resolve(ROOT, "corpus", tier.pdf))), verbosity: 0 }).promise;
+  const out = new Map<string, string>();
+  for (const [id, pageIndex, x0, y0, x1, y1] of tier.placements) {
+    if (!ids.includes(id)) continue;
+    const page = await doc.getPage(pageIndex + 1);
+    const model = buildPageMathModel(
+      await page.getOperatorList(),
+      (fontId) => page.commonObjs.get(fontId),
+      pdfjs.OPS as unknown as OpsTable,
+      page.getViewport({ scale: 1 }),
+    );
+    out.set(id, extractLatexFromModel(model, {
+      x: x0 / tier.pageWidth,
+      y: (tier.pageHeight - y1) / tier.pageHeight,
+      width: (x1 - x0) / tier.pageWidth,
+      height: (y1 - y0) / tier.pageHeight,
+    }));
+  }
+  await doc.destroy();
+  return out;
+}
+
 async function exactCount(name: string): Promise<{ n: number; exact: number }> {
   const tier = manifest.tiers[name]!;
   const doc = await pdfjs.getDocument({ data: new Uint8Array(readFileSync(resolve(ROOT, "corpus", tier.pdf))), verbosity: 0 }).promise;
@@ -62,4 +87,31 @@ describe("LaTeX extraction over the development corpus, in Node", () => {
       expect({ n, exact }).toEqual({ n: reported.tiers[name]!.n, exact: reported.tiers[name]!.exact });
     }, 120_000);
   }
+});
+
+describe("structure that spans lines (Phase 3)", () => {
+  it("reads matrices, cases and binomials as grids", async () => {
+    const got = await drafts("tex-display", ["c040", "c042", "c048", "c004"]);
+    expect(got.get("c040")).toBe("A=\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}");
+    expect(got.get("c042")).toBe("\\begin{vmatrix} a & b \\\\ c & d \\end{vmatrix}=ad-bc");
+    expect(got.get("c048")).toBe("|x|=\\begin{cases} x & \\mathrm{if}x\\geq 0 \\\\ -x & \\mathrm{if}x<0 \\end{cases}");
+    expect(got.get("c004")).toBe("(a+b)^n=\\sum_{k=0}^n\\binom{n}{k}a^{n-k}b^k");
+  }, 60_000);
+
+  it("keeps a fraction inside its own row, a script on its grid, an index on its root", async () => {
+    const ids = ["g1755", "g0094", "c029", "g0857", "g0222"];
+    const got = await drafts("tex-display", ids);
+    for (const id of ids) expect(scoreEquation(manifest.equations[id]!, got.get(id)!).exact, `${id}: ${got.get(id)}`).toBe(true);
+    expect(got.get("g1755")).toContain(" \\\\ ");
+    expect(got.get("g0094")).toMatch(/\\end\{pmatrix\}\^T$/);
+    expect(got.get("c029")).toMatch(/^\\sqrt\[n\]\{/);
+    expect(got.get("g0857")).toContain("\\overset{!}{=}");
+  }, 60_000);
+
+  it("gives each of two neighbouring operators its own limits", async () => {
+    const got = await drafts("real-display", ["rd0124", "rd0013", "rd0356"]);
+    expect(got.get("rd0124")).toContain("\\sum_{y=1}^g\\prod_{i=1}^k");
+    expect(got.get("rd0013")).toMatch(/^\\liminf_\{\\epsilon\\searrow 0\}/);
+    expect(got.get("rd0356")).toContain("\\int_{x_1}^{x_2}\\int_{y_1}^{y_2}");
+  }, 60_000);
 });

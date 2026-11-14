@@ -113,7 +113,7 @@ const STOPWORDS = new Set([
 
 /** Operators whose scripts sit above/below them (display limits). */
 const LIMIT_OPS = new Set(["∑", "∏", "⋃", "⋂"]);
-const LIMIT_WORDS = new Set(["\\lim", "\\max", "\\min", "\\sup", "\\inf"]);
+const LIMIT_WORDS = new Set(["\\lim", "\\max", "\\min", "\\sup", "\\inf", "\\liminf", "\\limsup", "\\det", "\\gcd", "\\Pr"]);
 /**
  * Glyphs drawn from extensible/operator fonts, whose reported baseline is not
  * the text baseline (a display `∑` hangs from its origin). They always sit on
@@ -127,7 +127,7 @@ const BAR_CHARS = new Set(["-", "−", "–", "—", "‐", "=", "≡", "≠", "
 // Boxes
 // ---------------------------------------------------------------------------
 
-type BoxKind = "glyph" | "frac" | "sqrt" | "over" | "word" | "text";
+type BoxKind = "glyph" | "frac" | "sqrt" | "over" | "word" | "text" | "grid";
 
 interface Box {
   x0: number;
@@ -479,7 +479,12 @@ function splitLines(boxes: Box[]): Line[] {
         const ref = isAnchor(b) ? l.base - 0.5 * l.size : l.base;
         const d = Math.abs(b.base - ref);
         const e = bbox(l.boxes);
-        if (d > 1.7 * l.size || b.x1 < e.x0 - 1.2 * l.size || b.x0 > e.x1 + 1.2 * l.size) return;
+        // A script on a grid sits at the grid's corner, far from the baseline.
+        const onGrid = l.boxes.some(
+          (g) => g.kind === "grid" && b.x0 >= g.x1 - 0.1 * l.size && b.x0 <= g.x1 + 0.4 * l.size &&
+            b.bottom > g.top - 0.6 * l.size && b.top < g.bottom + 0.6 * l.size,
+        );
+        if ((d > 1.7 * l.size && !onGrid) || b.x1 < e.x0 - 1.2 * l.size || b.x0 > e.x1 + 1.2 * l.size) return;
         if (d < bestD) {
           bestD = d;
           best = i;
@@ -511,7 +516,7 @@ function makeLine(large: Box[]): Line {
  */
 function lineBaseline(large: Box[]): number {
   if (!large.every((b) => b.exact || b.kind !== "glyph")) return median(large.map((b) => b.base));
-  const glyphs = large.filter((b) => !isTall(b) && b.kind !== "frac");
+  const glyphs = large.filter((b) => !isTall(b) && b.kind !== "frac" && b.kind !== "grid");
   const pool = glyphs.length > 0 ? glyphs : large;
   return pool.reduce((a, b) => (b.x0 < a.x0 ? b : a)).base;
 }
@@ -601,7 +606,11 @@ function mergeStyledRuns(mains: Box[], size: number, all: readonly Box[] = mains
     if (run.length === 0) return;
     const style = run[0]!.style!;
     const word = run.map((b) => b.tex).join("");
-    if (style === "rm" && FUNCTIONS.has(word)) {
+    if (style === "rm" && (word === "argmin" || word === "argmax")) {
+      // `\arg\!\min`: two function names closed up.
+      out.push({ ...mergedBox(run.slice(0, 3), "\\arg", "word"), exact: true, cls: "fn" });
+      out.push({ ...mergedBox(run.slice(3), `\\${word.slice(3)}`, "word"), exact: true, cls: "fn" });
+    } else if (style === "rm" && FUNCTIONS.has(word)) {
       out.push({ ...mergedBox(run, `\\${word}`, "word"), exact: true, cls: "fn" });
     } else if (style === "rm") {
       const prev = out[out.length - 1];
@@ -742,7 +751,7 @@ function lineToTex(line: Line): string {
     const d = (line.base - b.base) / s;
     // Exact glyphs: a script is never on the baseline, whatever its size, and
     // at the smallest size it is no smaller than its base, only shifted.
-    const tol = b.kind === "frac" ? 0.3
+    const tol = b.kind === "frac" || b.kind === "grid" ? 0.3
       : isTall(b) ? (b.size >= 0.85 * s ? 0.35 : -1)
       : b.exact ? (b.size <= 0.85 * s ? -1 : 0.14)
       : b.size <= 0.85 * s ? 0.08 : 0.28;
@@ -762,7 +771,11 @@ function lineToTex(line: Line): string {
       const gap = Math.max(0, b.x0 - a.x1, a.x0 - b.x1);
       // Inside a script TeX sets relations and operators tight, so exact
       // glyphs of one script nearly touch; limits of neighbouring operators don't.
-      const near = (a.exact || a.kind !== "glyph") && (b.exact || b.kind !== "glyph") ? 0.2 : 0.3;
+      const drawn = (a.exact || a.kind !== "glyph") && (b.exact || b.kind !== "glyph");
+      // A limit under an operator lies wholly below the baseline, which no
+      // subscript does, and is one piece however its parts are spaced.
+      const under = drawn && a.top > line.base + 0.1 * s && b.top > line.base + 0.1 * s;
+      const near = under ? 0.45 : drawn ? 0.2 : 0.3;
       if (gap < near * s && Math.abs(a.base - b.base) < 0.45 * Math.max(a.size, b.size)) {
         parent[find(i)] = find(j);
       }
@@ -776,18 +789,65 @@ function lineToTex(line: Line): string {
     else groups.set(r, [b]);
   });
 
+  // What can carry limits: an operator, a function such as `\lim`, and an
+  // integral when the script is centred on it (`\int\limits`).
+  const carriesLimits = (m: Box, c: number): boolean =>
+    (m.kind === "glyph" && (m.exact ? m.cls === "op" : m.ch != null && LIMIT_OPS.has(m.ch)) && c >= m.x0 - 0.2 * s && c <= m.x1 + 0.2 * s) ||
+    (LIMIT_WORDS.has(m.tex) && c >= m.x0 - 0.2 * s && c <= m.x1 + 0.2 * s) ||
+    (m.kind === "glyph" && m.exact === true && m.cls === "int" && Math.abs(c - cx(m)) < 0.2 * s);
+  // The limits of two operators side by side nearly touch and were joined
+  // above: part them at the widest gap between the operators' centres.
+  const pieces: Box[][] = [];
+  for (const g of groups.values()) {
+    let rest = [...g].sort((a, b) => a.x0 - b.x0);
+    const span = bbox(rest);
+    const hosts = mains
+      .filter((m) => carriesLimits(m, cx(m)) && cx(m) > span.x0 && cx(m) < span.x1)
+      .sort((a, b) => a.x0 - b.x0);
+    for (let h = 0; h + 1 < hosts.length && rest.length > 1; h++) {
+      let at = -1;
+      let widest = 0;
+      for (let i = 0; i + 1 < rest.length; i++) {
+        const gap = rest[i + 1]!.x0 - rest[i]!.x1;
+        const where = (rest[i]!.x1 + rest[i + 1]!.x0) / 2;
+        if (where > cx(hosts[h]!) && where < cx(hosts[h + 1]!) && gap > widest) {
+          widest = gap;
+          at = i;
+        }
+      }
+      if (at < 0) continue;
+      pieces.push(rest.slice(0, at + 1));
+      rest = rest.slice(at + 1);
+    }
+    pieces.push(rest);
+  }
   const sups = new Map<Box | null, Box[]>();
   const subs = new Map<Box | null, Box[]>();
-  for (const g of groups.values()) {
+  for (const g of pieces) {
     const bb = bbox(g);
     const c = cx(bb);
     const isAbove = median(g.map((b) => b.base)) < line.base;
-    let host: Box | null =
-      mains.find(
-        (m) =>
-          ((m.kind === "glyph" && (m.exact ? m.cls === "op" : m.ch != null && LIMIT_OPS.has(m.ch))) || LIMIT_WORDS.has(m.tex)) &&
-          c >= m.x0 - 0.2 * s && c <= m.x1 + 0.2 * s,
-      ) ?? null;
+    if (g.every((b) => b.exact || b.kind !== "glyph")) {
+      // A root's index: TeX sets it over the radical's left edge, ending ten
+      // math units (0.556 em) inside it.
+      const root = isAbove
+        ? mains.find((m) => m.kind === "sqrt" && m.tex.startsWith("\\sqrt{") && Math.abs(bb.x1 - (m.x0 + 0.556 * m.size)) < 0.2 * m.size)
+        : undefined;
+      if (root) {
+        root.tex = `\\sqrt[${build(g, [], false)}]${root.tex.slice(5)}`;
+        continue;
+      }
+      // Something centred over or under a relation is stacked on it (`\overset`).
+      const rel = mains.find(
+        (m) => m.kind === "glyph" && m.exact && m.cls === "rel" && c > m.x0 && c < m.x1 &&
+          (isAbove ? bb.bottom <= m.top + 0.15 * s : bb.top >= m.bottom - 0.15 * s),
+      );
+      if (rel) {
+        rel.tex = `\\${isAbove ? "overset" : "underset"}{${build(g, [], false)}}{${rel.tex}}`;
+        continue;
+      }
+    }
+    let host: Box | null = mains.find((m) => carriesLimits(m, c)) ?? null;
     if (!host) {
       for (const m of mains) if (m.x1 <= bb.x0 + 0.35 * s) host = m;
     }
@@ -823,8 +883,274 @@ function build(boxes: Box[], rules: readonly MathRule[], allowStack: boolean): s
   return layout(boxes, rules, allowStack).tex;
 }
 
+// ---------------------------------------------------------------------------
+// Rows and grids (exact glyphs only)
+// ---------------------------------------------------------------------------
+
+/**
+ * Baselines of two rows are at least this far apart, in ems of the rows' own
+ * size. The tightest rows are a text-style binomial's (1.06); a subscript and
+ * a superscript on one base, both at the smallest size, come to 0.93.
+ */
+const ROW_APART = 1.0;
+
+/** Whether a rule hangs from a radical sign: its vinculum, not a fraction bar. */
+function isVinculum(rule: MathRule, boxes: readonly Box[], s: number): boolean {
+  return boxes.some(
+    (b) => b.kind === "glyph" && b.cls === "radical" && Math.abs(b.x1 - rule.x0) < 0.1 * s && Math.abs(b.top - rule.y) < 0.3 * s,
+  );
+}
+
+/**
+ * Where a set of boxes divides into rows: the y of each cut, top to bottom;
+ * empty for a single row. Rows are found from baselines, not from gaps: a
+ * fraction has gaps of its own. Evidence for a row's baseline is a full-size
+ * glyph that no fraction bar owns, or a fraction bar that is not nested in
+ * another (the bar sits a quarter em above its row's baseline). Each cut then
+ * goes through the widest band of white between two baselines.
+ */
+function rowCuts(boxes: readonly Box[], rules: readonly MathRule[]): number[] {
+  const plain = boxes.filter((b) => !isTall(b) && b.cls !== "accent" && b.cls !== "radical");
+  if (plain.length === 0) return [];
+  const s = Math.max(...plain.map((b) => b.size));
+  const mid = (b: Box): number => (b.top + b.bottom) / 2;
+  const under = (b: { x0: number; x1: number }, r: MathRule): boolean => cx(b) >= r.x0 - 0.02 * s && cx(b) <= r.x1 + 0.02 * s;
+  const bars = rules.filter(
+    (r) =>
+      !isVinculum(r, boxes, s) &&
+      boxes.some((b) => under(b, r) && b.bottom <= r.y + 0.05 * s && r.y - b.bottom < 0.7 * s) &&
+      boxes.some((b) => under(b, r) && b.top >= r.y - 0.05 * s && b.top - r.y < 0.7 * s),
+  );
+  // What each bar holds: the stack of boxes and shorter bars that touches it
+  // from above and from below. A step from a bar may be as long as the
+  // clearance TeX leaves round a bar; any other step is from ink to ink.
+  const ownedBoxes = new Set<Box>();
+  const nestedBars = new Set<MathRule>();
+  // A shorter bar next to `outer` is part of it when one line of glyphs lies
+  // between the two (its own numerator or denominator). Two lines are a
+  // denominator and the next row's numerator: the bars are neighbours.
+  const partOf = (inner: MathRule, outer: MathRule): boolean => {
+    const lo = Math.min(inner.y, outer.y);
+    const hi = Math.max(inner.y, outer.y);
+    const between = boxes.filter((b) => !isTall(b) && under(b, inner) && mid(b) > lo && mid(b) < hi);
+    if (between.length === 0) return true;
+    const m = Math.max(...between.map((b) => b.size));
+    const bases = between.filter((b) => b.size >= 0.8 * m).map((b) => b.base);
+    return Math.max(...bases) - Math.min(...bases) <= 0.5 * m;
+  };
+  for (const bar of bars) {
+    const length = bar.x1 - bar.x0;
+    for (const dir of [-1, 1] as const) {
+      type Item = { near: number; far: number; box?: Box; rule?: MathRule };
+      const items: Item[] = [
+        ...boxes
+          .filter((b) => under(b, bar) && (dir < 0 ? mid(b) < bar.y : mid(b) > bar.y))
+          .map((b) => ({ near: dir < 0 ? b.bottom : b.top, far: dir < 0 ? b.top : b.bottom, box: b })),
+        ...bars
+          .filter((r) => r !== bar && r.x1 - r.x0 < length - 0.05 * s && under(r, bar) && (dir < 0 ? r.y < bar.y : r.y > bar.y))
+          .map((r) => ({ near: r.y, far: r.y, rule: r })),
+      ].sort((p, q) => dir * (p.near - q.near));
+      let edge = bar.y;
+      let reach = 0.7 * s;
+      for (const it of items) {
+        if (dir * (it.near - edge) > reach) break;
+        if (it.rule) {
+          if (!partOf(it.rule, bar)) break;
+          nestedBars.add(it.rule);
+          reach = 0.7 * s;
+        } else {
+          ownedBoxes.add(it.box!);
+          reach = 0.3 * s;
+        }
+        edge = dir < 0 ? Math.min(edge, it.far) : Math.max(edge, it.far);
+      }
+    }
+  }
+  const nested = (r: MathRule): boolean => nestedBars.has(r);
+  const owned = (b: Box): boolean => ownedBoxes.has(b);
+  const evidence = [
+    ...plain.filter((b) => b.size >= 0.8 * s && !owned(b)).map((b) => b.base),
+    ...bars.filter((r) => !nested(r)).map((r) => r.y + 0.25 * s),
+  ].sort((a, b) => a - b);
+  const baselines: number[] = [];
+  let group: number[] = [];
+  for (const y of evidence) {
+    if (group.length > 0 && y - group.reduce((a, b) => a + b, 0) / group.length > ROW_APART * s) {
+      baselines.push(group.reduce((a, b) => a + b, 0) / group.length);
+      group = [];
+    }
+    group.push(y);
+  }
+  if (group.length > 0) baselines.push(group.reduce((a, b) => a + b, 0) / group.length);
+  if (baselines.length < 2) return [];
+
+  const ink: [number, number][] = [
+    ...boxes.map((b) => [b.top, b.bottom] as [number, number]),
+    ...rules.map((r) => [r.y - 0.02 * s, r.y + 0.02 * s] as [number, number]),
+  ];
+  const cuts: number[] = [];
+  for (let i = 0; i + 1 < baselines.length; i++) {
+    const from = baselines[i]!;
+    const to = baselines[i + 1]!;
+    // Ink that reaches across both baselines spans the rows and says nothing.
+    const spans = ink
+      .filter(([t, b]) => b > from && t < to && !(t < from - 0.1 * s && b > to + 0.1 * s))
+      .sort((a, b) => a[0] - b[0]);
+    let edge = from;
+    let best: [number, number] | null = null;
+    for (const [t, b] of spans) {
+      if (t > edge && (!best || t - edge > best[1] - best[0])) best = [edge, t];
+      edge = Math.max(edge, b);
+    }
+    if (to > edge && (!best || to - edge > best[1] - best[0])) best = [edge, to];
+    cuts.push(best ? (best[0] + best[1]) / 2 : (from + to) / 2);
+  }
+  return cuts;
+}
+
+/** Divide boxes and rules among the rows that `cuts` separates. */
+function intoRows(boxes: readonly Box[], rules: readonly MathRule[], cuts: readonly number[]): { boxes: Box[]; rules: MathRule[] }[] {
+  const rows = Array.from({ length: cuts.length + 1 }, () => ({ boxes: [] as Box[], rules: [] as MathRule[] }));
+  const rowOf = (y: number): number => cuts.filter((c) => c < y).length;
+  for (const b of boxes) rows[rowOf((b.top + b.bottom) / 2)]!.boxes.push(b);
+  for (const r of rules) rows[rowOf(r.y)]!.rules.push(r);
+  return rows;
+}
+
+const CLOSER: Readonly<Record<string, string>> = {
+  "(": ")", "[": "]", "\\{": "\\}", "\\langle": "\\rangle", "|": "|", "\\|": "\\|", "\\lfloor": "\\rfloor", "\\lceil": "\\rceil",
+};
+const GRID_ENVIRONMENT: Readonly<Record<string, string>> = {
+  "(": "pmatrix", "[": "bmatrix", "\\{": "Bmatrix", "|": "vmatrix", "\\|": "Vmatrix",
+};
+/** Columns of a grid stand at least this far apart, in ems; spacing inside a cell is tighter. */
+const COLUMN_GAP = 0.6;
+
+/**
+ * Replace each grid by one box: a pair of delimiters (or a lone left brace)
+ * whose contents stand in two or more rows is a binomial, a matrix or `cases`.
+ * Cells are laid out on their own, so nothing in one row can reach into the next.
+ */
+function applyGrids(input: Box[], inputRules: readonly MathRule[]): { boxes: Box[]; rules: MathRule[] } {
+  let boxes = input;
+  let rules = [...inputRules];
+  const isDelimiter = (b: Box): boolean =>
+    b.kind === "glyph" && b.exact === true && (b.cls === "open" || b.cls === "close" || b.cls === "fence");
+  const tried = new Set<Box>();
+  for (let guard = 0; guard < 200; guard++) {
+    // Innermost first: the rightmost untried opener has no opener inside it,
+    // so a grid within a grid is one box by the time the outer one is read.
+    const openers = boxes
+      .filter((b) => isDelimiter(b) && !tried.has(b) && CLOSER[b.tex] != null && b.cls !== "close")
+      .sort((a, b) => b.x0 - a.x0);
+    const open = openers[0];
+    if (!open) break;
+    tried.add(open);
+    const s = open.size;
+    const sameExtent = (b: Box): boolean => Math.abs(b.top - open.top) < 0.12 * s && Math.abs(b.bottom - open.bottom) < 0.12 * s;
+    let close: Box | undefined;
+    let depth = 0;
+    for (const b of boxes.filter((x) => isDelimiter(x) && x.x0 > open.x0 && sameExtent(x)).sort((a, b) => a.x0 - b.x0)) {
+      if (b.tex === CLOSER[open.tex] && depth === 0) {
+        close = b;
+        break;
+      }
+      if (b.tex === open.tex) depth++;
+      else if (b.tex === CLOSER[open.tex]) depth--;
+    }
+    // The second of a pair of bars closes; it does not open the next pair.
+    if (close) tried.add(close);
+    // A lone brace as tall as two lines opens `cases`.
+    if (!close && !(open.tex === "\\{" && open.bottom - open.top > 1.8 * s)) continue;
+    const between = (x: number): boolean => x > open.x1 - 0.05 * s && (close ? x < close.x0 + 0.05 * s : true);
+    const within = (x: number, y: number): boolean => between(x) && y > open.top - 0.02 * s && y < open.bottom + 0.02 * s;
+    const content = boxes.filter((b) => b !== open && b !== close && within(cx(b), (b.top + b.bottom) / 2));
+    // Delimiters round a grid are as tall as the grid. Ink that crosses their
+    // top or bottom means they stand inside something taller, a fraction say.
+    const crosses = (b: Box, y: number): boolean => b.top < y - 0.15 * s && b.bottom > y + 0.15 * s;
+    if (close && boxes.some((b) => b !== open && b !== close && between(cx(b)) && (crosses(b, open.top) || crosses(b, open.bottom)))) continue;
+    const contentRules = rules.filter((r) => within((r.x0 + r.x1) / 2, r.y));
+    if (content.length < 2) continue;
+    const cuts = rowCuts(content, contentRules);
+    if (cuts.length === 0) continue;
+
+    const rows = intoRows(content, contentRules, cuts);
+    const cs = Math.max(...content.filter((b) => !isTall(b)).map((b) => b.size), 0) || s;
+    // Columns: gaps in the shadow that all rows together cast on the x axis.
+    const shadow = content.map((b) => [b.x0, b.x1] as [number, number]).sort((a, b) => a[0] - b[0]);
+    const columnStarts: number[] = [];
+    let edge = -Infinity;
+    for (const [x0, x1] of shadow) {
+      if (x0 - edge >= COLUMN_GAP * cs) columnStarts.push(x0);
+      edge = Math.max(edge, x1);
+    }
+    const columnOf = (x: number): number => Math.max(0, columnStarts.filter((c) => c <= x + 1e-6).length - 1);
+    const cells = rows.map((row) => {
+      const out = columnStarts.map(() => ({ boxes: [] as Box[], rules: [] as MathRule[] }));
+      for (const b of row.boxes) out[columnOf(b.x0)]!.boxes.push(b);
+      for (const r of row.rules) out[columnOf((r.x0 + r.x1) / 2)]!.rules.push(r);
+      return out.map((c) => (c.boxes.length > 0 ? build(c.boxes, usableRules(c.boxes, c.rules), false) : ""));
+    });
+
+    let tex: string;
+    const rowGap = rowBaselineGap(content, contentRules, cuts);
+    if (close && open.tex === "(" && cells.length === 2 && columnStarts.length === 1 && (cs < 0.85 * s || rowGap > 1.28 * cs)) {
+      // The rows of a binomial stand apart as a fraction's do; a matrix keeps the line spacing.
+      tex = `\\binom{${cells[0]![0]}}{${cells[1]![0]}}`;
+    } else {
+      const body = cells.map((row) => row.join(" & ")).join(" \\\\ ");
+      const env = !close ? "cases" : GRID_ENVIRONMENT[open.tex];
+      tex = env
+        ? `\\begin{${env}} ${body} \\end{${env}}`
+        : `\\left${open.tex} \\begin{matrix} ${body} \\end{matrix} \\right${close!.tex}`;
+    }
+    const gone = new Set<Box>([open, ...content, ...(close ? [close] : [])]);
+    const goneRules = new Set(contentRules);
+    const all = bbox([...gone]);
+    boxes = boxes.filter((b) => !gone.has(b));
+    rules = rules.filter((r) => !goneRules.has(r));
+    boxes.push({
+      x0: all.x0, x1: all.x1, top: open.top, bottom: open.bottom,
+      // Centred on the math axis of the line it stands in.
+      base: (open.top + open.bottom) / 2 + 0.25 * s,
+      size: s, tex, kind: "grid", exact: true, cls: "ord",
+    });
+  }
+  return { boxes, rules };
+}
+
+/** Distance between the first two row baselines of a grid. */
+function rowBaselineGap(boxes: readonly Box[], rules: readonly MathRule[], cuts: readonly number[]): number {
+  const rows = intoRows(boxes, rules, cuts);
+  const baseOf = (row: { boxes: Box[] }): number => {
+    const plain = row.boxes.filter((b) => !isTall(b));
+    const size = Math.max(...plain.map((b) => b.size), 0);
+    return median(plain.filter((b) => b.size >= 0.8 * size).map((b) => b.base));
+  };
+  return rows.length < 2 ? 0 : baseOf(rows[1]!) - baseOf(rows[0]!);
+}
+
 /** LaTeX for a set of boxes, and their baseline when they form a single line. */
-function layout(boxes: Box[], rules: readonly MathRule[], allowStack: boolean): { tex: string; base: number | null } {
+function layout(input: Box[], inputRules: readonly MathRule[], allowStack: boolean): { tex: string; base: number | null } {
+  let boxes = input;
+  let rules = inputRules;
+  // With every glyph identified, the structure that spans lines is read first.
+  if (boxes.length > 1 && boxes.every((b) => b.exact || b.kind !== "glyph")) {
+    const grids = applyGrids(boxes, rules);
+    boxes = grids.boxes;
+    rules = grids.rules;
+    const cuts = rowCuts(boxes, rules);
+    if (cuts.length > 0) {
+      const rows = intoRows(boxes, rules, cuts).filter((r) => r.boxes.length > 0);
+      if (rows.length > 1) {
+        return { tex: rows.map((r) => layoutRow(r.boxes, r.rules, allowStack).tex).filter((t) => t.length > 0).join(" \\\\ "), base: null };
+      }
+    }
+  }
+  return layoutRow(boxes, rules, allowStack);
+}
+
+function layoutRow(boxes: Box[], rules: readonly MathRule[], allowStack: boolean): { tex: string; base: number | null } {
   const structured = rules.length > 0 ? applyRules(boxes, rules) : boxes;
   let lines = splitLines(structured);
   if (allowStack) lines = mergeStackedFractions(lines);

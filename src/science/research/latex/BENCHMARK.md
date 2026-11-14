@@ -10,18 +10,18 @@ Metric: **exact match** of the canonical structure tree (`normalize.ts`), so spe
 
 | Tier | Selections | Exact | Exact rate | Mean similarity | Target | CI floor | Best provable |
 |---|---|---|---|---|---|---|---|
-| `tex-display` | 3460 | 2393 | 69.16% | 0.893 | 99.90% | 69.00% | 99.91% |
-| `tex-inline` | 2605 | 2174 | 83.45% | 0.975 | 99.90% | 83.00% | 99.89% |
-| `tex-times` | 760 | 316 | 41.58% | 0.849 | n/a | 41.00% | 99.61% |
-| `tex-tounicode` | 760 | 556 | 73.16% | 0.901 | 99.90% | 73.00% | 99.61% |
+| `tex-display` | 3460 | 3401 | 98.29% | 0.997 | 99.90% | 69.00% | 99.91% |
+| `tex-inline` | 2605 | 2538 | 97.43% | 0.997 | 99.90% | 83.00% | 99.89% |
+| `tex-times` | 760 | 317 | 41.71% | 0.849 | n/a | 41.00% | 99.61% |
+| `tex-tounicode` | 760 | 749 | 98.55% | 0.998 | 99.90% | 73.00% | 99.61% |
 | `scanned` | 110 | 0 | 0.00% | 0.000 | n/a | 0.00% | 97.31% |
-| `real-display` | 610 | 557 | 91.31% | 0.977 | 99.90% | 91.00% | 99.51% |
+| `real-display` | 610 | 597 | 97.87% | 0.998 | 99.90% | 91.00% | 99.51% |
 | `real-inline` | 888 | 882 | 99.32% | 0.999 | 99.90% | 99.00% | 99.66% |
 | `real-inline-punct` | 888 | 882 | 99.32% | 0.999 | 99.90% | 99.00% | 99.66% |
-| `real-display-numbered` | 610 | 557 | 91.31% | 0.977 | 99.90% | 91.00% | 99.51% |
-| `real-display-dvips` | 610 | 557 | 91.31% | 0.977 | 99.90% | 91.00% | 99.51% |
-| `real-display-lm` | 610 | 557 | 91.31% | 0.977 | 99.90% | 91.00% | 99.51% |
-| **all target tiers** | 11041 | 9115 | 82.56% | 0.949 |  |  | 99.97% |
+| `real-display-numbered` | 610 | 597 | 97.87% | 0.998 | 99.90% | 91.00% | 99.51% |
+| `real-display-dvips` | 610 | 597 | 97.87% | 0.998 | 99.90% | 91.00% | 99.51% |
+| `real-display-lm` | 610 | 597 | 97.87% | 0.998 | 99.90% | 91.00% | 99.51% |
+| **all target tiers** | 11041 | 10840 | 98.18% | 0.998 |  |  | 99.97% |
 
 The **target** of 99.9% exact match is claimed for pdfLaTeX with Computer Modern and AMS fonts only; other font families and scanned pages get their own targets once their baselines are understood. *Best provable* is the highest success rate a tier of that size could demonstrate at 95% confidence with zero failures. A tier must be larger than about 3,000 selections before a 99.9% claim is even testable.
 
@@ -43,35 +43,35 @@ Empty extractions: 0 of 3460.
 
 | Construct | Selections | Exact | Exact rate | Mean similarity |
 |---|---|---|---|---|
-| script | 2827 | 1914 | 67.70% | 0.898 |
-| greek | 2434 | 1682 | 69.10% | 0.908 |
-| function | 1511 | 1028 | 68.03% | 0.907 |
-| fraction | 1315 | 884 | 67.22% | 0.915 |
-| sub+sup | 852 | 630 | 73.94% | 0.942 |
-| tall-delimiter | 653 | 176 | 26.95% | 0.676 |
-| accent | 638 | 436 | 68.34% | 0.924 |
-| radical | 608 | 390 | 64.14% | 0.913 |
-| limits | 540 | 454 | 84.07% | 0.969 |
-| binomial | 428 | 0 | 0.00% | 0.752 |
-| font-bf | 419 | 255 | 60.86% | 0.828 |
-| text | 367 | 180 | 49.05% | 0.825 |
-| font-bb | 360 | 278 | 77.22% | 0.950 |
-| big-operator | 353 | 292 | 82.72% | 0.967 |
-| matrix | 328 | 0 | 0.00% | 0.441 |
-| prime | 319 | 223 | 69.91% | 0.932 |
-| integral | 295 | 252 | 85.42% | 0.971 |
-| nested-script | 261 | 193 | 73.95% | 0.941 |
-| multi-line | 250 | 141 | 56.40% | 0.862 |
-| integral-bounds | 230 | 196 | 85.22% | 0.971 |
-| upright-letter | 196 | 147 | 75.00% | 0.946 |
-| overline | 157 | 107 | 68.15% | 0.918 |
-| font-cal | 150 | 98 | 65.33% | 0.897 |
-| cases | 140 | 0 | 0.00% | 0.593 |
-| root-index | 139 | 0 | 0.00% | 0.826 |
+| script | 2827 | 2783 | 98.44% | 0.997 |
+| greek | 2434 | 2412 | 99.10% | 0.999 |
+| function | 1511 | 1497 | 99.07% | 0.999 |
+| fraction | 1315 | 1311 | 99.70% | 1.000 |
+| sub+sup | 852 | 848 | 99.53% | 1.000 |
+| tall-delimiter | 653 | 599 | 91.73% | 0.983 |
+| accent | 638 | 636 | 99.69% | 1.000 |
+| radical | 608 | 604 | 99.34% | 0.999 |
+| limits | 540 | 540 | 100.00% | 1.000 |
+| binomial | 428 | 424 | 99.07% | 0.999 |
+| font-bf | 419 | 412 | 98.33% | 0.998 |
+| text | 367 | 365 | 99.46% | 1.000 |
+| font-bb | 360 | 360 | 100.00% | 1.000 |
+| big-operator | 353 | 353 | 100.00% | 1.000 |
+| matrix | 328 | 275 | 83.84% | 0.967 |
+| prime | 319 | 318 | 99.69% | 1.000 |
+| integral | 295 | 295 | 100.00% | 1.000 |
+| nested-script | 261 | 261 | 100.00% | 1.000 |
+| multi-line | 250 | 250 | 100.00% | 1.000 |
+| integral-bounds | 230 | 230 | 100.00% | 1.000 |
+| upright-letter | 196 | 194 | 98.98% | 0.999 |
+| overline | 157 | 157 | 100.00% | 1.000 |
+| font-cal | 150 | 150 | 100.00% | 1.000 |
+| cases | 140 | 138 | 98.57% | 0.999 |
+| root-index | 139 | 139 | 100.00% | 1.000 |
 | plain | 138 | 138 | 100.00% | 1.000 |
-| nested-fraction | 134 | 86 | 64.18% | 0.934 |
-| fraction-in-script | 117 | 95 | 81.20% | 0.952 |
-| stacked-symbol | 40 | 0 | 0.00% | 0.832 |
+| nested-fraction | 134 | 132 | 98.51% | 0.999 |
+| fraction-in-script | 117 | 117 | 100.00% | 1.000 |
+| stacked-symbol | 40 | 40 | 100.00% | 1.000 |
 
 ## `tex-inline` by construct
 
@@ -79,32 +79,32 @@ Empty extractions: 0 of 2605.
 
 | Construct | Selections | Exact | Exact rate | Mean similarity |
 |---|---|---|---|---|
-| script | 2105 | 1714 | 81.43% | 0.974 |
-| greek | 1844 | 1480 | 80.26% | 0.972 |
-| function | 1099 | 886 | 80.62% | 0.974 |
-| fraction | 1006 | 777 | 77.24% | 0.971 |
-| sub+sup | 686 | 555 | 80.90% | 0.975 |
-| limits | 520 | 442 | 85.00% | 0.978 |
-| accent | 492 | 373 | 75.81% | 0.968 |
-| radical | 426 | 314 | 73.71% | 0.966 |
-| big-operator | 339 | 283 | 83.48% | 0.977 |
-| binomial | 313 | 0 | 0.00% | 0.843 |
-| font-bb | 292 | 246 | 84.25% | 0.981 |
-| tall-delimiter | 280 | 161 | 57.50% | 0.937 |
-| integral | 276 | 239 | 86.59% | 0.982 |
-| font-bf | 265 | 215 | 81.13% | 0.974 |
-| prime | 245 | 191 | 77.96% | 0.975 |
-| integral-bounds | 216 | 188 | 87.04% | 0.983 |
-| nested-script | 207 | 163 | 78.74% | 0.972 |
-| text | 178 | 148 | 83.15% | 0.975 |
-| upright-letter | 156 | 126 | 80.77% | 0.978 |
+| script | 2105 | 2042 | 97.01% | 0.997 |
+| greek | 1844 | 1784 | 96.75% | 0.997 |
+| function | 1099 | 1061 | 96.54% | 0.996 |
+| fraction | 1006 | 941 | 93.54% | 0.993 |
+| sub+sup | 686 | 660 | 96.21% | 0.996 |
+| limits | 520 | 510 | 98.08% | 0.998 |
+| accent | 492 | 468 | 95.12% | 0.996 |
+| radical | 426 | 404 | 94.84% | 0.995 |
+| big-operator | 339 | 332 | 97.94% | 0.998 |
+| binomial | 313 | 257 | 82.11% | 0.982 |
+| font-bb | 292 | 283 | 96.92% | 0.997 |
+| tall-delimiter | 280 | 262 | 93.57% | 0.992 |
+| integral | 276 | 273 | 98.91% | 0.998 |
+| font-bf | 265 | 258 | 97.36% | 0.998 |
+| prime | 245 | 238 | 97.14% | 0.997 |
+| integral-bounds | 216 | 213 | 98.61% | 0.998 |
+| nested-script | 207 | 202 | 97.58% | 0.998 |
+| text | 178 | 173 | 97.19% | 0.997 |
+| upright-letter | 156 | 153 | 98.08% | 0.998 |
 | plain | 138 | 138 | 100.00% | 1.000 |
-| nested-fraction | 114 | 75 | 65.79% | 0.961 |
-| overline | 112 | 87 | 77.68% | 0.974 |
-| font-cal | 110 | 88 | 80.00% | 0.973 |
-| root-index | 102 | 0 | 0.00% | 0.857 |
-| fraction-in-script | 95 | 86 | 90.53% | 0.988 |
-| stacked-symbol | 36 | 0 | 0.00% | 0.834 |
+| nested-fraction | 114 | 95 | 83.33% | 0.983 |
+| overline | 112 | 107 | 95.54% | 0.996 |
+| font-cal | 110 | 106 | 96.36% | 0.997 |
+| root-index | 102 | 90 | 88.24% | 0.988 |
+| fraction-in-script | 95 | 93 | 97.89% | 0.998 |
+| stacked-symbol | 36 | 36 | 100.00% | 1.000 |
 
 ## `tex-times` by construct
 
@@ -112,7 +112,7 @@ Empty extractions: 0 of 760.
 
 | Construct | Selections | Exact | Exact rate | Mean similarity |
 |---|---|---|---|---|
-| script | 576 | 213 | 36.98% | 0.845 |
+| script | 576 | 214 | 37.15% | 0.846 |
 | greek | 472 | 175 | 37.08% | 0.854 |
 | fraction | 292 | 103 | 35.27% | 0.836 |
 | function | 274 | 97 | 35.40% | 0.831 |
@@ -120,10 +120,10 @@ Empty extractions: 0 of 760.
 | radical | 130 | 34 | 26.15% | 0.796 |
 | tall-delimiter | 121 | 15 | 12.40% | 0.666 |
 | accent | 114 | 4 | 3.51% | 0.774 |
-| limits | 106 | 61 | 57.55% | 0.898 |
+| limits | 106 | 62 | 58.49% | 0.902 |
 | font-bf | 89 | 0 | 0.00% | 0.742 |
 | binomial | 81 | 0 | 0.00% | 0.661 |
-| big-operator | 77 | 46 | 59.74% | 0.930 |
+| big-operator | 77 | 47 | 61.04% | 0.934 |
 | font-bb | 73 | 35 | 47.95% | 0.913 |
 | text | 72 | 4 | 5.56% | 0.757 |
 | matrix | 68 | 0 | 0.00% | 0.542 |
@@ -148,35 +148,35 @@ Empty extractions: 0 of 760.
 
 | Construct | Selections | Exact | Exact rate | Mean similarity |
 |---|---|---|---|---|
-| script | 576 | 403 | 69.97% | 0.897 |
-| greek | 472 | 344 | 72.88% | 0.914 |
-| fraction | 292 | 220 | 75.34% | 0.933 |
-| function | 274 | 190 | 69.34% | 0.906 |
-| sub+sup | 147 | 105 | 71.43% | 0.929 |
-| radical | 130 | 84 | 64.62% | 0.895 |
-| tall-delimiter | 121 | 38 | 31.40% | 0.678 |
-| accent | 114 | 84 | 73.68% | 0.930 |
-| limits | 106 | 88 | 83.02% | 0.967 |
-| font-bf | 89 | 53 | 59.55% | 0.806 |
-| binomial | 81 | 0 | 0.00% | 0.741 |
-| big-operator | 77 | 64 | 83.12% | 0.968 |
-| font-bb | 73 | 60 | 82.19% | 0.966 |
-| text | 72 | 36 | 50.00% | 0.817 |
-| matrix | 68 | 0 | 0.00% | 0.451 |
-| prime | 61 | 46 | 75.41% | 0.943 |
-| integral | 59 | 53 | 89.83% | 0.981 |
-| integral-bounds | 46 | 41 | 89.13% | 0.981 |
-| multi-line | 45 | 27 | 60.00% | 0.873 |
-| nested-script | 45 | 34 | 75.56% | 0.954 |
+| script | 576 | 568 | 98.61% | 0.998 |
+| greek | 472 | 468 | 99.15% | 0.999 |
+| fraction | 292 | 292 | 100.00% | 1.000 |
+| function | 274 | 272 | 99.27% | 0.999 |
+| sub+sup | 147 | 145 | 98.64% | 0.998 |
+| radical | 130 | 129 | 99.23% | 0.999 |
+| tall-delimiter | 121 | 112 | 92.56% | 0.987 |
+| accent | 114 | 113 | 99.12% | 0.999 |
+| limits | 106 | 106 | 100.00% | 1.000 |
+| font-bf | 89 | 87 | 97.75% | 0.997 |
+| binomial | 81 | 80 | 98.77% | 0.999 |
+| big-operator | 77 | 77 | 100.00% | 1.000 |
+| font-bb | 73 | 73 | 100.00% | 1.000 |
+| text | 72 | 72 | 100.00% | 1.000 |
+| matrix | 68 | 59 | 86.76% | 0.976 |
+| prime | 61 | 61 | 100.00% | 1.000 |
+| integral | 59 | 59 | 100.00% | 1.000 |
+| integral-bounds | 46 | 46 | 100.00% | 1.000 |
+| multi-line | 45 | 45 | 100.00% | 1.000 |
+| nested-script | 45 | 45 | 100.00% | 1.000 |
 | plain | 40 | 40 | 100.00% | 1.000 |
-| upright-letter | 32 | 24 | 75.00% | 0.946 |
-| overline | 31 | 18 | 58.06% | 0.880 |
-| font-cal | 30 | 19 | 63.33% | 0.862 |
-| cases | 27 | 0 | 0.00% | 0.563 |
-| fraction-in-script | 19 | 15 | 78.95% | 0.953 |
-| nested-fraction | 18 | 12 | 66.67% | 0.920 |
-| root-index | 18 | 0 | 0.00% | 0.794 |
-| stacked-symbol | 7 | 0 | 0.00% | 0.834 |
+| upright-letter | 32 | 30 | 93.75% | 0.994 |
+| overline | 31 | 31 | 100.00% | 1.000 |
+| font-cal | 30 | 30 | 100.00% | 1.000 |
+| cases | 27 | 27 | 100.00% | 1.000 |
+| fraction-in-script | 19 | 19 | 100.00% | 1.000 |
+| nested-fraction | 18 | 18 | 100.00% | 1.000 |
+| root-index | 18 | 18 | 100.00% | 1.000 |
+| stacked-symbol | 7 | 7 | 100.00% | 1.000 |
 
 ## `scanned` by construct
 
@@ -216,37 +216,37 @@ Empty extractions: 0 of 610.
 
 | Construct | Selections | Exact | Exact rate | Mean similarity |
 |---|---|---|---|---|
-| script | 577 | 526 | 91.16% | 0.978 |
-| greek | 454 | 415 | 91.41% | 0.979 |
-| fraction | 261 | 237 | 90.80% | 0.982 |
-| sub+sup | 181 | 159 | 87.85% | 0.967 |
-| limits | 159 | 142 | 89.31% | 0.985 |
-| accent | 142 | 126 | 88.73% | 0.973 |
-| text | 132 | 121 | 91.67% | 0.990 |
-| nested-script | 115 | 99 | 86.09% | 0.980 |
-| function | 111 | 100 | 90.09% | 0.981 |
-| big-operator | 108 | 98 | 90.74% | 0.989 |
-| tall-delimiter | 101 | 79 | 78.22% | 0.918 |
-| font-cal | 99 | 91 | 91.92% | 0.985 |
-| font-bf | 92 | 82 | 89.13% | 0.944 |
-| integral | 61 | 53 | 86.89% | 0.982 |
-| upright-letter | 61 | 55 | 90.16% | 0.988 |
-| prime | 47 | 36 | 76.60% | 0.924 |
-| font-bb | 46 | 43 | 93.48% | 0.987 |
-| radical | 46 | 45 | 97.83% | 0.996 |
-| multi-line | 39 | 27 | 69.23% | 0.929 |
-| integral-bounds | 38 | 33 | 86.84% | 0.986 |
-| font-bm | 23 | 22 | 95.65% | 0.983 |
-| font-tt | 20 | 14 | 70.00% | 0.825 |
-| matrix | 13 | 0 | 0.00% | 0.436 |
+| script | 577 | 564 | 97.75% | 0.998 |
+| greek | 454 | 444 | 97.80% | 0.998 |
+| fraction | 261 | 255 | 97.70% | 0.998 |
+| sub+sup | 181 | 175 | 96.69% | 0.998 |
+| limits | 159 | 154 | 96.86% | 0.997 |
+| accent | 142 | 136 | 95.77% | 0.994 |
+| text | 132 | 127 | 96.21% | 0.996 |
+| nested-script | 115 | 109 | 94.78% | 0.993 |
+| function | 111 | 110 | 99.10% | 1.000 |
+| big-operator | 108 | 103 | 95.37% | 0.995 |
+| tall-delimiter | 101 | 96 | 95.05% | 0.995 |
+| font-cal | 99 | 96 | 96.97% | 0.996 |
+| font-bf | 92 | 91 | 98.91% | 0.998 |
+| integral | 61 | 58 | 95.08% | 0.997 |
+| upright-letter | 61 | 58 | 95.08% | 0.996 |
+| prime | 47 | 43 | 91.49% | 0.990 |
+| font-bb | 46 | 45 | 97.83% | 0.996 |
+| radical | 46 | 46 | 100.00% | 1.000 |
+| multi-line | 39 | 39 | 100.00% | 1.000 |
+| integral-bounds | 38 | 37 | 97.37% | 0.999 |
+| font-bm | 23 | 23 | 100.00% | 1.000 |
+| font-tt | 20 | 20 | 100.00% | 1.000 |
+| matrix | 13 | 13 | 100.00% | 1.000 |
 | nested-fraction | 11 | 10 | 90.91% | 0.995 |
-| fraction-in-script | 8 | 4 | 50.00% | 0.946 |
-| overline | 6 | 5 | 83.33% | 0.969 |
-| cases | 3 | 0 | 0.00% | 0.816 |
-| font-sf | 3 | 2 | 66.67% | 0.938 |
+| fraction-in-script | 8 | 5 | 62.50% | 0.969 |
+| overline | 6 | 6 | 100.00% | 1.000 |
+| cases | 3 | 3 | 100.00% | 1.000 |
+| font-sf | 3 | 3 | 100.00% | 1.000 |
 | font-frak | 2 | 2 | 100.00% | 1.000 |
-| stacked-symbol | 2 | 0 | 0.00% | 0.925 |
-| binomial | 1 | 0 | 0.00% | 0.854 |
+| stacked-symbol | 2 | 1 | 50.00% | 0.987 |
+| binomial | 1 | 1 | 100.00% | 1.000 |
 
 ## `real-inline` by construct
 
@@ -322,37 +322,37 @@ Empty extractions: 0 of 610.
 
 | Construct | Selections | Exact | Exact rate | Mean similarity |
 |---|---|---|---|---|
-| script | 577 | 526 | 91.16% | 0.978 |
-| greek | 454 | 415 | 91.41% | 0.979 |
-| fraction | 261 | 237 | 90.80% | 0.982 |
-| sub+sup | 181 | 159 | 87.85% | 0.967 |
-| limits | 159 | 142 | 89.31% | 0.985 |
-| accent | 142 | 126 | 88.73% | 0.973 |
-| text | 132 | 121 | 91.67% | 0.990 |
-| nested-script | 115 | 99 | 86.09% | 0.980 |
-| function | 111 | 100 | 90.09% | 0.981 |
-| big-operator | 108 | 98 | 90.74% | 0.989 |
-| tall-delimiter | 101 | 79 | 78.22% | 0.918 |
-| font-cal | 99 | 91 | 91.92% | 0.985 |
-| font-bf | 92 | 82 | 89.13% | 0.944 |
-| integral | 61 | 53 | 86.89% | 0.982 |
-| upright-letter | 61 | 55 | 90.16% | 0.988 |
-| prime | 47 | 36 | 76.60% | 0.924 |
-| font-bb | 46 | 43 | 93.48% | 0.987 |
-| radical | 46 | 45 | 97.83% | 0.996 |
-| multi-line | 39 | 27 | 69.23% | 0.929 |
-| integral-bounds | 38 | 33 | 86.84% | 0.986 |
-| font-bm | 23 | 22 | 95.65% | 0.983 |
-| font-tt | 20 | 14 | 70.00% | 0.825 |
-| matrix | 13 | 0 | 0.00% | 0.436 |
+| script | 577 | 564 | 97.75% | 0.998 |
+| greek | 454 | 444 | 97.80% | 0.998 |
+| fraction | 261 | 255 | 97.70% | 0.998 |
+| sub+sup | 181 | 175 | 96.69% | 0.998 |
+| limits | 159 | 154 | 96.86% | 0.997 |
+| accent | 142 | 136 | 95.77% | 0.994 |
+| text | 132 | 127 | 96.21% | 0.996 |
+| nested-script | 115 | 109 | 94.78% | 0.993 |
+| function | 111 | 110 | 99.10% | 1.000 |
+| big-operator | 108 | 103 | 95.37% | 0.995 |
+| tall-delimiter | 101 | 96 | 95.05% | 0.995 |
+| font-cal | 99 | 96 | 96.97% | 0.996 |
+| font-bf | 92 | 91 | 98.91% | 0.998 |
+| integral | 61 | 58 | 95.08% | 0.997 |
+| upright-letter | 61 | 58 | 95.08% | 0.996 |
+| prime | 47 | 43 | 91.49% | 0.990 |
+| font-bb | 46 | 45 | 97.83% | 0.996 |
+| radical | 46 | 46 | 100.00% | 1.000 |
+| multi-line | 39 | 39 | 100.00% | 1.000 |
+| integral-bounds | 38 | 37 | 97.37% | 0.999 |
+| font-bm | 23 | 23 | 100.00% | 1.000 |
+| font-tt | 20 | 20 | 100.00% | 1.000 |
+| matrix | 13 | 13 | 100.00% | 1.000 |
 | nested-fraction | 11 | 10 | 90.91% | 0.995 |
-| fraction-in-script | 8 | 4 | 50.00% | 0.946 |
-| overline | 6 | 5 | 83.33% | 0.969 |
-| cases | 3 | 0 | 0.00% | 0.816 |
-| font-sf | 3 | 2 | 66.67% | 0.938 |
+| fraction-in-script | 8 | 5 | 62.50% | 0.969 |
+| overline | 6 | 6 | 100.00% | 1.000 |
+| cases | 3 | 3 | 100.00% | 1.000 |
+| font-sf | 3 | 3 | 100.00% | 1.000 |
 | font-frak | 2 | 2 | 100.00% | 1.000 |
-| stacked-symbol | 2 | 0 | 0.00% | 0.925 |
-| binomial | 1 | 0 | 0.00% | 0.854 |
+| stacked-symbol | 2 | 1 | 50.00% | 0.987 |
+| binomial | 1 | 1 | 100.00% | 1.000 |
 
 ## `real-display-dvips` by construct
 
@@ -360,37 +360,37 @@ Empty extractions: 0 of 610.
 
 | Construct | Selections | Exact | Exact rate | Mean similarity |
 |---|---|---|---|---|
-| script | 577 | 526 | 91.16% | 0.978 |
-| greek | 454 | 415 | 91.41% | 0.979 |
-| fraction | 261 | 237 | 90.80% | 0.982 |
-| sub+sup | 181 | 159 | 87.85% | 0.967 |
-| limits | 159 | 142 | 89.31% | 0.985 |
-| accent | 142 | 126 | 88.73% | 0.973 |
-| text | 132 | 121 | 91.67% | 0.990 |
-| nested-script | 115 | 99 | 86.09% | 0.980 |
-| function | 111 | 100 | 90.09% | 0.981 |
-| big-operator | 108 | 98 | 90.74% | 0.989 |
-| tall-delimiter | 101 | 79 | 78.22% | 0.918 |
-| font-cal | 99 | 91 | 91.92% | 0.985 |
-| font-bf | 92 | 82 | 89.13% | 0.944 |
-| integral | 61 | 53 | 86.89% | 0.982 |
-| upright-letter | 61 | 55 | 90.16% | 0.988 |
-| prime | 47 | 36 | 76.60% | 0.924 |
-| font-bb | 46 | 43 | 93.48% | 0.987 |
-| radical | 46 | 45 | 97.83% | 0.996 |
-| multi-line | 39 | 27 | 69.23% | 0.929 |
-| integral-bounds | 38 | 33 | 86.84% | 0.986 |
-| font-bm | 23 | 22 | 95.65% | 0.983 |
-| font-tt | 20 | 14 | 70.00% | 0.825 |
-| matrix | 13 | 0 | 0.00% | 0.436 |
+| script | 577 | 564 | 97.75% | 0.998 |
+| greek | 454 | 444 | 97.80% | 0.998 |
+| fraction | 261 | 255 | 97.70% | 0.998 |
+| sub+sup | 181 | 175 | 96.69% | 0.998 |
+| limits | 159 | 154 | 96.86% | 0.997 |
+| accent | 142 | 136 | 95.77% | 0.994 |
+| text | 132 | 127 | 96.21% | 0.996 |
+| nested-script | 115 | 109 | 94.78% | 0.993 |
+| function | 111 | 110 | 99.10% | 1.000 |
+| big-operator | 108 | 103 | 95.37% | 0.995 |
+| tall-delimiter | 101 | 96 | 95.05% | 0.995 |
+| font-cal | 99 | 96 | 96.97% | 0.996 |
+| font-bf | 92 | 91 | 98.91% | 0.998 |
+| integral | 61 | 58 | 95.08% | 0.997 |
+| upright-letter | 61 | 58 | 95.08% | 0.996 |
+| prime | 47 | 43 | 91.49% | 0.990 |
+| font-bb | 46 | 45 | 97.83% | 0.996 |
+| radical | 46 | 46 | 100.00% | 1.000 |
+| multi-line | 39 | 39 | 100.00% | 1.000 |
+| integral-bounds | 38 | 37 | 97.37% | 0.999 |
+| font-bm | 23 | 23 | 100.00% | 1.000 |
+| font-tt | 20 | 20 | 100.00% | 1.000 |
+| matrix | 13 | 13 | 100.00% | 1.000 |
 | nested-fraction | 11 | 10 | 90.91% | 0.995 |
-| fraction-in-script | 8 | 4 | 50.00% | 0.946 |
-| overline | 6 | 5 | 83.33% | 0.969 |
-| cases | 3 | 0 | 0.00% | 0.816 |
-| font-sf | 3 | 2 | 66.67% | 0.938 |
+| fraction-in-script | 8 | 5 | 62.50% | 0.969 |
+| overline | 6 | 6 | 100.00% | 1.000 |
+| cases | 3 | 3 | 100.00% | 1.000 |
+| font-sf | 3 | 3 | 100.00% | 1.000 |
 | font-frak | 2 | 2 | 100.00% | 1.000 |
-| stacked-symbol | 2 | 0 | 0.00% | 0.925 |
-| binomial | 1 | 0 | 0.00% | 0.854 |
+| stacked-symbol | 2 | 1 | 50.00% | 0.987 |
+| binomial | 1 | 1 | 100.00% | 1.000 |
 
 ## `real-display-lm` by construct
 
@@ -398,290 +398,168 @@ Empty extractions: 0 of 610.
 
 | Construct | Selections | Exact | Exact rate | Mean similarity |
 |---|---|---|---|---|
-| script | 577 | 526 | 91.16% | 0.978 |
-| greek | 454 | 415 | 91.41% | 0.979 |
-| fraction | 261 | 237 | 90.80% | 0.982 |
-| sub+sup | 181 | 159 | 87.85% | 0.967 |
-| limits | 159 | 142 | 89.31% | 0.985 |
-| accent | 142 | 126 | 88.73% | 0.973 |
-| text | 132 | 121 | 91.67% | 0.990 |
-| nested-script | 115 | 99 | 86.09% | 0.980 |
-| function | 111 | 100 | 90.09% | 0.981 |
-| big-operator | 108 | 98 | 90.74% | 0.989 |
-| tall-delimiter | 101 | 79 | 78.22% | 0.918 |
-| font-cal | 99 | 91 | 91.92% | 0.985 |
-| font-bf | 92 | 82 | 89.13% | 0.944 |
-| integral | 61 | 53 | 86.89% | 0.982 |
-| upright-letter | 61 | 55 | 90.16% | 0.988 |
-| prime | 47 | 36 | 76.60% | 0.924 |
-| font-bb | 46 | 43 | 93.48% | 0.987 |
-| radical | 46 | 45 | 97.83% | 0.996 |
-| multi-line | 39 | 27 | 69.23% | 0.929 |
-| integral-bounds | 38 | 33 | 86.84% | 0.986 |
-| font-bm | 23 | 22 | 95.65% | 0.983 |
-| font-tt | 20 | 14 | 70.00% | 0.825 |
-| matrix | 13 | 0 | 0.00% | 0.437 |
+| script | 577 | 564 | 97.75% | 0.998 |
+| greek | 454 | 444 | 97.80% | 0.998 |
+| fraction | 261 | 255 | 97.70% | 0.998 |
+| sub+sup | 181 | 175 | 96.69% | 0.998 |
+| limits | 159 | 154 | 96.86% | 0.997 |
+| accent | 142 | 136 | 95.77% | 0.994 |
+| text | 132 | 127 | 96.21% | 0.996 |
+| nested-script | 115 | 109 | 94.78% | 0.993 |
+| function | 111 | 110 | 99.10% | 1.000 |
+| big-operator | 108 | 103 | 95.37% | 0.995 |
+| tall-delimiter | 101 | 96 | 95.05% | 0.995 |
+| font-cal | 99 | 96 | 96.97% | 0.996 |
+| font-bf | 92 | 91 | 98.91% | 0.998 |
+| integral | 61 | 58 | 95.08% | 0.997 |
+| upright-letter | 61 | 58 | 95.08% | 0.996 |
+| prime | 47 | 43 | 91.49% | 0.990 |
+| font-bb | 46 | 45 | 97.83% | 0.996 |
+| radical | 46 | 46 | 100.00% | 1.000 |
+| multi-line | 39 | 39 | 100.00% | 1.000 |
+| integral-bounds | 38 | 37 | 97.37% | 0.999 |
+| font-bm | 23 | 23 | 100.00% | 1.000 |
+| font-tt | 20 | 20 | 100.00% | 1.000 |
+| matrix | 13 | 13 | 100.00% | 1.000 |
 | nested-fraction | 11 | 10 | 90.91% | 0.995 |
-| fraction-in-script | 8 | 4 | 50.00% | 0.946 |
-| overline | 6 | 5 | 83.33% | 0.969 |
-| cases | 3 | 0 | 0.00% | 0.816 |
-| font-sf | 3 | 2 | 66.67% | 0.938 |
+| fraction-in-script | 8 | 5 | 62.50% | 0.969 |
+| overline | 6 | 6 | 100.00% | 1.000 |
+| cases | 3 | 3 | 100.00% | 1.000 |
+| font-sf | 3 | 3 | 100.00% | 1.000 |
 | font-frak | 2 | 2 | 100.00% | 1.000 |
-| stacked-symbol | 2 | 0 | 0.00% | 0.925 |
-| binomial | 1 | 0 | 0.00% | 0.854 |
+| stacked-symbol | 2 | 1 | 50.00% | 0.987 |
+| binomial | 1 | 1 | 100.00% | 1.000 |
 
 ## Sample failures (`tex-display`)
 
-1067 of 3460 selections fail. Up to three per construct, lowest id first; an equation appears under each construct it exercises.
+59 of 3460 selections fail. Up to three per construct, lowest id first; an equation appears under each construct it exercises.
 
-### accent (202 failing)
-
-- `c133` expected `{}^{14}_{6}\mathrm{C}\to{}^{14}_{7}\mathrm{N}+e^-+\bar{\nu}_e`
-  - got `{}_6^{14}\mathrm{C}\rightarrow_7^{14}\mathrm{N}+e^{-}+\bar{\nu}_e` (similarity 0.93)
-- `g0002` expected `\lambda =2\sqrt{\binom{n}{k}\dot{g}\pm u}+\exp\left(u_{2n}^T\right)\times w_{n+1}`
-  - got `\lambda=2\sqrt{{}_{(}n_{)\dot{g}\pm u} \\ k}+\exp(u_{2n}^T)\times w_{n+1}` (similarity 0.72)
-- `g0005` expected `\Theta \propto (\hat{\eta }\times \binom{2n}{k})^2t+56\cos \lambda `
-  - got `\Theta\propto(\hat{\eta}\times(^{2n}))^2t+56\cos\lambda \\ k` (similarity 0.73)
-
-### big-operator (61 failing)
-
-- `c004` expected `(a+b)^n=\sum_{k=0}^{n}\binom{n}{k}a^{n-k}b^k`
-  - got `(a+b)^n=\sum_{k=}^n(^n)a^{n-k}b^k \\ {}_0k` (similarity 0.67)
-- `g0015` expected `\omega ^{1/2}-\chi _1^{\prime}\bigcup_{j=1}^{\infty}D_j\sim 5\sim \binom{2n}{k}e^{-\frac{n^2}{2}}`
-  - got `\omega^{1/2}-\chi_1^{\prime}\bigcup_{j=1}^{\infty}D_j\sim 5\sim(^{2n})e^{-\frac{n^2}{2}} \\ k` (similarity 0.85)
-- `g0039` expected `8+\sum_{j=0}^k45\binom{m}{2}\rho ^2\left\|a\right\|\pm \ddot{\delta }\varepsilon =4Y^n+\Pi \lfloor a\Sigma ^2\rfloor \cdot n\mathbf{f}`
-  - got `8+\sum_{j=0}^k45(^m)\rho^2\|a\|\pm\ddot{\delta}\varepsilon=4Y^n+\Pi\lfloor a\Sigma^2\rfloor\cdot n\mathbf{f} \\ 2` (similarity 0.86)
-
-### binomial (428 failing)
-
-- `c004` expected `(a+b)^n=\sum_{k=0}^{n}\binom{n}{k}a^{n-k}b^k`
-  - got `(a+b)^n=\sum_{k=}^n(^n)a^{n-k}b^k \\ {}_0k` (similarity 0.67)
-- `c005` expected `\binom{n}{k}=\frac{n!}{k!(n-k)!}`
-  - got `{}_{(}n_{)=}\frac{n!}{k!(n-k)!} \\ k` (similarity 0.58)
-- `c069` expected `P(X=k)=\binom{n}{k}p^k(1-p)^{n-k}`
-  - got `P(X=k)=(^n)p^k(1-p)^{n-k} \\ k` (similarity 0.77)
-
-### cases (140 failing)
-
-- `c048` expected `|x|=\begin{cases}x&\text{if }x\geq 0\\-x&\text{if }x<0\end{cases}`
-  - got `|x|=\{^{x\mathrm{if}x\geq 0} \\ -x\mathrm{if}x<0` (similarity 0.63)
-- `c050` expected `f(n)=\begin{cases}n/2&\text{if }n\text{ is even}\\3n+1&\text{if }n\text{ is odd}\end{cases}`
-  - got `f(n)=\{^{n/2\mathrm{if}n\text{ is even}} \\ 3n+1\mathrm{if}n\text{ is odd}` (similarity 0.75)
-- `g0009` expected `h(t)=\begin{cases}\sqrt{w}n_0&t\leq a\\8\frac{\mathbf{A}}{G}&\text{if }t\geq n\\\frac{\nabla\cdot\mathbf{F}}{-41}&\text{if }t=n\end{cases}`
-  - got `n_0t\leq a \\ h(t)=\{\mathrm{if}t\geq n \\ \frac{\sqrt{w} \\ {}_{\nabla}8\frac{\mathbf{A}}{G \\ \cdot\mathbf{F}}}{-41}\mathrm{if}t=n` (similarity 0.25)
-
-### font-bb (82 failing)
-
-- `g0135` expected `u''(z)=5\tan^n\Lambda \frac{p_n\sqrt{\mathbb{N}}}{s_m}-2.5\frac{3f^{\prime}}{\Pi _{ij}p}+5\binom{n+1}{m}`
-  - got `u^{\prime\prime}(z)=5\tan^n\Lambda\frac{p_n\sqrt{\mathbb{N}}}{s_m}-2.5\frac{3f^{\prime}}{\Pi_{ij}p}+5(^{n+1}) \\ m` (similarity 0.89)
-- `g0202` expected `\begin{aligned}\frac{1s_m}{5v^{2k}}h&=30\\\mathbb{N}\sqrt{\overline{WR}}&=2\end{aligned}`
-  - got `\frac{1s_m}{{}^5\sqrt\frac{v^{2k}}{W}}h=30 \\ \mathbb{N}R=2` (similarity 0.70)
-- `g0251` expected `\left|E\cdot \Xi \bar{\Psi }\right|=z^3y+6\mathbb{Z}\prod_{k=0}^n\Theta \binom{n+1}{m}`
-  - got `|E\cdot\Xi\bar{\Psi}|=z^3y+6\mathbb{Z}\prod_{k=0}^n\Theta(^{n+1}) \\ m` (similarity 0.81)
-
-### font-bf (164 failing)
-
-- `c047` expected `\mathbf{a}\times\mathbf{b}=\begin{vmatrix}\mathbf{i}&\mathbf{j}&\mathbf{k}\\a_1&a_2&a_3\\b_1&b_2&b_3\end{vmatrix}`
-  - got `\mathbf{i}\mathbf{j}\mathbf{k} \\ \mathbf{a}\times\mathbf{b}=|a_1a_2a_3| \\ b_1b_2b_3` (similarity 0.58)
-- `g0009` expected `h(t)=\begin{cases}\sqrt{w}n_0&t\leq a\\8\frac{\mathbf{A}}{G}&\text{if }t\geq n\\\frac{\nabla\cdot\mathbf{F}}{-41}&\text{if }t=n\end{cases}`
-  - got `n_0t\leq a \\ h(t)=\{\mathrm{if}t\geq n \\ \frac{\sqrt{w} \\ {}_{\nabla}8\frac{\mathbf{A}}{G \\ \cdot\mathbf{F}}}{-41}\mathrm{if}t=n` (similarity 0.25)
-- `g0033` expected `\begin{bmatrix}8&5&t\\A&1&-\sin\theta \end{bmatrix}\mathbf{t}=\lambda \mathbf{a}`
-  - got `85t_{\mathbf{t}=\lambda\mathbf{a}} \\ {}^{[}A1-\sin\theta^{]}` (similarity 0.00)
-
-### font-cal (52 failing)
-
-- `g0041` expected `u(n)=\begin{cases}46\mathcal{A}K\cdot 7d_{\min}^{-1}\|\zeta \|_{\infty}&\text{if }n\leq n\\-\frac{1}{G_2}r\ddot{n}&n=1\end{cases}`
-  - got `u(n)=\{^{46K\cdot 7d_{\min}^{-1}\|\zeta\|_{\infty}\mathrm{if}n\leq n} \\ -\frac{{}_1\mathcal{A}}{G_2}r\ddot{n}n=1` (similarity 0.65)
-- `g0052` expected `\det \begin{bmatrix}x&d_{11}\\r&3.14\\3&t\end{bmatrix}=\sqrt{\mathcal{A}}`
-  - got `xd_{11} \\ \det[r3.14]=\sqrt{\mathcal{A}} \\ 3t` (similarity 0.41)
-- `g0065` expected `\begin{aligned}\frac{\chi }{n_2}&=9\\\sqrt[n]{v}u+\frac{7\binom{m}{k-1}}{-\Omega }\mathcal{N}&=7\end{aligned}`
-  - got `\frac{\chi}{n_2}=9 \\ {}^n\sqrt{v}u+\frac{7(_{k-1}^m)}{-\Omega}\mathcal{N}=7` (similarity 0.76)
-
-### fraction (431 failing)
-
-- `c005` expected `\binom{n}{k}=\frac{n!}{k!(n-k)!}`
-  - got `{}_{(}n_{)=}\frac{n!}{k!(n-k)!} \\ k` (similarity 0.58)
-- `c029` expected `\sqrt[n]{x_1x_2\cdots x_n}\leq\frac{x_1+x_2+\cdots+x_n}{n}`
-  - got `{}^n\sqrt{x_1x_2\cdots x_n}\leq\frac{x_1+x_2+\cdots+x_n}{n}` (similarity 0.89)
-- `c041` expected `A^{-1}=\frac{1}{ad-bc}\begin{pmatrix}d&-b\\-c&a\end{pmatrix}`
-  - got `A^{-1}=\frac{1}{ad-bc}(^{d-b}) \\ -ca` (similarity 0.62)
-
-### fraction-in-script (22 failing)
-
-- `g0015` expected `\omega ^{1/2}-\chi _1^{\prime}\bigcup_{j=1}^{\infty}D_j\sim 5\sim \binom{2n}{k}e^{-\frac{n^2}{2}}`
-  - got `\omega^{1/2}-\chi_1^{\prime}\bigcup_{j=1}^{\infty}D_j\sim 5\sim(^{2n})e^{-\frac{n^2}{2}} \\ k` (similarity 0.85)
-- `g0282` expected `\begin{aligned}\left\|3\binom{n}{r}\right\|&=2\\-\frac{\eta }{q}\frac{|e^{\frac{r}{n}}|}{-\ddot{M}}&=3\end{aligned}`
-  - got `\|3(=2 \\ -\frac{\eta}{q}\frac{n_{\|} \\ r \\ |e\frac{) \\ r}{n}|}{-\ddot{M}}=3` (similarity 0.59)
-- `g0412` expected `\lfloor -\left(\nabla\cdot\mathbf{B}\right)^n\rfloor =1\psi ^{-2}+65\sqrt[k]{h_1^{\dagger}}+6e^{-\frac{p^2}{2\sigma ^2}}`
-  - got `\lfloor-(\nabla\cdot\mathbf{B})^n\rfloor=1\psi^{-2}+65^k\sqrt{h_1^{\dagger}}+6e^{-\frac{p^2}{2\sigma^2}}` (similarity 0.92)
-
-### function (483 failing)
-
-- `c043` expected `R(\theta)=\begin{bmatrix}\cos\theta&-\sin\theta\\\sin\theta&\cos\theta\end{bmatrix}`
-  - got `R(\theta)=[^{\cos\theta-\sin\theta}] \\ \sin\theta\cos\theta` (similarity 0.46)
-- `g0001` expected `f(x)=\begin{cases}g|-\sin(6d)|-8\sqrt[n]{4r^n}&x\geq 0\\\zeta &x\leq 0\\\tan(\Omega )&x\geq 1\end{cases}`
-  - got `g|-\sin(6d)|-8^n\sqrt{4r^n}x\geq 0 \\ f(x)=\{\zeta x\leq 0 \\ \tan(\Omega)x\geq 1` (similarity 0.47)
-- `g0002` expected `\lambda =2\sqrt{\binom{n}{k}\dot{g}\pm u}+\exp\left(u_{2n}^T\right)\times w_{n+1}`
-  - got `\lambda=2\sqrt{{}_{(}n_{)\dot{g}\pm u} \\ k}+\exp(u_{2n}^T)\times w_{n+1}` (similarity 0.72)
-
-### greek (752 failing)
-
-- `c043` expected `R(\theta)=\begin{bmatrix}\cos\theta&-\sin\theta\\\sin\theta&\cos\theta\end{bmatrix}`
-  - got `R(\theta)=[^{\cos\theta-\sin\theta}] \\ \sin\theta\cos\theta` (similarity 0.46)
-- `c049` expected `\delta_{ij}=\begin{cases}1&i=j\\0&i\neq j\end{cases}`
-  - got `\delta_{ij}=\{^{1i=j} \\ 0i\neq j` (similarity 0.59)
-- `c133` expected `{}^{14}_{6}\mathrm{C}\to{}^{14}_{7}\mathrm{N}+e^-+\bar{\nu}_e`
-  - got `{}_6^{14}\mathrm{C}\rightarrow_7^{14}\mathrm{N}+e^{-}+\bar{\nu}_e` (similarity 0.93)
-
-### integral (43 failing)
-
-- `g0017` expected `z_{k-1}^3=\int_a^1t_{i,j}^m\sqrt[n]{\varepsilon }-2y\,du>\sqrt{-\tan t}\tilde{f}+9\frac{a_{\alpha}}{y}`
-  - got `z_{k-1}^3=\int_a^1t_{i,j}^{m_n}\sqrt{\varepsilon}-2ydu>\sqrt{-\tan t}\tilde{f}+9\frac{a_{\alpha}}{y}` (similarity 0.89)
-- `g0261` expected `\int_1^T8\mathcal{N}+\binom{n}{k}7\sqrt{\nu }\,dx`
-  - got `\int_1^T8\mathcal{N}+(^n)7\sqrt{\nu}dx \\ k` (similarity 0.67)
-- `g0280` expected `t=65\int_0^b\|d\|\sinh(24\mathbb{Z})|N_{\mu\nu}^k|\,\mathrm{d}x\cdot \binom{m}{2}G^{n+1}+\widehat{ah}_n`
-  - got `t=65\int_0^b\|d\|\sinh(24\mathbb{Z})|N_{\mu\nu}^k|\mathrm{d}x\cdot(^m)G^{n+1}+\widehat{ah}_n \\ 2` (similarity 0.87)
-
-### integral-bounds (34 failing)
-
-- `g0017` expected `z_{k-1}^3=\int_a^1t_{i,j}^m\sqrt[n]{\varepsilon }-2y\,du>\sqrt{-\tan t}\tilde{f}+9\frac{a_{\alpha}}{y}`
-  - got `z_{k-1}^3=\int_a^1t_{i,j}^{m_n}\sqrt{\varepsilon}-2ydu>\sqrt{-\tan t}\tilde{f}+9\frac{a_{\alpha}}{y}` (similarity 0.89)
-- `g0261` expected `\int_1^T8\mathcal{N}+\binom{n}{k}7\sqrt{\nu }\,dx`
-  - got `\int_1^T8\mathcal{N}+(^n)7\sqrt{\nu}dx \\ k` (similarity 0.67)
-- `g0280` expected `t=65\int_0^b\|d\|\sinh(24\mathbb{Z})|N_{\mu\nu}^k|\,\mathrm{d}x\cdot \binom{m}{2}G^{n+1}+\widehat{ah}_n`
-  - got `t=65\int_0^b\|d\|\sinh(24\mathbb{Z})|N_{\mu\nu}^k|\mathrm{d}x\cdot(^m)G^{n+1}+\widehat{ah}_n \\ 2` (similarity 0.87)
-
-### limits (86 failing)
-
-- `c004` expected `(a+b)^n=\sum_{k=0}^{n}\binom{n}{k}a^{n-k}b^k`
-  - got `(a+b)^n=\sum_{k=}^n(^n)a^{n-k}b^k \\ {}_0k` (similarity 0.67)
-- `g0015` expected `\omega ^{1/2}-\chi _1^{\prime}\bigcup_{j=1}^{\infty}D_j\sim 5\sim \binom{2n}{k}e^{-\frac{n^2}{2}}`
-  - got `\omega^{1/2}-\chi_1^{\prime}\bigcup_{j=1}^{\infty}D_j\sim 5\sim(^{2n})e^{-\frac{n^2}{2}} \\ k` (similarity 0.85)
-- `g0028` expected `-4\sqrt{90|\binom{m}{2}|\frac{\partial g}{\partial t}-\frac{-t}{C}n_0}\overset{!}{=}N_i\cdot r\max_{s\in S}M`
-  - got `-4\sqrt{90|(^m)|\frac{\partial g}{\partial t}-\frac{-t}{C}n_0 \\ 2}^{!}=N_i\cdot r\max_{s\in S}M` (similarity 0.78)
-
-### matrix (328 failing)
-
-- `c040` expected `A=\begin{pmatrix}a&b\\c&d\end{pmatrix}`
-  - got `A=(^{ab}) \\ cd` (similarity 0.36)
-- `c041` expected `A^{-1}=\frac{1}{ad-bc}\begin{pmatrix}d&-b\\-c&a\end{pmatrix}`
-  - got `A^{-1}=\frac{1}{ad-bc}(^{d-b}) \\ -ca` (similarity 0.62)
-- `c042` expected `\begin{vmatrix}a&b\\c&d\end{vmatrix}=ad-bc`
-  - got `ab_{=ad-bc} \\ {}^{|}cd^{|}` (similarity 0.09)
-
-### multi-line (109 failing)
-
-- `g0065` expected `\begin{aligned}\frac{\chi }{n_2}&=9\\\sqrt[n]{v}u+\frac{7\binom{m}{k-1}}{-\Omega }\mathcal{N}&=7\end{aligned}`
-  - got `\frac{\chi}{n_2}=9 \\ {}^n\sqrt{v}u+\frac{7(_{k-1}^m)}{-\Omega}\mathcal{N}=7` (similarity 0.76)
-- `g0089` expected `\begin{aligned}\sqrt{w}&=45\\\lceil 5\arctan(T)\rceil \sqrt{46x}&=6\end{aligned}`
-  - got `=45 \\ \sqrt\frac{\sqrt{w}}{46x} \\ \lceil 5\arctan(T)\rceil=6` (similarity 0.35)
-- `g0144` expected `\begin{aligned}6\frac{\Theta ^{\dagger}}{\binom{N}{2}}&=16\\0.1v&=0.1\end{aligned}`
-  - got `6\frac{\Theta^{\dagger}}{N \\ {}^{{}^{(}2^{)}}0.1v}=16 \\ =0.1` (similarity 0.40)
-
-### nested-fraction (48 failing)
-
-- `g0155` expected `\begin{aligned}a^{2k}&=1.5\frac{d^2f}{ds^2}-9\epsilon \frac19\\&=98|\overline{BE}_0|Y\\&=8\frac59\pm \frac{\frac{d^2u}{dr^2}}{-\alpha }\end{…`
-  - got `a^{2k}=1.5-9\epsilon\frac{1}{9} \\ =98|\frac{\frac{d^2f}{ds^2}}{BE} \\ =8\frac{5}{9}\pm\frac{\frac{{}_{0 \\ d^2u}|Y}{dr^2}}{-\alpha}` (similarity 0.49)
-- `g0194` expected `\begin{aligned}b&=-\Phi _{\min}^*\pm \frac{\omega }{96\Gamma }\\&=0\arctan(t_j)\frac{\overline{RE}_j}{|\frac{du}{dz}|}\\&=69w_n\end{aligned}`
-  - got `b=-\Phi_{\min}^{*}\pm\frac{\omega}{96} \\ =0\arctan(t_j)\frac{\frac{\Gamma}{RE}_j}{|\frac{du}{dz}|} \\ =69w_n` (similarity 0.94)
-- `g0209` expected `34=a\pm \nabla\cdot\mathbf{E}\rho \cdot 100\cdot 2\frac{\frac{-\mathcal{F}}{\kappa ^T}\alpha ^{2k}}{\sqrt[n]{50t}\sinh(2.5\binom{2n}{m})}`
-  - got `34=a\pm\nabla\cdot\mathbf{E}\rho\cdot 100\cdot 2\frac{\frac{-\mathcal{F}}{\kappa^T}\alpha^{2k}}{{}^n\sqrt{50t}\sinh(2.5(_m^{2n}))}` (similarity 0.82)
-
-### nested-script (68 failing)
-
-- `g0015` expected `\omega ^{1/2}-\chi _1^{\prime}\bigcup_{j=1}^{\infty}D_j\sim 5\sim \binom{2n}{k}e^{-\frac{n^2}{2}}`
-  - got `\omega^{1/2}-\chi_1^{\prime}\bigcup_{j=1}^{\infty}D_j\sim 5\sim(^{2n})e^{-\frac{n^2}{2}} \\ k` (similarity 0.85)
-- `g0020` expected `u(k)=\begin{cases}98\left\|2^{k^2}\right\|h_k^*&\text{if }k>0\\y0+S&k=n\\2.5\frac{du}{dt}&\text{if }k\neq 0\end{cases}`
-  - got `98^{k^2}\|h_k^{*}\mathrm{if}k>0 \\ u(k)=\{_{y0Sk=n} \\ 2.5\frac{\|2 \\ {}_{du}+}{dt}\mathrm{if}k\neq 0` (similarity 0.38)
-- `g0127` expected `\omega <\lceil \langle C^{w_i}\rangle (-a^2)^{-1}\rceil ^2\binom{m}{r}`
-  - got `\omega<\lceil\langle C^{w_i}\rangle(-a^2)^{-1}\rceil^2(^m) \\ r` (similarity 0.81)
-
-### overline (50 failing)
-
-- `g0011` expected `h(k)=\begin{cases}1|f|E&\text{if }k\geq a\\-Q_i^{-1}&k\leq 0\\5\sinh(\overline{RP})a&\text{otherwise}\end{cases}`
-  - got `1|f|E\mathrm{if}k\geq a \\ h(k)=\{-Q_i^{-1}k\leq 0 \\ 5\sinh(\overline{RP})a\text{ otherwise}` (similarity 0.61)
-- `g0088` expected `f(k)=\begin{cases}2\frac{-\nabla y}{\xi }\sqrt{1\log_br}+\overline{QN}&\text{if }k>n\\\sin c\sqrt{2.5\tan^{-1}\kappa }&k<a\end{cases}`
-  - got `2\frac{-\nabla y}{{}^{\xi}\sqrt \\ \mathrm{n}c}\overline{QN}\mathrm{if}k>n \\ f(k)=\{\frac{\sqrt{1\log_br}+}{2.5\tan^{-1}\kappa} \\ \mathrm{…` (similarity 0.29)
-- `g0092` expected `g(n)=\begin{cases}\arctan f&n<1\\7\mathbf{H}\nu +\sqrt{\overline{RK}}&n\leq a\\9c&\text{otherwise}\end{cases}`
-  - got `\arctan fn<1 \\ g(n)=\{7\mathbf{H}\nu+\sqrt{\overline{RK}}n\leq a \\ 9c\text{ otherwise}` (similarity 0.52)
-
-### prime (96 failing)
-
-- `g0015` expected `\omega ^{1/2}-\chi _1^{\prime}\bigcup_{j=1}^{\infty}D_j\sim 5\sim \binom{2n}{k}e^{-\frac{n^2}{2}}`
-  - got `\omega^{1/2}-\chi_1^{\prime}\bigcup_{j=1}^{\infty}D_j\sim 5\sim(^{2n})e^{-\frac{n^2}{2}} \\ k` (similarity 0.85)
-- `g0077` expected `\Xi _i\leq -\binom{2n}{r}\pm 2t\cdot f''(x)\text{ where }z=81A_j^3`
-  - got `\Xi_i\leq-(^{2n})\pm 2t\cdot f^{\prime\prime}(x)\text{ where }z=81A_j^3 \\ r` (similarity 0.84)
-- `g0135` expected `u''(z)=5\tan^n\Lambda \frac{p_n\sqrt{\mathbb{N}}}{s_m}-2.5\frac{3f^{\prime}}{\Pi _{ij}p}+5\binom{n+1}{m}`
-  - got `u^{\prime\prime}(z)=5\tan^n\Lambda\frac{p_n\sqrt{\mathbb{N}}}{s_m}-2.5\frac{3f^{\prime}}{\Pi_{ij}p}+5(^{n+1}) \\ m` (similarity 0.89)
-
-### radical (218 failing)
-
-- `g0002` expected `\lambda =2\sqrt{\binom{n}{k}\dot{g}\pm u}+\exp\left(u_{2n}^T\right)\times w_{n+1}`
-  - got `\lambda=2\sqrt{{}_{(}n_{)\dot{g}\pm u} \\ k}+\exp(u_{2n}^T)\times w_{n+1}` (similarity 0.72)
-- `g0009` expected `h(t)=\begin{cases}\sqrt{w}n_0&t\leq a\\8\frac{\mathbf{A}}{G}&\text{if }t\geq n\\\frac{\nabla\cdot\mathbf{F}}{-41}&\text{if }t=n\end{cases}`
-  - got `n_0t\leq a \\ h(t)=\{\mathrm{if}t\geq n \\ \frac{\sqrt{w} \\ {}_{\nabla}8\frac{\mathbf{A}}{G \\ \cdot\mathbf{F}}}{-41}\mathrm{if}t=n` (similarity 0.25)
-- `g0017` expected `z_{k-1}^3=\int_a^1t_{i,j}^m\sqrt[n]{\varepsilon }-2y\,du>\sqrt{-\tan t}\tilde{f}+9\frac{a_{\alpha}}{y}`
-  - got `z_{k-1}^3=\int_a^1t_{i,j}^{m_n}\sqrt{\varepsilon}-2ydu>\sqrt{-\tan t}\tilde{f}+9\frac{a_{\alpha}}{y}` (similarity 0.89)
-
-### root-index (139 failing)
-
-- `c029` expected `\sqrt[n]{x_1x_2\cdots x_n}\leq\frac{x_1+x_2+\cdots+x_n}{n}`
-  - got `{}^n\sqrt{x_1x_2\cdots x_n}\leq\frac{x_1+x_2+\cdots+x_n}{n}` (similarity 0.89)
-- `g0001` expected `f(x)=\begin{cases}g|-\sin(6d)|-8\sqrt[n]{4r^n}&x\geq 0\\\zeta &x\leq 0\\\tan(\Omega )&x\geq 1\end{cases}`
-  - got `g|-\sin(6d)|-8^n\sqrt{4r^n}x\geq 0 \\ f(x)=\{\zeta x\leq 0 \\ \tan(\Omega)x\geq 1` (similarity 0.47)
-- `g0017` expected `z_{k-1}^3=\int_a^1t_{i,j}^m\sqrt[n]{\varepsilon }-2y\,du>\sqrt{-\tan t}\tilde{f}+9\frac{a_{\alpha}}{y}`
-  - got `z_{k-1}^3=\int_a^1t_{i,j}^{m_n}\sqrt{\varepsilon}-2ydu>\sqrt{-\tan t}\tilde{f}+9\frac{a_{\alpha}}{y}` (similarity 0.89)
-
-### script (913 failing)
-
-- `c004` expected `(a+b)^n=\sum_{k=0}^{n}\binom{n}{k}a^{n-k}b^k`
-  - got `(a+b)^n=\sum_{k=}^n(^n)a^{n-k}b^k \\ {}_0k` (similarity 0.67)
-- `c029` expected `\sqrt[n]{x_1x_2\cdots x_n}\leq\frac{x_1+x_2+\cdots+x_n}{n}`
-  - got `{}^n\sqrt{x_1x_2\cdots x_n}\leq\frac{x_1+x_2+\cdots+x_n}{n}` (similarity 0.89)
-- `c041` expected `A^{-1}=\frac{1}{ad-bc}\begin{pmatrix}d&-b\\-c&a\end{pmatrix}`
-  - got `A^{-1}=\frac{1}{ad-bc}(^{d-b}) \\ -ca` (similarity 0.62)
-
-### stacked-symbol (40 failing)
-
-- `g0028` expected `-4\sqrt{90|\binom{m}{2}|\frac{\partial g}{\partial t}-\frac{-t}{C}n_0}\overset{!}{=}N_i\cdot r\max_{s\in S}M`
-  - got `-4\sqrt{90|(^m)|\frac{\partial g}{\partial t}-\frac{-t}{C}n_0 \\ 2}^{!}=N_i\cdot r\max_{s\in S}M` (similarity 0.78)
-- `g0214` expected `q_k\overset{!}{=}\overline{FE}\left(\left\|\hat{A}\right\|\sqrt{\Delta _1}\times 2\|v\|_1\right)`
-  - got `q_k^{!}=\overline{FE}(\|\hat{A}\|\sqrt{\Delta_1}\times 2\|v\|_1)` (similarity 0.90)
-- `g0222` expected `v_j^k\cdot \log h\underset{n\to\infty}{\longrightarrow}q\text{ for all }d\in 1`
-  - got `v_j^k\cdot\log h_{n\rightarrow\infty}\longrightarrow q\text{ for all }d\in 1` (similarity 0.81)
-
-### sub+sup (222 failing)
+### accent (2 failing)
 
 - `c133` expected `{}^{14}_{6}\mathrm{C}\to{}^{14}_{7}\mathrm{N}+e^-+\bar{\nu}_e`
   - got `{}_6^{14}\mathrm{C}\rightarrow_7^{14}\mathrm{N}+e^{-}+\bar{\nu}_e` (similarity 0.93)
-- `g0002` expected `\lambda =2\sqrt{\binom{n}{k}\dot{g}\pm u}+\exp\left(u_{2n}^T\right)\times w_{n+1}`
-  - got `\lambda=2\sqrt{{}_{(}n_{)\dot{g}\pm u} \\ k}+\exp(u_{2n}^T)\times w_{n+1}` (similarity 0.72)
-- `g0011` expected `h(k)=\begin{cases}1|f|E&\text{if }k\geq a\\-Q_i^{-1}&k\leq 0\\5\sinh(\overline{RP})a&\text{otherwise}\end{cases}`
-  - got `1|f|E\mathrm{if}k\geq a \\ h(k)=\{-Q_i^{-1}k\leq 0 \\ 5\sinh(\overline{RP})a\text{ otherwise}` (similarity 0.61)
+- `g1014` expected `g(x)=\begin{cases}9\sqrt{\vec{L}}\cdot \Phi _{\min}&x\geq 0\\72qg&x\geq 1\\79&x=1\end{cases}`
+  - got `g(x)=\begin{cases} \sqrt \\ 9\vec{L}\cdot\Phi_{\min} & x\geq 0 \\ 72qg & x\geq 1 \\ 79 & x=1 \end{cases}` (similarity 0.91)
 
-### tall-delimiter (477 failing)
+### binomial (4 failing)
 
-- `c040` expected `A=\begin{pmatrix}a&b\\c&d\end{pmatrix}`
-  - got `A=(^{ab}) \\ cd` (similarity 0.36)
-- `c041` expected `A^{-1}=\frac{1}{ad-bc}\begin{pmatrix}d&-b\\-c&a\end{pmatrix}`
-  - got `A^{-1}=\frac{1}{ad-bc}(^{d-b}) \\ -ca` (similarity 0.62)
-- `c042` expected `\begin{vmatrix}a&b\\c&d\end{vmatrix}=ad-bc`
-  - got `ab_{=ad-bc} \\ {}^{|}cd^{|}` (similarity 0.09)
-
-### text (187 failing)
-
-- `c048` expected `|x|=\begin{cases}x&\text{if }x\geq 0\\-x&\text{if }x<0\end{cases}`
-  - got `|x|=\{^{x\mathrm{if}x\geq 0} \\ -x\mathrm{if}x<0` (similarity 0.63)
-- `c050` expected `f(n)=\begin{cases}n/2&\text{if }n\text{ is even}\\3n+1&\text{if }n\text{ is odd}\end{cases}`
-  - got `f(n)=\{^{n/2\mathrm{if}n\text{ is even}} \\ 3n+1\mathrm{if}n\text{ is odd}` (similarity 0.75)
-- `g0009` expected `h(t)=\begin{cases}\sqrt{w}n_0&t\leq a\\8\frac{\mathbf{A}}{G}&\text{if }t\geq n\\\frac{\nabla\cdot\mathbf{F}}{-41}&\text{if }t=n\end{cases}`
-  - got `n_0t\leq a \\ h(t)=\{\mathrm{if}t\geq n \\ \frac{\sqrt{w} \\ {}_{\nabla}8\frac{\mathbf{A}}{G \\ \cdot\mathbf{F}}}{-41}\mathrm{if}t=n` (similarity 0.25)
-
-### upright-letter (49 failing)
-
-- `c133` expected `{}^{14}_{6}\mathrm{C}\to{}^{14}_{7}\mathrm{N}+e^-+\bar{\nu}_e`
-  - got `{}_6^{14}\mathrm{C}\rightarrow_7^{14}\mathrm{N}+e^{-}+\bar{\nu}_e` (similarity 0.93)
-- `g0190` expected `\begin{aligned}\bar{Y}f^*\mathbf{p}+\mathrm{d}x&=7\\\frac{d}{\ln(\zeta )}&=5\end{aligned}`
-  - got `\bar{Y}f^{*}\mathbf{p}=7 \\ \frac{+\mathrm{d}x \\ d}{\ln(\zeta)}=5` (similarity 0.64)
 - `g0221` expected `\det \begin{pmatrix}34&0.5&r\end{pmatrix}=3\left|\mathrm{d}b\right|-\exp(\mathrm{i})\sqrt{\binom{2n}{r}}`
-  - got `\det(340.5r)=3|\mathrm{d}b|-\exp(\mathrm{i})\sqrt{{}_{(}2n_{)} \\ r}` (similarity 0.67)
+  - got `\det(340.5r)=3|\mathrm{d}b|-\exp(\mathrm{i})\sqrt{\binom{2n}{r}}` (similarity 0.88)
+- `g0775` expected `u(k)=\begin{cases}\frac{\Gamma }{-A}g^3&\text{if }k\leq 0\\x\frac{\exp\left(\binom{n+1}{k-1}\right)}{7a_j}&k<0\end{cases}`
+  - got `u(k)=\begin{cases} \frac{\Gamma}{-A}g^3 & \mathrm{if}k\leq 0 \\ x\frac{{}^{\exp}(\binom{n+1}{k-1})}{7a_j} & k<0 \end{cases}` (similarity 0.95)
+- `g1505` expected `\frac{|1\frac{\partial g}{\partial t}|}{\frac{-\binom{m}{r}}{\frac{d^2u}{dr^2}}-9\lfloor a\rfloor _2}+|21|\tan^2\theta `
+  - got `\frac{|1\frac{\partial g}{\partial t}|}{\frac{{}^{-}\binom{m}{r}}{\frac{d^2u}{dr^2}}-9\lfloor a\rfloor_2}+|21|\tan^2\theta` (similarity 0.94)
+
+### cases (2 failing)
+
+- `g0775` expected `u(k)=\begin{cases}\frac{\Gamma }{-A}g^3&\text{if }k\leq 0\\x\frac{\exp\left(\binom{n+1}{k-1}\right)}{7a_j}&k<0\end{cases}`
+  - got `u(k)=\begin{cases} \frac{\Gamma}{-A}g^3 & \mathrm{if}k\leq 0 \\ x\frac{{}^{\exp}(\binom{n+1}{k-1})}{7a_j} & k<0 \end{cases}` (similarity 0.95)
+- `g1948` expected `u(t)=\begin{cases}7h_i\sqrt{\mu _{2n}^{(n)}}\sqrt{f^2}-5Qn_{i,j}&t\geq 1\\8\rho _n^{\prime}&\text{otherwise}\end{cases}`
+  - got `u(t)=\begin{cases} \sqrt \\ 7h_i\mu_{2n}^{(n)}\sqrt{f^2}-5Qn_{i,j} & t\geq 1 \\ 8\rho_n^{\prime} & \text{otherwise} \end{cases}` (similarity 0.94)
+
+### font-bf (7 failing)
+
+- `g0103` expected `\begin{vmatrix}8&w&g\end{vmatrix}\mathbf{x}=\lambda \mathbf{x}`
+  - got `|8wg|\mathbf{x}=\lambda\mathbf{x}` (similarity 0.86)
+- `g0219` expected `\left(\begin{matrix}z&Z&a\end{matrix}\right)\mathbf{v}=\mathbf{w}`
+  - got `(zZa)\mathbf{v}=\mathbf{w}` (similarity 0.85)
+- `g0992` expected `\begin{pmatrix}w_{13}&f&K\end{pmatrix}\mathbf{h}=\lambda \mathbf{b}`
+  - got `(w_{13}fK)\mathbf{h}=\lambda\mathbf{b}` (similarity 0.89)
+
+### fraction (4 failing)
+
+- `g0775` expected `u(k)=\begin{cases}\frac{\Gamma }{-A}g^3&\text{if }k\leq 0\\x\frac{\exp\left(\binom{n+1}{k-1}\right)}{7a_j}&k<0\end{cases}`
+  - got `u(k)=\begin{cases} \frac{\Gamma}{-A}g^3 & \mathrm{if}k\leq 0 \\ x\frac{{}^{\exp}(\binom{n+1}{k-1})}{7a_j} & k<0 \end{cases}` (similarity 0.95)
+- `g1505` expected `\frac{|1\frac{\partial g}{\partial t}|}{\frac{-\binom{m}{r}}{\frac{d^2u}{dr^2}}-9\lfloor a\rfloor _2}+|21|\tan^2\theta `
+  - got `\frac{|1\frac{\partial g}{\partial t}|}{\frac{{}^{-}\binom{m}{r}}{\frac{d^2u}{dr^2}}-9\lfloor a\rfloor_2}+|21|\tan^2\theta` (similarity 0.94)
+- `g2573` expected `\sqrt{M}\log r\chi ^{1/2}\sim St_2^{-2}-\frac{-\exp\left(71\right)+3.14\Theta U^{1/2}\frac{25q}{1\binom{n}{m}}}{\sqrt{84}\cdot 9p\|g\|}`
+  - got `\sqrt{M}\log r\chi^{1/2}\sim St_2^{-2}-\frac{-\exp(71)+3.14\Theta U^{1/2}\frac{25q}{{}^1\binom{n}{m}}}{\sqrt{84}\cdot 9p\|g\|}` (similarity 0.95)
+
+### function (14 failing)
+
+- `g0221` expected `\det \begin{pmatrix}34&0.5&r\end{pmatrix}=3\left|\mathrm{d}b\right|-\exp(\mathrm{i})\sqrt{\binom{2n}{r}}`
+  - got `\det(340.5r)=3|\mathrm{d}b|-\exp(\mathrm{i})\sqrt{\binom{2n}{r}}` (similarity 0.88)
+- `g0530` expected `\det \begin{pmatrix}16&4&u_{33}\end{pmatrix}=-(8U)^{1/2}`
+  - got `\det(164u_{33})=-(8U)^{1/2}` (similarity 0.89)
+- `g0708` expected `\det \left(\begin{matrix}C&u_{13}&u\end{matrix}\right)=3Q\sinh(\Sigma )`
+  - got `\det(Cu_{13}u)=3Q\sinh(\Sigma)` (similarity 0.90)
+
+### greek (22 failing)
+
+- `c133` expected `{}^{14}_{6}\mathrm{C}\to{}^{14}_{7}\mathrm{N}+e^-+\bar{\nu}_e`
+  - got `{}_6^{14}\mathrm{C}\rightarrow_7^{14}\mathrm{N}+e^{-}+\bar{\nu}_e` (similarity 0.93)
+- `g0024` expected `R^\rho{}_{\sigma\mu\nu}=\partial_\mu\Gamma^\rho_{\nu\sigma}-\partial_\nu\Gamma^\rho_{\mu\sigma}`
+  - got `R_{\sigma\mu\nu}^{\rho}=\partial_{\mu}\Gamma_{\nu\sigma}^{\rho}-\partial_{\nu}\Gamma_{\mu\sigma}^{\rho}` (similarity 0.82)
+- `g0103` expected `\begin{vmatrix}8&w&g\end{vmatrix}\mathbf{x}=\lambda \mathbf{x}`
+  - got `|8wg|\mathbf{x}=\lambda\mathbf{x}` (similarity 0.86)
+
+### matrix (53 failing)
+
+- `g0103` expected `\begin{vmatrix}8&w&g\end{vmatrix}\mathbf{x}=\lambda \mathbf{x}`
+  - got `|8wg|\mathbf{x}=\lambda\mathbf{x}` (similarity 0.86)
+- `g0119` expected `H=\begin{bmatrix}f_{23}&0.5&n_{31}\end{bmatrix}`
+  - got `H=[f_{23}0.5n_{31}]` (similarity 0.87)
+- `g0219` expected `\left(\begin{matrix}z&Z&a\end{matrix}\right)\mathbf{v}=\mathbf{w}`
+  - got `(zZa)\mathbf{v}=\mathbf{w}` (similarity 0.85)
+
+### nested-fraction (2 failing)
+
+- `g1505` expected `\frac{|1\frac{\partial g}{\partial t}|}{\frac{-\binom{m}{r}}{\frac{d^2u}{dr^2}}-9\lfloor a\rfloor _2}+|21|\tan^2\theta `
+  - got `\frac{|1\frac{\partial g}{\partial t}|}{\frac{{}^{-}\binom{m}{r}}{\frac{d^2u}{dr^2}}-9\lfloor a\rfloor_2}+|21|\tan^2\theta` (similarity 0.94)
+- `g2573` expected `\sqrt{M}\log r\chi ^{1/2}\sim St_2^{-2}-\frac{-\exp\left(71\right)+3.14\Theta U^{1/2}\frac{25q}{1\binom{n}{m}}}{\sqrt{84}\cdot 9p\|g\|}`
+  - got `\sqrt{M}\log r\chi^{1/2}\sim St_2^{-2}-\frac{-\exp(71)+3.14\Theta U^{1/2}\frac{25q}{{}^1\binom{n}{m}}}{\sqrt{84}\cdot 9p\|g\|}` (similarity 0.95)
+
+### prime (1 failing)
+
+- `g1948` expected `u(t)=\begin{cases}7h_i\sqrt{\mu _{2n}^{(n)}}\sqrt{f^2}-5Qn_{i,j}&t\geq 1\\8\rho _n^{\prime}&\text{otherwise}\end{cases}`
+  - got `u(t)=\begin{cases} \sqrt \\ 7h_i\mu_{2n}^{(n)}\sqrt{f^2}-5Qn_{i,j} & t\geq 1 \\ 8\rho_n^{\prime} & \text{otherwise} \end{cases}` (similarity 0.94)
+
+### radical (4 failing)
+
+- `g0221` expected `\det \begin{pmatrix}34&0.5&r\end{pmatrix}=3\left|\mathrm{d}b\right|-\exp(\mathrm{i})\sqrt{\binom{2n}{r}}`
+  - got `\det(340.5r)=3|\mathrm{d}b|-\exp(\mathrm{i})\sqrt{\binom{2n}{r}}` (similarity 0.88)
+- `g1014` expected `g(x)=\begin{cases}9\sqrt{\vec{L}}\cdot \Phi _{\min}&x\geq 0\\72qg&x\geq 1\\79&x=1\end{cases}`
+  - got `g(x)=\begin{cases} \sqrt \\ 9\vec{L}\cdot\Phi_{\min} & x\geq 0 \\ 72qg & x\geq 1 \\ 79 & x=1 \end{cases}` (similarity 0.91)
+- `g1948` expected `u(t)=\begin{cases}7h_i\sqrt{\mu _{2n}^{(n)}}\sqrt{f^2}-5Qn_{i,j}&t\geq 1\\8\rho _n^{\prime}&\text{otherwise}\end{cases}`
+  - got `u(t)=\begin{cases} \sqrt \\ 7h_i\mu_{2n}^{(n)}\sqrt{f^2}-5Qn_{i,j} & t\geq 1 \\ 8\rho_n^{\prime} & \text{otherwise} \end{cases}` (similarity 0.94)
+
+### script (44 failing)
+
+- `c133` expected `{}^{14}_{6}\mathrm{C}\to{}^{14}_{7}\mathrm{N}+e^-+\bar{\nu}_e`
+  - got `{}_6^{14}\mathrm{C}\rightarrow_7^{14}\mathrm{N}+e^{-}+\bar{\nu}_e` (similarity 0.93)
+- `g0024` expected `R^\rho{}_{\sigma\mu\nu}=\partial_\mu\Gamma^\rho_{\nu\sigma}-\partial_\nu\Gamma^\rho_{\mu\sigma}`
+  - got `R_{\sigma\mu\nu}^{\rho}=\partial_{\mu}\Gamma_{\nu\sigma}^{\rho}-\partial_{\nu}\Gamma_{\mu\sigma}^{\rho}` (similarity 0.82)
+- `g0119` expected `H=\begin{bmatrix}f_{23}&0.5&n_{31}\end{bmatrix}`
+  - got `H=[f_{23}0.5n_{31}]` (similarity 0.87)
+
+### sub+sup (4 failing)
+
+- `c133` expected `{}^{14}_{6}\mathrm{C}\to{}^{14}_{7}\mathrm{N}+e^-+\bar{\nu}_e`
+  - got `{}_6^{14}\mathrm{C}\rightarrow_7^{14}\mathrm{N}+e^{-}+\bar{\nu}_e` (similarity 0.93)
+- `g0024` expected `R^\rho{}_{\sigma\mu\nu}=\partial_\mu\Gamma^\rho_{\nu\sigma}-\partial_\nu\Gamma^\rho_{\mu\sigma}`
+  - got `R_{\sigma\mu\nu}^{\rho}=\partial_{\mu}\Gamma_{\nu\sigma}^{\rho}-\partial_{\nu}\Gamma_{\mu\sigma}^{\rho}` (similarity 0.82)
+- `g1948` expected `u(t)=\begin{cases}7h_i\sqrt{\mu _{2n}^{(n)}}\sqrt{f^2}-5Qn_{i,j}&t\geq 1\\8\rho _n^{\prime}&\text{otherwise}\end{cases}`
+  - got `u(t)=\begin{cases} \sqrt \\ 7h_i\mu_{2n}^{(n)}\sqrt{f^2}-5Qn_{i,j} & t\geq 1 \\ 8\rho_n^{\prime} & \text{otherwise} \end{cases}` (similarity 0.94)
+
+### tall-delimiter (54 failing)
+
+- `g0103` expected `\begin{vmatrix}8&w&g\end{vmatrix}\mathbf{x}=\lambda \mathbf{x}`
+  - got `|8wg|\mathbf{x}=\lambda\mathbf{x}` (similarity 0.86)
+- `g0119` expected `H=\begin{bmatrix}f_{23}&0.5&n_{31}\end{bmatrix}`
+  - got `H=[f_{23}0.5n_{31}]` (similarity 0.87)
+- `g0219` expected `\left(\begin{matrix}z&Z&a\end{matrix}\right)\mathbf{v}=\mathbf{w}`
+  - got `(zZa)\mathbf{v}=\mathbf{w}` (similarity 0.85)
+
+### text (2 failing)
+
+- `g0775` expected `u(k)=\begin{cases}\frac{\Gamma }{-A}g^3&\text{if }k\leq 0\\x\frac{\exp\left(\binom{n+1}{k-1}\right)}{7a_j}&k<0\end{cases}`
+  - got `u(k)=\begin{cases} \frac{\Gamma}{-A}g^3 & \mathrm{if}k\leq 0 \\ x\frac{{}^{\exp}(\binom{n+1}{k-1})}{7a_j} & k<0 \end{cases}` (similarity 0.95)
+- `g1948` expected `u(t)=\begin{cases}7h_i\sqrt{\mu _{2n}^{(n)}}\sqrt{f^2}-5Qn_{i,j}&t\geq 1\\8\rho _n^{\prime}&\text{otherwise}\end{cases}`
+  - got `u(t)=\begin{cases} \sqrt \\ 7h_i\mu_{2n}^{(n)}\sqrt{f^2}-5Qn_{i,j} & t\geq 1 \\ 8\rho_n^{\prime} & \text{otherwise} \end{cases}` (similarity 0.94)
+
+### upright-letter (2 failing)
+
+- `c133` expected `{}^{14}_{6}\mathrm{C}\to{}^{14}_{7}\mathrm{N}+e^-+\bar{\nu}_e`
+  - got `{}_6^{14}\mathrm{C}\rightarrow_7^{14}\mathrm{N}+e^{-}+\bar{\nu}_e` (similarity 0.93)
+- `g0221` expected `\det \begin{pmatrix}34&0.5&r\end{pmatrix}=3\left|\mathrm{d}b\right|-\exp(\mathrm{i})\sqrt{\binom{2n}{r}}`
+  - got `\det(340.5r)=3|\mathrm{d}b|-\exp(\mathrm{i})\sqrt{\binom{2n}{r}}` (similarity 0.88)

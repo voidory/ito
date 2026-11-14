@@ -3,23 +3,23 @@
  "tiers": {
   "tex-display": {
    "n": 3460,
-   "exact": 2393,
+   "exact": 3401,
    "comparable": {
     "n": 3259,
-    "exact": 2207
+    "exact": 3202
    }
   },
   "tex-inline": {
    "n": 2605,
-   "exact": 2174,
+   "exact": 2538,
    "comparable": {
     "n": 2416,
-    "exact": 1991
+    "exact": 2351
    }
   },
   "tex-times": {
    "n": 760,
-   "exact": 316,
+   "exact": 317,
    "comparable": {
     "n": 580,
     "exact": 204
@@ -27,10 +27,10 @@
   },
   "tex-tounicode": {
    "n": 760,
-   "exact": 556,
+   "exact": 749,
    "comparable": {
     "n": 580,
-    "exact": 391
+    "exact": 571
    }
   },
   "scanned": {
@@ -43,10 +43,10 @@
   },
   "real-display": {
    "n": 610,
-   "exact": 557,
+   "exact": 597,
    "comparable": {
     "n": 610,
-    "exact": 557
+    "exact": 597
    }
   },
   "real-inline": {
@@ -67,26 +67,26 @@
   },
   "real-display-numbered": {
    "n": 610,
-   "exact": 557,
+   "exact": 597,
    "comparable": {
     "n": 610,
-    "exact": 557
+    "exact": 597
    }
   },
   "real-display-dvips": {
    "n": 610,
-   "exact": 557,
+   "exact": 597,
    "comparable": {
     "n": 610,
-    "exact": 557
+    "exact": 597
    }
   },
   "real-display-lm": {
    "n": 610,
-   "exact": 557,
+   "exact": 597,
    "comparable": {
     "n": 610,
-    "exact": 557
+    "exact": 597
    }
   }
  }

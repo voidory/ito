@@ -5,7 +5,10 @@
 //   npx vite-node scripts/dev/latex-score.ts [dev|heldout] [tier ...]
 //   ITO_SHOW=20 ...       print that many failures per tier (development set only)
 //   ITO_TAG=matrix ...    only equations with that construct tag
-import { readFileSync } from "node:fs";
+//   ITO_TAGS=1 ...        break each tier down by construct
+//   ITO_ONLY=rd0016 ...   only that equation
+//   ITO_IDS=file ...      append `tier id` for every exact match, to compare two runs
+import { appendFileSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
@@ -36,6 +39,7 @@ for (const name of names.length > 0 ? names : Object.keys(manifest.tiers)) {
     const truth = manifest.equations[id];
     const tags = constructsOf(parseLatex(truth));
     if (tag && !tags.includes(tag)) continue;
+    if (process.env.ITO_ONLY && id !== process.env.ITO_ONLY) continue;
     let model = models.get(pageIndex);
     if (!model) {
       const page = await doc.getPage(pageIndex + 1);
@@ -51,7 +55,8 @@ for (const name of names.length > 0 ? names : Object.keys(manifest.tiers)) {
     const ok = scoreEquation(truth, got).exact;
     n++;
     if (ok) exact++;
-    else failures.push(`${id}\n  E: ${truth}\n  G: ${got}`);
+    if (ok && process.env.ITO_IDS) appendFileSync(process.env.ITO_IDS, `${name} ${id}\n`);
+    if (!ok) failures.push(`${id}\n  E: ${truth}\n  G: ${got}`);
     for (const t of tags) {
       const c = byTag.get(t) ?? [0, 0];
       c[0]++;

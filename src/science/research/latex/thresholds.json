@@ -4,11 +4,11 @@
   "tiers": {
     "tex-display": {
       "target": 0.999,
-      "floor": 0.69
+      "floor": 0.98
     },
     "tex-inline": {
       "target": 0.999,
-      "floor": 0.83
+      "floor": 0.97
     },
     "tex-times": {
       "target": null,
@@ -16,7 +16,7 @@
     },
     "tex-tounicode": {
       "target": 0.999,
-      "floor": 0.73
+      "floor": 0.98
     },
     "scanned": {
       "target": null,
@@ -24,7 +24,7 @@
     },
     "real-display": {
       "target": 0.999,
-      "floor": 0.91
+      "floor": 0.97
     },
     "real-inline": {
       "target": 0.999,
@@ -36,15 +36,15 @@
     },
     "real-display-numbered": {
       "target": 0.999,
-      "floor": 0.91
+      "floor": 0.97
     },
     "real-display-dvips": {
       "target": 0.999,
-      "floor": 0.91
+      "floor": 0.97
     },
     "real-display-lm": {
       "target": 0.999,
-      "floor": 0.91
+      "floor": 0.97
     }
   },
   "heldout": {
