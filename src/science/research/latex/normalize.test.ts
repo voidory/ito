@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { canonicalLatex, constructsOf, parseLatex } from "./normalize";
-import { failureRateUpperBound, scoreEquation, tally, treeEditDistance } from "./score";
+import {
+  failureRateUpperBound,
+  pairedGapInterval,
+  rateGapInterval,
+  scoreEquation,
+  tally,
+  treeEditDistance,
+  wilsonInterval,
+} from "./score";
 
 const same = (a: string, b: string): void => expect(canonicalLatex(a)).toBe(canonicalLatex(b));
 const differ = (a: string, b: string): void => expect(canonicalLatex(a)).not.toBe(canonicalLatex(b));
@@ -45,6 +53,22 @@ describe("canonicalLatex — spellings of the same structure are equal", () => {
     same("x\\text{ if }y", "x\\text{if}y");
     same("\\text{for}\\text{ all}", "\\text{for all}");
     same("\\text{a}", "\\mathrm{a}");
+    same("\\text{ sin }x", "\\sin x");
+  });
+
+  it("counts word spaces inside text, but not at its ends or in math mode", () => {
+    differ("\\text{is even}", "\\text{iseven}");
+    differ("n\\text{ is even}", "n\\text{iseven}");
+    same("\\text{is  even}", "\\text{is even}");
+    same("\\text{is~even}", "\\text{is even}");
+    same("\\text{is\\ even}", "\\text{is even}");
+    same("\\text{for }\\text{all}", "\\text{for all}");
+    same("\\text{ if }x", "\\text{if}x");
+    same("\\mathrm{is even}", "\\mathrm{iseven}");
+    same("\\operatorname{arg max}", "\\operatorname{argmax}");
+    same("x_{\\text{ max }}", "x_{\\text{max}}");
+    same("\\text{a}\\alpha b", "\\text{a}\\alpha  b");
+    differ("\\textbf{no go}", "\\textbf{nogo}");
   });
 
   it("folds matrix and alignment environments", () => {
@@ -117,5 +141,37 @@ describe("scoring", () => {
     expect(failureRateUpperBound(3000, 0)).toBeLessThan(0.001);
     expect(failureRateUpperBound(2900, 0)).toBeGreaterThan(0.001);
     expect(failureRateUpperBound(100, 100)).toBe(1);
+  });
+
+  it("puts an interval on the gap between two exact-match rates", () => {
+    // Newcombe (1998), worked example: 56/70 vs 48/80 gives 0.2 [0.0524, 0.3339].
+    const g = rateGapInterval(56, 70, 48, 80);
+    expect(g.gap).toBeCloseTo(0.2, 10);
+    expect(g.lower).toBeCloseTo(0.0524, 3);
+    expect(g.upper).toBeCloseTo(0.3339, 3);
+    // Equal rates: the interval straddles zero.
+    const same = rateGapInterval(900, 1000, 2700, 3000);
+    expect(same.lower).toBeLessThan(0);
+    expect(same.upper).toBeGreaterThan(0);
+    // Near 100% the interval stays inside [-1, 1] and is still informative:
+    // 3 failures in 3000 against 12 in 3000 is a real difference.
+    const tail = rateGapInterval(2997, 3000, 2988, 3000);
+    expect(tail.lower).toBeGreaterThan(0);
+    expect(wilsonInterval(3000, 3000).upper).toBeCloseTo(1, 10);
+    expect(wilsonInterval(3000, 3000).lower).toBeGreaterThan(0.998);
+  });
+
+  it("puts an interval on a gap measured on the same items", () => {
+    // 30 items flip one way and 10 the other out of 760: a real difference.
+    const g = pairedGapInterval(30, 10, 760);
+    expect(g.gap).toBeCloseTo(20 / 760, 10);
+    expect(g.lower).toBeGreaterThan(0);
+    // Balanced disagreement is no difference at all.
+    const even = pairedGapInterval(12, 12, 760);
+    expect(even.gap).toBe(0);
+    expect(even.lower).toBeLessThan(0);
+    expect(even.upper).toBeGreaterThan(0);
+    // No disagreement: a zero-width interval at zero.
+    expect(pairedGapInterval(0, 0, 760)).toEqual({ gap: 0, lower: 0, upper: 0 });
   });
 });

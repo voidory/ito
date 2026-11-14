@@ -21,6 +21,11 @@ const manifest = JSON.parse(readFileSync(resolve(HERE, "corpus/manifest.json"), 
 };
 const thresholds = JSON.parse(readFileSync(resolve(HERE, "thresholds.json"), "utf8")) as {
   tiers: Record<string, { target: number | null; floor: number }>;
+  heldout: Record<string, { target: number | null }>;
+};
+const heldout = JSON.parse(readFileSync(resolve(HERE, "corpus-heldout/manifest.json"), "utf8")) as typeof manifest & {
+  set: string;
+  comparison: { drawn: number; excludedDevIds: string[] };
 };
 
 describe("LaTeX benchmark corpus", () => {
@@ -89,3 +94,60 @@ describe("LaTeX benchmark corpus", () => {
     for (const c of expected) expect(counts.get(c) ?? 0, c).toBeGreaterThanOrEqual(15);
   });
 });
+
+describe("held-out LaTeX benchmark set", () => {
+  it("every tier has its PDF, a target entry and in-page boxes for known equations", () => {
+    expect(heldout.set).toBe("heldout");
+    for (const [name, tier] of Object.entries(heldout.tiers)) {
+      expect(existsSync(resolve(HERE, "corpus-heldout", tier.pdf)), `${name} pdf`).toBe(true);
+      expect(thresholds.heldout[name], `${name} target`).toBeDefined();
+      expect(tier.placements.length).toBeGreaterThan(0);
+      for (const [id, page, x0, y0, x1, y1] of tier.placements) {
+        expect(heldout.equations[id], `${name} ${id}`).toBeDefined();
+        expect(page).toBeGreaterThanOrEqual(0);
+        expect(x0).toBeGreaterThanOrEqual(0);
+        expect(y0).toBeGreaterThanOrEqual(0);
+        expect(x1).toBeLessThanOrEqual(tier.pageWidth);
+        expect(y1).toBeLessThanOrEqual(tier.pageHeight);
+      }
+    }
+  });
+
+  it("shares no equation with the development corpus", () => {
+    const dev = new Set(Object.values(manifest.equations).map(canonicalLatex));
+    const seen = new Set<string>();
+    for (const [id, latex] of Object.entries(heldout.equations)) {
+      const key = canonicalLatex(latex);
+      expect(dev.has(key), `${id} is also in the development corpus`).toBe(false);
+      expect(seen.has(key), `${id} duplicates another held-out equation`).toBe(false);
+      seen.add(key);
+    }
+  });
+
+  it("records which development equations it also drew, so both sides can drop them", () => {
+    const { drawn, excludedDevIds } = heldout.comparison;
+    // Same draw size as the development corpus's generated part.
+    expect(drawn).toBe(Object.keys(manifest.equations).filter((id) => id.startsWith("g")).length);
+    expect(Object.keys(heldout.equations).length).toBe(drawn - excludedDevIds.length);
+    expect(new Set(excludedDevIds).size).toBe(excludedDevIds.length);
+    for (const id of excludedDevIds) {
+      expect(id.startsWith("g"), id).toBe(true);
+      expect(manifest.equations[id], id).toBeDefined();
+    }
+  });
+
+  it("is large enough for a 99.9% claim to be testable, and covers every construct", () => {
+    const display = heldout.tiers["tex-display"]!.placements;
+    expect(failureRateUpperBound(display.length, 0)).toBeLessThan(0.001);
+    const counts = new Map<string, number>();
+    for (const [id] of display) {
+      for (const c of constructsOf(parseLatex(heldout.equations[id]!))) counts.set(c, (counts.get(c) ?? 0) + 1);
+    }
+    const devConstructs = new Set<string>();
+    for (const [id] of manifest.tiers["tex-display"]!.placements) {
+      for (const c of constructsOf(parseLatex(manifest.equations[id]!))) devConstructs.add(c);
+    }
+    for (const c of devConstructs) expect(counts.get(c) ?? 0, c).toBeGreaterThanOrEqual(15);
+  });
+});
+

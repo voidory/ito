@@ -3,6 +3,10 @@ name: LaTeX extraction benchmark
 # Measures box-selection LaTeX extraction over the committed TeX corpus and
 # fails if any tier's exact-match rate drops below its floor
 # (src/science/research/latex/thresholds.json).
+#
+# Run by hand with "heldout" ticked at a phase gate: it then also measures the
+# held-out set and uploads the regenerated reports, to be committed as they
+# are. The held-out set is never measured on a push.
 
 on:
   push:
@@ -11,6 +15,12 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      heldout:
+        description: Phase gate - also measure the held-out set and upload the reports
+        type: boolean
+        default: false
 
 jobs:
   benchmark:
@@ -24,4 +34,18 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: npm run benchmark:latex
+      - name: Measure and enforce the floors
+        if: ${{ !inputs.heldout }}
+        run: npm run benchmark:latex
+      - name: Phase gate - development report, then the held-out set
+        if: ${{ inputs.heldout }}
+        run: npm run benchmark:latex:report && npm run benchmark:latex:heldout
+      - name: Upload the reports
+        if: ${{ inputs.heldout }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: latex-benchmark-reports
+          path: |
+            src/science/research/latex/BENCHMARK.md
+            src/science/research/latex/BENCHMARK.json
+            src/science/research/latex/BENCHMARK-HELDOUT.md

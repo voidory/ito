@@ -12,8 +12,11 @@
  *   - font changes (`\mathrm{d}` vs `d`, `\mathbf`, `\mathbb`, `\mathcal`);
  *   - variant letters (`\epsilon` vs `\varepsilon`, `\phi` vs `\varphi`);
  *   - `\bar` (an accent glyph) vs `\overline` (a rule).
+ *   - word spaces inside text: `\text{is even}` is not `\text{iseven}`.
  * What IS folded, because it is spacing or size only: `\,` `\;` `\quad`,
- * `\left`/`\right`/`\big`, `\displaystyle`, `\limits`, `\dfrac`/`\tfrac`.
+ * `\left`/`\right`/`\big`, `\displaystyle`, `\limits`, `\dfrac`/`\tfrac`,
+ * and a space at either end of a text run (`\text{if }x` equals `\text{if}x`:
+ * whether that gap is a word space or math spacing is not a structural fact).
  *
  * Pure and dependency-free. It is a benchmark instrument, not a LaTeX engine:
  * unknown commands become opaque symbols rather than errors.
@@ -28,6 +31,8 @@ export interface TexNode {
 const leaf = (t: string): TexNode => ({ t, c: [] });
 const node = (t: string, c: TexNode[]): TexNode => ({ t, c });
 const EMPTY = leaf("empty");
+/** A word space inside text-mode content (`\text{is even}`). */
+const SPACE = "\u2423";
 
 // ---------------------------------------------------------------------------
 // Vocabulary
@@ -56,6 +61,11 @@ const FONTS: Readonly<Record<string, string>> = {
   mathbb: "bb", mathcal: "cal", mathscr: "cal", mathfrak: "frak", mathsf: "sf", textsf: "sf",
   mathtt: "tt", texttt: "tt", mathit: "it", textit: "it",
 };
+/**
+ * Font commands whose argument is typeset in text mode, where a space is a
+ * word space. In the math-mode ones (`\mathrm`, `\operatorname`) TeX ignores it.
+ */
+const TEXT_MODE = new Set(["text", "textrm", "textnormal", "mbox", "hbox", "textup", "textbf", "textsf", "texttt", "textit"]);
 const ACCENTS: Readonly<Record<string, string>> = {
   hat: "hat", widehat: "hat", tilde: "tilde", widetilde: "tilde", bar: "bar", vec: "vec",
   overrightarrow: "vec", dot: "dot", ddot: "ddot", overline: "overline", underline: "underline",
@@ -147,16 +157,30 @@ function tokenize(src: string): Tok[] {
   let s = "";
   for (const ch of Array.from(src)) {
     const u = UNICODE[ch];
-    s += u != null ? `${u} ` : ch;
+    // A control word needs a terminator; anything else must not gain a space,
+    // which would read as a word space inside text.
+    s += u == null ? ch : /\\[A-Za-z]+$/.test(u) ? `${u} ` : u;
   }
   const out: Tok[] = [];
   let i = 0;
+  // Brace depths at which a text-mode argument opened: inside one, white space
+  // is a word space, not source formatting.
+  let depth = 0;
+  const textAt: number[] = [];
+  let pendingText = false;
+  const wordSpace = (): void => {
+    const last = out[out.length - 1];
+    if (!(last?.k === "chr" && last.v === SPACE)) out.push({ k: "chr", v: SPACE });
+  };
   while (i < s.length) {
     const ch = s[i]!;
     if (/\s/.test(ch) || ch === "~") {
       i++;
+      if (textAt.length > 0) wordSpace();
       continue;
     }
+    const textArg = pendingText && ch === "{";
+    pendingText = false;
     if (ch === "%") {
       while (i < s.length && s[i] !== "\n") i++;
       continue;
@@ -173,6 +197,8 @@ function tokenize(src: string): Tok[] {
           while (k < s.length && s[k] === " ") k++;
           if (s[k] === "[" && /^\[[^\]]*(pt|em|ex|mm|cm|in)\]/.test(s.slice(k))) j = s.indexOf("]", k) + 1;
           out.push({ k: "nl" });
+        } else if (esc === " " && textAt.length > 0) {
+          wordSpace(); // `\ ` is an explicit word space
         } else if (!IGNORED.has(esc)) {
           out.push({ k: "cmd", v: esc });
         }
@@ -181,6 +207,8 @@ function tokenize(src: string): Tok[] {
       }
       let name = s.slice(i + 1, j);
       if (s[j] === "*") j++; // starred forms (`\operatorname*`, `align*`)
+      // TeX swallows the white space that ends a control word, in any mode.
+      while (j < s.length && /\s/.test(s[j]!)) j++;
       i = j;
       if (name === "left" || name === "right" || name === "middle") {
         // `\left.` / `\right.` is an invisible delimiter, not a full stop.
@@ -195,11 +223,19 @@ function tokenize(src: string): Tok[] {
       if (IGNORED.has(name)) continue;
       name = name in SYNONYMS ? SYNONYMS[name]! : name;
       out.push({ k: "cmd", v: name });
+      pendingText = TEXT_MODE.has(name);
       continue;
     }
     i++;
-    if (ch === "{") out.push({ k: "open" });
-    else if (ch === "}") out.push({ k: "close" });
+    if (ch === "{") {
+      depth++;
+      if (textArg) textAt.push(depth);
+      out.push({ k: "open" });
+    } else if (ch === "}") {
+      if (textAt[textAt.length - 1] === depth) textAt.pop();
+      depth = Math.max(0, depth - 1);
+      out.push({ k: "close" });
+    }
     else if (ch === "^") out.push({ k: "sup" });
     else if (ch === "_") out.push({ k: "sub" });
     else if (ch === "&") out.push({ k: "amp" });
@@ -417,6 +453,36 @@ function letters(n: TexNode): string | null {
   return s;
 }
 
+/** Drop word spaces at either end of a run and collapse repeats inside it. */
+function trimSpaces(kids: readonly TexNode[]): TexNode[] {
+  const out: TexNode[] = [];
+  for (const k of kids) {
+    if (k.t === SPACE && (out.length === 0 || out[out.length - 1]!.t === SPACE)) continue;
+    out.push(k);
+  }
+  while (out.length > 0 && out[out.length - 1]!.t === SPACE) out.pop();
+  return out;
+}
+
+/**
+ * Settle word spaces once adjacent text runs have been merged (which is why
+ * `canon` leaves them alone): `\text{for }\text{all}` must keep its space.
+ */
+function settleSpaces(n: TexNode): TexNode {
+  if (n.c.length === 0) return n;
+  const kids = n.c.map(settleSpaces);
+  if (n.t.startsWith("font:")) {
+    const kept = trimSpaces(kids);
+    return kept.length === 0 ? EMPTY : node(n.t, kept);
+  }
+  if (n.t === "row") {
+    const kept = kids.filter((k) => k.t !== "empty");
+    if (kept.length === 0) return EMPTY;
+    return kept.length === 1 ? kept[0]! : node("row", kept);
+  }
+  return node(n.t, kids);
+}
+
 function canon(n: TexNode): TexNode {
   // A childless row is an absent script / empty group, not a symbol.
   if (n.c.length === 0) return n.t === "row" ? EMPTY : n;
@@ -452,7 +518,8 @@ function canon(n: TexNode): TexNode {
   }
 
   if (n.t === "font:rm") {
-    const word = letters(kids[0] ?? EMPTY);
+    const inner = trimSpaces(kids[0]?.t === "row" ? kids[0].c : kids);
+    const word = letters(node("row", inner));
     if (word != null && FUNCTION_NAMES.has(word)) return leaf(`fn:${word}`);
     if (kids[0]?.t === "empty") return EMPTY;
     // Children of a font node are its symbols, without a wrapping row.
@@ -506,7 +573,7 @@ export function parseLatex(src: string): TexNode {
     .replace(/^\\\(|\\\)$/g, "");
   try {
     const p = new Parser(tokenize(stripped));
-    return canon(node("row", p.row(() => false)));
+    return settleSpaces(canon(node("row", p.row(() => false))));
   } catch {
     return leaf("unparsed");
   }

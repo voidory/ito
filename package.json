@@ -19,6 +19,7 @@
     "gen-math-corpus": "node scripts/gen-math-corpus.mjs",
     "benchmark:latex": "playwright test -c playwright.benchmark.config.ts",
     "benchmark:latex:report": "ITO_WRITE_LATEX_BENCHMARK=1 playwright test -c playwright.benchmark.config.ts",
+    "benchmark:latex:heldout": "ITO_LATEX_BENCH_SET=heldout ITO_WRITE_LATEX_BENCHMARK=1 playwright test -c playwright.benchmark.config.ts",
     "koofr-probe": "node scripts/koofr-probe.mjs",
     "realworld:manifest": "ITO_WRITE_REALWORLD_MANIFEST=1 vitest run src/science/research/skeleton/realworld/manifest",
     "realworld:report": "ITO_WRITE_REALWORLD_REPORT=1 vitest run src/science/research/skeleton/realworld/report",

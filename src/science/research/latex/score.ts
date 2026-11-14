@@ -155,3 +155,52 @@ export function failureRateUpperBound(n: number, failures: number, confidence = 
   }
   return hi;
 }
+
+/** Wilson score interval for a proportion, at 95% confidence. */
+export function wilsonInterval(successes: number, n: number): { lower: number; upper: number } {
+  if (n <= 0) return { lower: 0, upper: 1 };
+  const z = 1.959964;
+  const p = successes / n;
+  const centre = (p + (z * z) / (2 * n)) / (1 + (z * z) / n);
+  const half = (z * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n))) / (1 + (z * z) / n);
+  return { lower: Math.max(0, centre - half), upper: Math.min(1, centre + half) };
+}
+
+/**
+ * The gap between two success rates, a minus b, with a 95% interval
+ * (Newcombe's hybrid score method, 1998, which stays sound when a rate is
+ * near 0 or 1, where this benchmark is headed). The held-out report uses it:
+ * an interval wholly above zero means the development corpus scores better
+ * than unseen equations by more than chance explains.
+ */
+export function rateGapInterval(
+  exactA: number,
+  nA: number,
+  exactB: number,
+  nB: number,
+): { gap: number; lower: number; upper: number } {
+  const pA = nA > 0 ? exactA / nA : 0;
+  const pB = nB > 0 ? exactB / nB : 0;
+  const a = wilsonInterval(exactA, nA);
+  const b = wilsonInterval(exactB, nB);
+  const gap = pA - pB;
+  return {
+    gap,
+    lower: gap - Math.sqrt((pA - a.lower) ** 2 + (b.upper - pB) ** 2),
+    upper: gap + Math.sqrt((a.upper - pA) ** 2 + (pB - b.lower) ** 2),
+  };
+}
+
+/**
+ * The gap between two success rates measured on the SAME items, a minus b,
+ * with a 95% interval. Only the items the two disagree on carry information:
+ * `onlyA` succeeded under a alone, `onlyB` under b alone. (Wald interval on
+ * the discordant counts.)
+ */
+export function pairedGapInterval(onlyA: number, onlyB: number, n: number): { gap: number; lower: number; upper: number } {
+  if (n <= 0) return { gap: 0, lower: -1, upper: 1 };
+  const z = 1.959964;
+  const gap = (onlyA - onlyB) / n;
+  const half = (z * Math.sqrt(Math.max(0, onlyA + onlyB - (onlyA - onlyB) ** 2 / n))) / n;
+  return { gap, lower: Math.max(-1, gap - half), upper: Math.min(1, gap + half) };
+}
