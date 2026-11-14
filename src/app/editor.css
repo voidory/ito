@@ -70,6 +70,93 @@
   -webkit-user-select: none;
 }
 
+/* -------------------------------------------------------------------------
+ * M21 — Optical Precision annotation treatment.
+ *
+ * TypeScript owns normalized geometry, DOM identity, hit-testing and drag
+ * behaviour. These rules own only visual presentation. Colour arrives through
+ * --ito-highlight-fill / --ito-highlight-solid on the annotation container.
+ * ------------------------------------------------------------------------- */
+
+.ito-highlight {
+  --ito-highlight-fill: rgba(255, 221, 87, 0.32);
+  --ito-highlight-solid: #d2a014;
+}
+
+.ito-highlight-fragment {
+  background: var(--ito-highlight-fill);
+  border: 0;
+  border-radius: 2px 4px 3px 2px;
+}
+
+.ito-highlight-fragment[data-animated="true"] {
+  will-change: transform;
+}
+
+.ito-highlight[data-kind="underline"] .ito-highlight-fragment {
+  background: transparent;
+  border: 0;
+  border-bottom: 1.5px solid var(--ito-highlight-solid);
+  border-radius: 0;
+}
+
+.ito-highlight-area {
+  border: 1px solid color-mix(in srgb, var(--ito-highlight-solid) 72%, transparent);
+  border-radius: 3px;
+  background-color: color-mix(in srgb, var(--ito-highlight-fill) 18%, transparent);
+  /* Four restrained corner reticles replace the heavy continuous frame. */
+  background-image:
+    linear-gradient(var(--ito-highlight-solid), var(--ito-highlight-solid)),
+    linear-gradient(var(--ito-highlight-solid), var(--ito-highlight-solid)),
+    linear-gradient(var(--ito-highlight-solid), var(--ito-highlight-solid)),
+    linear-gradient(var(--ito-highlight-solid), var(--ito-highlight-solid));
+  background-size: 10px 1.5px, 1.5px 10px, 10px 1.5px, 1.5px 10px;
+  background-position: left top, left top, right bottom, right bottom;
+  background-repeat: no-repeat;
+}
+
+.ito-highlight-area-label {
+  position: absolute;
+  left: 0;
+  top: -1.25em;
+  max-width: min(24rem, 80vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0.1rem 0.35rem;
+  border: 1px solid color-mix(in srgb, var(--ito-highlight-solid) 30%, transparent);
+  border-radius: 3px;
+  background: var(--ito-bg-elevated, rgba(255, 255, 255, 0.94));
+  color: var(--ito-highlight-solid);
+  font-size: 0.68rem;
+  line-height: 1.3;
+  letter-spacing: 0.015em;
+  pointer-events: none;
+}
+
+.ito-highlight-border {
+  border: 1px solid color-mix(in srgb, var(--ito-highlight-solid) 72%, transparent);
+  border-left-width: 3px;
+  border-radius: 5px;
+  pointer-events: auto;
+}
+
+.ito-highlight[data-selected="true"] .ito-highlight-fragment,
+.ito-highlight[data-selected="true"] .ito-highlight-area {
+  outline: 1.5px solid var(--ito-accent, #2c4a6f);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ito-highlight-fragment {
+    transition: none !important;
+  }
+}
+
+[data-suppress-motion="true"] .ito-highlight-fragment {
+  transition: none !important;
+}
+
 /* FEAT-002 (2.2a) the selected highlight's fragments get an accent outline. */
 .ito-highlight[data-selected="true"] .ito-highlight-fragment,
 .ito-highlight[data-selected="true"] .ito-highlight-area {
