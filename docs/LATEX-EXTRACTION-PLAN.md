@@ -1,16 +1,23 @@
 # Box-selection LaTeX extraction: plan to professional grade
 
-Status: Phase 1 is built. Phases 2 to 6 are proposals.
+Status: Phase 1 is built and the Phase 2 spike is done
+(`docs/spikes/pdf-glyph-geometry.md`: go). The rest of Phase 2 and Phases 3 to
+6 are proposals.
 
 ## Target
 
-**99.9% exact match on TeX-produced PDFs**, measured by the benchmark in
-`src/science/research/latex/` (see its `README.md` and the generated
-`BENCHMARK.md`).
+**99.9% exact match on PDFs produced by pdfLaTeX with Computer Modern and AMS
+fonts**, measured by the benchmark in `src/science/research/latex/` (see its
+`README.md` and the generated `BENCHMARK.md`).
 
-Measured baseline, before any Phase 2 work: **19.75%** exact match pooled over
-7,585 selections on four TeX tiers (display 19.19%, inline 18.96%, Times
-22.76%, ToUnicode 21.97%), and 0% on scanned pages.
+The scope is deliberate. Other font families (Times, Palatino, STIX), other
+engines (XeLaTeX and LuaLaTeX with OpenType math) and old bitmap-font PDFs are
+different problems; each gets its own tier and its own target once its baseline
+is understood. The Times tier already exists and has no target yet.
+
+Measured baseline, before any Phase 2 work: **19.41%** exact match pooled over
+6,825 selections on the three target tiers (display 19.19%, inline 18.96%,
+ToUnicode 21.97%). Outside the target: Times 22.76%, scanned pages 0%.
 
 What the target means in practice:
 
@@ -18,12 +25,20 @@ What the target means in practice:
   holds 3,460 selections so that such a claim is testable at all: with zero
   failures, the 95% upper bound on the failure rate is about 3 divided by the
   number of selections.
-- "Exact" is structural, not textual (`normalize.ts`). It still requires
-  recovering fonts, variant letters and accents, none of which the current
-  extractor attempts.
+- "Exact" is structural, not textual (`normalize.ts`). It requires recovering
+  fonts, variant letters, accents and the word spaces inside text, none of
+  which the current extractor attempts. It does not require delimiter height
+  (`\left(` equals `(`) or spacing commands.
 - The corpus is 160 real formulas plus a seeded grammar. Reaching the target on
   it is necessary, not sufficient, for real papers; that needs the real-paper
   tier below.
+- A rule-based extractor tuned against a fixed corpus will fit it. A held-out
+  set, drawn from the same grammar with another seed and reported only in
+  aggregate, is measured at each phase gate to catch that
+  (`BENCHMARK-HELDOUT.md`).
+- At this failure rate the benchmark's own defects matter. Every residual
+  failure near the target has to be triaged as an extractor error or a
+  benchmark error.
 
 ## Where we are
 
@@ -58,15 +73,25 @@ TeX-produced PDF. Known gaps:
 ## Order and dependencies
 
 ```
-Phase 1 (benchmark) ──┬─> Phase 2 (PDF geometry) ──┐
-                      └─> Phase 6 (foundations) ───┴─> re-measure ─┬─> Phase 3 (parser)
-                                                                   └─> Phase 4 (image model)
-Phase 5a (renderer swap) is independent and can start any time.
-Phase 5b/5c (verification UI) follow Phase 4's confidence signal.
+Phase 1 (benchmark) ──> Phase 2 (PDF geometry, font slots) ──> Phase 3 (parser) ──> the tail
+Phases 4 (image model), 5 (verification) and 6 (foundations) do not serve the
+TeX target and are deferred. Phase 5a (renderer swap) is independent.
 ```
 
-The re-measure after Phases 2 and 6 decides whether Phase 3 or Phase 4 comes
-next: mostly structural failures point to 3, mostly bad or absent text to 4.
+The baseline settles the order. Splitting the display tier's 3,460 equations by
+what each one needs (a rough classification by construct tag; tall delimiters
+and accents really need both):
+
+| Equation needs | Equations | Exact today |
+|---|---|---|
+| Neither of the below | 863 | 585 |
+| Font decoding only (big operators, integrals, bold, blackboard, calligraphic, upright) | 871 | 11 |
+| Structure the extractor does not model (matrix, cases, binomial, accent, root index, tall delimiter, stacked symbol, aligned lines) | 910 | 68 |
+| Both | 816 | 0 |
+
+If Phase 2 fixed every equation in the first two rows, the display tier would
+reach 52% and the inline tier 65%. That is a ceiling, not a forecast. Phase 3
+is therefore required for the target, not conditional on a re-measure.
 
 ---
 
@@ -118,7 +143,8 @@ Goal: a number that says how good the extractor is, gated in CI.
 | Task | State |
 |---|---|
 | 1. Corpus builder | Done for TeX (four tiers) and scanned. `scripts/gen-math-corpus.mjs`. |
-| 1. Real-paper tier | **Not built.** Needs a licence check per paper and hand labelling. |
+| 1. Held-out set | Done. `corpus-heldout/`: 3,259 unseen grammar equations in three tiers, one of them 12pt. |
+| 1. Real-paper tier | **Not built.** Approach decided: see below. |
 | 1. Other-producer tier | **Not built.** Word and LibreOffice exports. |
 | 2. Structural normaliser | Done. `normalize.ts`, with its own parser. |
 | 3. Scorer | Done. `score.ts`: exact match, tree edit distance, confidence bound. |
@@ -136,6 +162,35 @@ Differences from the tasks as first written:
 - Floors sit one point under the baseline, not at it: glyph positions are
   measured against the browser's fallback fonts, which differ between machines.
 - Manual tiers go in `corpus/manual-tiers.json`, which the generator merges.
+- The metric counts word spaces inside text (`\text{is even}` is not
+  `\text{iseven}`); a space at either end of a text run is still ignored. This
+  changed no result for the current extractor.
+
+The held-out set. A second corpus drawn from the same grammar by the same rule
+with another seed (`node scripts/gen-math-corpus.mjs heldout`), measured with
+`npm run benchmark:latex:heldout` at phase gates only. Its report lists no
+individual failures and the runner refuses to dump them. What it reports is the
+gap to the development corpus, with a 95% interval:
+
+- Same typesetting, unseen equations: has the extractor been fitted to the
+  corpus? Baseline: +1.50 points on display (interval -0.30 to +3.31) and +1.20
+  on inline (-0.89 to +3.30). No detectable gap, as expected of an extractor
+  that was written before the corpus existed.
+- The same 760 equations at 12pt, which uses font design sizes the development
+  corpus never shows: does the extractor depend on the fonts it was developed
+  on? Baseline: 0.00 points (-0.36 to +0.36).
+
+Equations that both draws produce are removed from both sides of the
+comparison. Removing them from the held-out side only made that set harder
+(the twins are short and easy) and showed a spurious 2.5-point gap in the first
+build.
+
+The real-paper tier, when built: harvest ground truth from the LaTeX source of
+arXiv papers by compiling them with the same position markers the corpus
+builder uses, instead of hand labelling. Only papers under a licence that
+allows redistribution (CC BY, CC0) can be committed. The open problem is that
+authors' own macros must be expanded before the source is usable as ground
+truth.
 
 What the baseline says about priorities (display tier, exact match by
 construct): big operators, integrals, accents, binomials, matrices, cases and
@@ -161,48 +216,82 @@ no font identity) with exact data from pdf.js. Installed version: 4.10.38.
 
 ### Tasks
 
-1. **Spike** (two days, `docs/spikes/pdf-glyph-geometry.md`). Confirm what
-   `page.getOperatorList()` and `page.commonObjs` expose in 4.10.38: per-glyph
-   advances, font names and flags, and path operators with the current
-   transform. Everything below depends on this; none of it has been verified.
-2. **Page math model** (`src/pdf/pageMathModel.ts`, new). One pass over the
+1. **Spike. Done: go.** `docs/spikes/pdf-glyph-geometry.md`, reproducible with
+   the two scripts in `scripts/spikes/`. What it established, on the
+   development corpus:
+   - The operator list gives every glyph's font name, font slot and advance,
+     and every rule, in Node and in the reader's own browser setup (identical
+     glyph streams on 40 of 40 pages), for about 2ms a page.
+   - On the three Computer Modern tiers, a TeX font slot identifies the symbol
+     or style with no error: 11,373 agreements with the ground truth over 26
+     checks, no false positive and no miss.
+   - Unicode cannot: display `\sum` is reported as `X` and big delimiters as
+     control characters or nothing, with or without ToUnicode maps.
+   - Rule counts match fractions + radicals + over/underlines in all 7,585
+     equations. pdfTeX strokes its rules (the plan had assumed filled
+     rectangles), and pdf.js can split one path across two operations.
+   - pdf.js's text layer, which today's extractor reads, misplaces every letter
+     under `\vec` by half an em. The operator list does not.
+2. **Slot table** (`src/pdf/texFontSlots.ts`, new, generated). For the Computer
+   Modern and AMS families, (font family, slot) to LaTeX command and class:
+   letter, digit, operator, relation, delimiter or delimiter piece, radical
+   piece, accent, big operator. Generated by a script from TeX's own font
+   metric files (which name every slot) plus one hand-written map from glyph
+   name to command, and committed. A font family with no table falls back to
+   the Unicode pdf.js reports.
+3. **Page math model** (`src/pdf/pageMathModel.ts`, new). One pass over the
    operator list producing, in viewport coordinates:
-   - `glyphs`: character, origin, advance, font size, font id;
-   - `rules`: thin axis-aligned strokes and thin filled rectangles (TeX draws
-     fraction bars as filled rectangles);
-   - `fonts`: per font id, name and classification (math italic, upright,
+   - `glyphs`: font family, slot, origin, advance, font size;
+   - `rules`: thin axis-aligned strokes and thin filled rectangles, accumulated
+     across consecutive `constructPath` operations until painted;
+   - `fonts`: per font id, family, design size and style (math italic, upright,
      symbol, extension, bold, blackboard, calligraphic).
-3. **Wire it in.** `RenderedPage` gains `mathModel()`, computed lazily and
+4. **Wire it in.** `RenderedPage` gains `mathModel()`, computed lazily and
    cached per page. `extractLatexFromRegion` takes the model when present and
    falls back to today's DOM path when not.
-4. **Use font identity in `mathLayout.ts`.**
+5. **Use slot and font identity in `mathLayout.ts`.**
+   - Symbols come from the slot table, not from the character.
    - Upright multi-letter runs become `\mathrm{}` or a function name; italic
      letters stay variables. Removes the word-length heuristic.
-   - Extension-font glyphs get baseline-independent placement by font, not by
-     the hard-coded character list.
+   - Extension-font glyphs (big operators, delimiter and radical pieces) are
+     placed by class, not by the hard-coded character list.
    - Blackboard, calligraphic and bold map to `\mathbb`, `\mathcal`,
      `\mathbf`.
-5. **Remove the pixel path for born-digital pages.** Keep
+   - Script level comes from the rendered size (a 10pt document has exactly
+     three per family), not from a baseline threshold alone.
+   - Composite symbols are recognised by overlap, one rule each (`\notin` is
+     `\in` with a slash drawn over it).
+6. **Remove the pixel path for born-digital pages.** Keep
    `detectHorizontalRules` only as the fallback for pages with no operator
    rules (scanned pages overlaid with OCR text).
-6. **Rotation.** The model is in viewport coordinates, so runs at 90, 180 and
+7. **Rotation.** The model is in viewport coordinates, so runs at 90, 180 and
    270 degrees can be rotated into a horizontal frame before layout rather
    than skipped.
 
 ### Acceptance
 
-- TeX tier exact-match rises against the Phase 1 baseline; the target is set
-  once the baseline is known.
+- Target tiers rise against the Phase 1 baseline, and their floors in
+  `thresholds.json` are raised to the new numbers. The ceiling for this phase
+  alone is about 52% on display and 65% on inline (see "Order and
+  dependencies").
+- The held-out report shows no gap whose interval excludes zero, on the 10pt
+  tiers or the 12pt tier.
+- The benchmark gives identical per-selection results locally and in CI. Today
+  they differ by two selections on each of the display and inline tiers,
+  because glyph extents are measured against the browser's fallback fonts.
 - Extraction result is identical at 50%, 100% and 200% zoom.
 - Extraction no longer depends on `AreaAnchor.imageDataUrl`.
 - Existing unit tests and `e2e/latex-extract.spec.ts` pass unchanged.
 
 ### Risks
 
-- The operator list is a less stable pdf.js surface than `getTextContent`.
-  Isolate it behind `pageMathModel.ts` and pin the version.
+- The operator list is a less stable pdf.js surface than `getTextContent`, and
+  the spike confirms it for 4.10.38 only. Isolate it behind `pageMathModel.ts`,
+  pin the version, and re-run both spike scripts on any upgrade.
 - Type 3 fonts and fonts without usable names give no classification; fall
   back to today's heuristics per glyph.
+- Other TeX engines (XeLaTeX, LuaLaTeX, dvipdfmx) may report a glyph id where
+  pdfLaTeX reports a TeX slot. Untested, and outside the claimed scope.
 - Cost: one extra pass per page. Compute on first extraction, not on render.
 
 ---
@@ -210,8 +299,11 @@ no font identity) with exact data from pdf.js. Installed version: 4.10.38.
 ## Phase 3: structural parser
 
 Goal: replace the fixed-threshold cascade with a scored search, and cover the
-constructs it cannot express. Start only if the post-Phase-2 benchmark shows
-structural failures dominate.
+constructs it cannot express. Required for the target: half of the display
+tier's equations need a construct the extractor does not model (see "Order and
+dependencies"). Order the tasks by measured mass: the tree (task 1), then
+delimiters (4), accents and root indices (6), grids (5); the scored search
+(2 and 3) only if what remains needs it.
 
 ### Tasks
 
@@ -380,10 +472,12 @@ Acceptance: each item has a test that fails before the fix and passes after.
 | Decision | Needed by | Recommendation |
 |---|---|---|
 | Local model, remote service, or neither | Phase 4 | Local default, remote opt-in |
-| Real-paper tier: which papers, licence check | Phase 1 | Open-licence arXiv only |
+| Real-paper tier: which papers | Before the target is claimed | CC BY or CC0 arXiv papers, ground truth harvested from source (approach decided, papers not chosen) |
 | Renderer: KaTeX or Temml | Phase 5a | Decide on the Word paste test |
 | Structured math editor dependency | Phase 5c | Spike before committing |
 | Accuracy target on TeX PDFs | Decided | 99.9% exact match |
+| What counts as a TeX PDF for that target | Decided | pdfLaTeX with Computer Modern and AMS fonts |
+| Metric strictness | Decided | Word spaces inside text count; delimiter height does not |
 | Accuracy targets for other tiers | After their baselines | Set from measured numbers |
 
 ## Not in scope
