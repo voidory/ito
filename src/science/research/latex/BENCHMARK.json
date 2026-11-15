@@ -3,10 +3,10 @@
  "tiers": {
   "tex-display": {
    "n": 3460,
-   "exact": 3401,
+   "exact": 3403,
    "comparable": {
     "n": 3259,
-    "exact": 3202
+    "exact": 3204
    }
   },
   "tex-inline": {
@@ -19,18 +19,18 @@
   },
   "tex-times": {
    "n": 760,
-   "exact": 724,
+   "exact": 725,
    "comparable": {
     "n": 580,
-    "exact": 549
+    "exact": 550
    }
   },
   "tex-tounicode": {
    "n": 760,
-   "exact": 749,
+   "exact": 750,
    "comparable": {
     "n": 580,
-    "exact": 571
+    "exact": 572
    }
   },
   "scanned": {
@@ -99,50 +99,50 @@
   },
   "real-display-ptm": {
    "n": 610,
-   "exact": 588,
+   "exact": 592,
    "comparable": {
     "n": 610,
-    "exact": 588
+    "exact": 592
    }
   },
   "real-display-tx": {
    "n": 610,
-   "exact": 594,
+   "exact": 596,
    "comparable": {
     "n": 610,
-    "exact": 594
+    "exact": 596
    }
   },
   "real-display-newtx": {
    "n": 610,
-   "exact": 592,
+   "exact": 593,
    "comparable": {
     "n": 610,
-    "exact": 592
+    "exact": 593
    }
   },
   "real-display-pazo": {
    "n": 610,
-   "exact": 594,
+   "exact": 598,
    "comparable": {
     "n": 610,
-    "exact": 594
+    "exact": 598
    }
   },
   "real-display-newpx": {
    "n": 610,
-   "exact": 592,
+   "exact": 593,
    "comparable": {
     "n": 610,
-    "exact": 592
+    "exact": 593
    }
   },
   "real-display-stix": {
    "n": 607,
-   "exact": 590,
+   "exact": 591,
    "comparable": {
     "n": 607,
-    "exact": 590
+    "exact": 591
    }
   }
  }

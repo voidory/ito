@@ -259,4 +259,24 @@ describe("layout of exact glyphs", () => {
     // x^2 at 5pt: same size, the exponent only raised.
     expect(latex([g("CMMI", 0x78, 40, 3.5, { size: 5 }), g("CMR", 50, 43.5, 3.4, { size: 5, y: 98.2 })])).toBe("x^2");
   });
+
+describe("horizontal braces", () => {
+  const braceAt = (x: number, y: number): ModelGlyph[] => [
+    g("CMEX", 124, x, 4.5, { y }), g("CMEX", 123, x + 15.7, 4.5, { y }), g("CMEX", 122, x + 20.1, 4.5, { y }), g("CMEX", 125, x + 35.8, 4.5, { y }),
+  ];
+  const rules = (x: number, y: number): ModelRule[] => [{ x0: x + 4.4, x1: x + 15.7, y, thickness: 1.2 }, { x0: x + 24.6, x1: x + 35.8, y, thickness: 1.2 }];
+
+  it("reads an underbrace with its label as \\underbrace{…}_{…}", () => {
+    const body = [g("CMMI", 0x78, 264.8, 5.7, { y: 155.8 }), g("CMR", 43, 272.7, 7.7, { y: 155.8 }), g("CMMI", 0x79, 282.6, 4.9, { y: 155.8 }), g("CMR", 43, 290.1, 7.7, { y: 155.8 }), g("CMMI", 0x7a, 300.1, 4.6, { y: 155.8 })];
+    const label = g("CMMI", 0x6e, 282.5, 4.9, { y: 170.9, size: 7 });
+    expect(latex([...body, ...braceAt(264.8, 162), label], rules(264.8, 161.4))).toBe("\\underbrace{x+y+z}_{n}");
+  });
+
+  it("reads an overbrace with its label as \\overbrace{…}^{…}", () => {
+    const body = [g("CMMI", 0x62, 316.2, 4.3, { y: 155.8 }), g("CMMI", 0x63, 320.5, 4.3, { y: 155.8 }), g("CMMI", 0x64, 324.8, 5.2, { y: 155.8 }), g("CMMI", 0x65, 330, 4.6, { y: 155.8 }), g("CMMI", 0x66, 334.6, 4.9, { y: 155.8 }), g("CMMI", 0x67, 340.6, 4.8, { y: 155.8 })];
+    const over = [g("CMEX", 122, 316.2, 4.5, { y: 145.9 }), g("CMEX", 125, 326.4, 4.5, { y: 145.9 }), g("CMEX", 124, 330.9, 4.5, { y: 145.9 }), g("CMEX", 123, 341.2, 4.5, { y: 145.9 })];
+    const label = g("CMMI", 0x6d, 327.4, 7.1, { y: 139.8, size: 7 });
+    expect(latex([...body, ...over, label], [{ x0: 320.7, x1: 326.4, y: 145.3, thickness: 1.2 }, { x0: 335.4, x1: 341.2, y: 145.3, thickness: 1.2 }])).toBe("\\overbrace{bcdefg}^{m}");
+  });
+});
 });

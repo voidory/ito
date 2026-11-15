@@ -484,7 +484,16 @@ function splitLines(boxes: Box[]): Line[] {
           (g) => g.kind === "grid" && b.x0 >= g.x1 - 0.1 * l.size && b.x0 <= g.x1 + 0.4 * l.size &&
             b.bottom > g.top - 0.6 * l.size && b.top < g.bottom + 0.6 * l.size,
         );
-        if ((d > 1.7 * l.size && !onGrid) || b.x1 < e.x0 - 1.2 * l.size || b.x0 > e.x1 + 1.2 * l.size) return;
+        // So does a script on a tall bracket, and what follows it in that script.
+        const far = (g: Box): boolean => Math.abs(g.base - l.base) > 1.7 * l.size;
+        const onCorner = !l.large.has(b) && l.boxes.some(
+          (g) =>
+            b.x0 >= g.x1 - 0.1 * l.size && b.x0 <= g.x1 + 0.4 * l.size &&
+            ((isTall(g) && (g.cls === "close" || g.cls === "fence") && g.bottom - g.top > 2 * l.size &&
+              b.bottom > g.top - 0.6 * l.size && b.top < g.bottom + 0.6 * l.size) ||
+              (!l.large.has(g) && far(g) && b.bottom > g.top - 0.3 * l.size && b.top < g.bottom + 0.3 * l.size)),
+        );
+        if ((d > 1.7 * l.size && !onGrid && !onCorner) || b.x1 < e.x0 - 1.2 * l.size || b.x0 > e.x1 + 1.2 * l.size) return;
         if (d < bestD) {
           bestD = d;
           best = i;
@@ -753,9 +762,11 @@ function lineToTex(line: Line): string {
     const d = (line.base - b.base) / s;
     // Exact glyphs: a script is never on the baseline, whatever its size, and
     // at the smallest size it is no smaller than its base, only shifted.
+    // A prime is only ever a superscript, however little a small size raises it.
+    const primed = b.exact === true && b.tex === "\\prime" && b.size < 0.85 * s && all.some((o) => o !== b && o.tex !== "\\prime" && o.x1 <= b.x0 + 0.1 * s && b.x0 - o.x1 < 0.3 * s);
     const tol = b.kind === "frac" || b.kind === "grid" ? 0.3
       : isTall(b) ? (b.size >= 0.85 * s ? 0.35 : -1)
-      : b.exact ? (b.size <= 0.85 * s ? -1 : b.tex === "\\prime" ? 0.3 : 0.14)
+      : b.exact ? (b.size <= 0.85 * s || primed ? -1 : b.tex === "\\prime" ? 0.3 : 0.14)
       : b.size <= 0.85 * s ? 0.08 : 0.28;
     if ((line.large.has(b) && !b.exact) || isAnchor(b) || Math.abs(d) <= tol) mainsRaw.push(b);
     else scripts.push(b);
@@ -808,6 +819,18 @@ function lineToTex(line: Line): string {
     const hosts = mains
       .filter((m) => carriesLimits(m, cx(m)) && cx(m) > span.x0 && cx(m) < span.x1)
       .sort((a, b) => a.x0 - b.x0);
+    // A subscript of one integral runs up to the next integral sign; that
+    // one's own subscript starts inside it.
+    for (const m of mains.filter((m) => m.kind === "glyph" && m.exact && m.cls === "int").sort((a, b) => a.x0 - b.x0)) {
+      const edge = m.x0 + 0.2 * s;
+      if (!(edge > span.x0 && edge < span.x1)) continue;
+      // Limits centred on an integral (\\limits) are not set at its side.
+      if (rest.some((b) => Math.abs(cx(b) - cx(m)) < 0.3 * s)) continue;
+      const before = rest.filter((b) => cx(b) < edge);
+      if (before.length === 0 || before.length === rest.length) continue;
+      pieces.push(before);
+      rest = rest.filter((b) => cx(b) >= edge);
+    }
     for (let h = 0; h + 1 < hosts.length && rest.length > 1; h++) {
       let at = -1;
       let widest = 0;
@@ -830,7 +853,13 @@ function lineToTex(line: Line): string {
   for (const g of pieces) {
     const bb = bbox(g);
     const c = cx(bb);
-    const isAbove = median(g.map((b) => b.base)) < line.base;
+    // Which side it is on is where its own line stands: its leftmost glyph of
+    // full size, as for any line. A subscript that carries superscripts has
+    // most of its glyphs above the baseline and is still a subscript.
+    const body = g.filter((b) => b.tex !== "\\prime");
+    const top = Math.max(0, ...body.map((b) => b.size));
+    const lead = body.filter((b) => b.size >= 0.85 * top).sort((a, b) => a.x0 - b.x0)[0];
+    const isAbove = lead && g.every((b) => b.exact || b.kind !== "glyph") ? lead.base < line.base : median(g.map((b) => b.base)) < line.base;
     if (g.every((b) => b.exact || b.kind !== "glyph")) {
       // A root's index: TeX sets it over the radical's left edge, ending ten
       // math units (0.556 em) inside it.
@@ -915,7 +944,7 @@ function isVinculum(rule: MathRule, boxes: readonly Box[], s: number): boolean {
  * goes through the widest band of white between two baselines.
  */
 function rowCuts(boxes: readonly Box[], rules: readonly MathRule[]): number[] {
-  const plain = boxes.filter((b) => !isTall(b) && b.cls !== "accent" && b.cls !== "radical");
+  const plain = boxes.filter((b) => !isTall(b) && b.cls !== "accent" && b.cls !== "radical" && b.cls !== "brace");
   if (plain.length === 0) return [];
   const s = Math.max(...plain.map((b) => b.size));
   const mid = (b: Box): number => (b.top + b.bottom) / 2;
@@ -943,8 +972,12 @@ function rowCuts(boxes: readonly Box[], rules: readonly MathRule[]): number[] {
     const bases = between.filter((b) => b.size >= 0.8 * m).map((b) => b.base);
     return Math.max(...bases) - Math.min(...bases) <= 0.5 * m;
   };
+  // A bar that holds nothing of full size is a fraction inside a script or a
+  // limit: it stands off the baseline of the row it belongs to.
+  const inScript = new Set<MathRule>();
   for (const bar of bars) {
     const length = bar.x1 - bar.x0;
+    let fullSize = false;
     for (const dir of [-1, 1] as const) {
       type Item = { near: number; far: number; box?: Box; rule?: MathRule };
       const items: Item[] = [
@@ -965,17 +998,19 @@ function rowCuts(boxes: readonly Box[], rules: readonly MathRule[]): number[] {
           reach = 0.7 * s;
         } else {
           ownedBoxes.add(it.box!);
+          if (it.box!.size >= 0.8 * s) fullSize = true;
           reach = 0.3 * s;
         }
         edge = dir < 0 ? Math.min(edge, it.far) : Math.max(edge, it.far);
       }
     }
+    if (!fullSize) inScript.add(bar);
   }
   const nested = (r: MathRule): boolean => nestedBars.has(r);
   const owned = (b: Box): boolean => ownedBoxes.has(b);
   const evidence = [
     ...plain.filter((b) => b.size >= 0.8 * s && !owned(b)).map((b) => b.base),
-    ...bars.filter((r) => !nested(r)).map((r) => r.y + 0.25 * s),
+    ...bars.filter((r) => !nested(r) && !inScript.has(r)).map((r) => r.y + 0.25 * s),
   ].sort((a, b) => a - b);
   const baselines: number[] = [];
   let group: number[] = [];
@@ -1176,7 +1211,77 @@ function layout(input: Box[], inputRules: readonly MathRule[], allowStack: boole
   return layoutRow(boxes, rules, allowStack);
 }
 
-function layoutRow(boxes: Box[], rules: readonly MathRule[], allowStack: boolean): { tex: string; base: number | null } {
+/**
+ * Replace each horizontal brace, what it spans and its label by one box:
+ * `\underbrace{…}_{…}` or `\overbrace{…}^{…}`. Within a row, everything on
+ * the brace's open side and inside its width is what it spans; everything on
+ * the other side is the label.
+ */
+function applyBraces(input: Box[], inputRules: readonly MathRule[], allowStack: boolean): { boxes: Box[]; rules: MathRule[] } {
+  let boxes = input;
+  let rules = [...inputRules];
+  for (;;) {
+    // Innermost first: the narrowest brace.
+    const brace = boxes.filter((b) => b.kind === "glyph" && b.cls === "brace").sort((a, b) => a.x1 - a.x0 - (b.x1 - b.x0))[0];
+    if (!brace) return { boxes, rules };
+    const s = brace.size;
+    const under = brace.tex === "\\underbrace";
+    const mid = (brace.top + brace.bottom) / 2;
+    const within = (b: { x0: number; x1: number }): boolean => cx(b) > brace.x0 - 0.05 * s && cx(b) < brace.x1 + 0.05 * s;
+    // The rules between the pieces are the brace's own.
+    rules = rules.filter((r) => !(within(r) && Math.abs(r.y - mid) < 0.4 * s));
+    const others = boxes.filter((b) => b !== brace && within(b));
+    const above = others.filter((b) => (b.top + b.bottom) / 2 < mid);
+    const below = others.filter((b) => (b.top + b.bottom) / 2 >= mid);
+    const spanned = under ? above : below;
+    const label = under ? below : above;
+    // A label may be wider than its brace: it goes on as far as script-size
+    // boxes on its line keep touching it.
+    for (let grew = label.length > 0; grew; ) {
+      grew = false;
+      const e = bbox(label);
+      for (const b of boxes) {
+        if (b === brace || label.includes(b) || spanned.includes(b) || b.size >= 0.8 * s) continue;
+        const m = (b.top + b.bottom) / 2;
+        if (m < e.top - 0.2 * s || m > e.bottom + 0.2 * s || (under ? m < mid : m > mid)) continue;
+        if (b.x0 > e.x1 + 0.45 * s || b.x1 < e.x0 - 0.45 * s) continue;
+        label.push(b);
+        grew = true;
+      }
+    }
+    const side = (set: Box[]): MathRule[] => {
+      const e = set.length > 0 ? bbox(set) : null;
+      return e ? rules.filter((r) => within(r) && r.y > e.top - 0.5 * s && r.y < e.bottom + 0.5 * s) : [];
+    };
+    const spannedRules = side(spanned);
+    const labelRules = side(label);
+    const inner = spanned.length > 0 ? layout(spanned, spannedRules, allowStack) : { tex: "", base: null };
+    const tag = label.length > 0 ? layout(label, labelRules, allowStack).tex : "";
+    const all = [brace, ...spanned, ...label];
+    const e = bbox(all);
+    const gone = new Set(all);
+    const goneRules = new Set([...spannedRules, ...labelRules]);
+    const full = spanned.filter((b) => b.size >= 0.8 * Math.max(...spanned.map((x) => x.size)));
+    const made: Box = {
+      ...e,
+      base: inner.base ?? (full.length > 0 ? median(full.map((b) => b.base)) : brace.base),
+      size: spanned.length > 0 ? Math.max(...spanned.map((b) => b.size)) : s,
+      tex: `${brace.tex}{${inner.tex}}${tag ? `${under ? "_" : "^"}{${tag}}` : ""}`,
+      kind: "frac",
+    };
+    boxes = [...boxes.filter((b) => !gone.has(b)), made];
+    rules = rules.filter((r) => !goneRules.has(r));
+  }
+}
+
+function layoutRow(input: Box[], inputRules: readonly MathRule[], allowStack: boolean): { tex: string; base: number | null } {
+  let boxes = input;
+  let rules = inputRules;
+  if (boxes.some((b) => b.cls === "brace")) {
+    const braced = applyBraces(boxes, rules, allowStack);
+    boxes = braced.boxes;
+    rules = braced.rules;
+  }
   const structured = rules.length > 0 ? applyRules(boxes, rules) : boxes;
   let lines = splitLines(structured);
   if (allowStack) lines = mergeStackedFractions(lines);

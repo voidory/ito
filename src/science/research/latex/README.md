@@ -54,8 +54,9 @@ with). Both build the app and take about two minutes.
 
 - The **target** is 99.9% exact match, claimed for pdfLaTeX with Computer
   Modern and AMS fonts: the `tex-display`, `tex-inline` and `tex-tounicode`
-  tiers. Tiers in other fonts (`tex-times`) and scanned pages have no target
-  until their baselines are understood.
+  tiers. Tiers in other fonts (`tex-times`, `real-display-times` to
+  `real-display-stix`) and scanned pages have a floor and no target: part of
+  what they miss is not on the page (see "Tiers in other fonts").
 - The **floor** is what CI enforces (`.github/workflows/latex-benchmark.yml`).
   It sits one point under the measured baseline and should only be raised.
 
@@ -140,6 +141,29 @@ Rules of use, stricter than the held-out set's:
   harvest sealed` with a new window in the script, after moving this set's
   papers into the main store.
 
+## Survey set
+
+`corpus-survey/` holds 6,635 display and 8,954 inline equations from 300 more
+openly licensed arXiv papers (June 2024), none of them in another set and no
+equation shared (`corpus.test.ts` checks both). It is not a measurement. It is
+the set that is read: thirty papers show what thirty authors write, and a rule
+made for one author seldom helps the next thirty, so this is large enough to
+rank what goes wrong by **how many papers it goes wrong in**.
+
+```bash
+npm run survey:latex                        # writes SURVEY.md
+ITO_CLASS='row -> lines' npx vite-node scripts/dev/latex-survey.ts   # failures of a class, one paper each first
+ITO_GREP='underbrace' npx vite-node scripts/dev/latex-survey.ts      # failures whose source matches
+```
+
+A failure's class is mechanical: where its tree first departs from the
+truth's, as `truth -> draft`. Nobody chooses the classes. `SURVEY.md` lists
+them by papers. Since the survey is developed against, its rate overstates
+what unseen papers get; the sealed set says that. The harvest also records
+each paper's document class and packages (`real-papers-survey.json`), which
+shows what papers set their mathematics in: of the 300, 47 load or select a
+Times package and 13 load `lmodern`, so the font tiers above are not a corner.
+
 ## Corpus
 
 `corpus/manifest.json` lists the equations (`id -> LaTeX`) and, per tier, each
@@ -158,6 +182,13 @@ selection as `[id, page, x0, y0, x1, y1]` in PDF points from the bottom-left.
 | `real-display-numbered` | The same display equations centred and numbered as `equation` sets them, with a box as wide as the column |
 | `real-display-dvips` | The same display equations through `latex`, `dvips` and Ghostscript, which draw rules as image masks |
 | `real-display-lm` | The same display equations in Latin Modern (`lmodern`, T1 text) |
+| `real-display-times` | The same display equations with Times text and Computer Modern math (`times`) |
+| `real-display-ptm` | ... in Times with `mathptmx` |
+| `real-display-tx` | ... in Times with `txfonts` |
+| `real-display-newtx` | ... in Times with `newtxtext`, `newtxmath` |
+| `real-display-pazo` | ... in Palatino with `mathpazo` |
+| `real-display-newpx` | ... in Palatino with `newpxtext`, `newpxmath` |
+| `real-display-stix` | ... in STIX Two (`stix2`) |
 
 160 equations are hand-picked real formulas (`scripts/math-corpus/curated.mjs`);
 the rest come from a seeded grammar (`scripts/math-corpus/grammar.mjs`) that
@@ -209,6 +240,25 @@ surroundings, not the mathematics.
 - **`real-display-dvips`** needs `dvips` and `gs` to regenerate.
 - **`real-display-lm`** needs the `lmodern` package.
 
+### Tiers in other fonts
+
+Seven tiers set the development papers' display equations in the fonts
+papers use besides Computer Modern. The extractor reads them from slot tables
+generated the same way as Computer Modern's (`scripts/gen-tex-font-slots.mjs`
+asks TeX under each font package), so a font tier should score what
+`real-display` scores, less what that font does not show:
+
+- `mathptmx` has one glyph for `\epsilon` and `\varepsilon`, and no bold
+  math: `\boldsymbol` prints the symbol three times a hair apart, which is
+  read back as bold.
+- A font package may lack a glyph an equation asks for (`newpx` has no sans
+  Greek capitals); TeX then prints nothing, and the draft cannot have it.
+
+They exist in the development corpus only. The tables come from TeX, not
+from reading failures, so a held-out copy would have nothing to catch.
+Fonts with no table (Word's Cambria Math, MathTime, Fourier, Libertinus
+and others) fall back to the character heuristics and are not measured.
+
 ### Regenerating
 
 ```bash
@@ -226,7 +276,8 @@ to `arxiv.org` and `oaipmh.arxiv.org`.
 
 Needs `pdflatex` (Debian: `texlive-latex-base texlive-fonts-recommended`),
 `pdftoppm` (`poppler-utils`) and Node 22.18 or later; the real-paper tiers
-also need `dvips`, `gs` (`ghostscript`) and `lmodern`. Output is deterministic:
+also need `dvips`, `gs` (`ghostscript`), `lmodern`, and for the font tiers
+`texlive-fonts-extra`, `texlive-latex-extra` and `texlive-plain-generic`. Output is deterministic:
 the same seed and TeX version give byte-identical files. Changing the corpus
 changes the baseline, so rerun the report and revisit the floors in the same
 commit.

@@ -428,6 +428,16 @@ column-wide box 95.7% and 90.7%.
   and reading failures paper by paper does not move that. Getting further
   needs either many more papers per round or rules of a more general kind;
   the 99.9% target should be restated against the sealed set.
+- **Then, ranked by papers.** A survey set of 300 papers
+  (`corpus-survey/`, `SURVEY.md`) ranks failure classes by how many papers
+  each occurs in. Its first class was one general cause in 46 papers (an
+  exponent on a tall bracket, a limit that holds a fraction, `\underbrace`):
+  fixing the causes moved the survey's display rate from 93.3% to 94.3% with
+  no change on the development set and +0.3 points on the held-out one. What
+  is left is a long tail (123 classes in one paper each) and a few classes
+  of ten papers. Separately, the slot tables now cover Times, Palatino and
+  STIX math (eight font packages); `tex-times` went from 41.7% to 95.3% and
+  seven font tiers sit at 96% to 98%.
 - **Not done:** the intermediate tree (task 1), scored search (2 and 3),
   `\left`/`\right` (4), `\tag` output (7: numbers are dropped), accents
   over several glyphs, pre-scripts, and one-row matrices, which print exactly

@@ -235,6 +235,47 @@ describe("sealed set", () => {
   });
 });
 
+describe("survey set", () => {
+  const survey = JSON.parse(readFileSync(resolve(HERE, "corpus-survey/manifest.json"), "utf8")) as typeof manifest & {
+    set: string;
+    paperOf: Record<string, string>;
+    sources: { arxiv: string; licence: string }[];
+  };
+  const sealed = JSON.parse(readFileSync(resolve(HERE, "corpus-sealed/manifest.json"), "utf8")) as typeof manifest & { sources: { arxiv: string }[] };
+
+  it("has its PDFs and in-page boxes for known equations", () => {
+    expect(survey.set).toBe("survey");
+    for (const [name, tier] of Object.entries(survey.tiers)) {
+      expect(existsSync(resolve(HERE, "corpus-survey", tier.pdf)), `${name} pdf`).toBe(true);
+      expect(tier.placements.length).toBeGreaterThanOrEqual(5000);
+      for (const [id, , x0, y0, x1, y1] of tier.placements) {
+        expect(survey.equations[id], `${name} ${id}`).toBeDefined();
+        expect(survey.paperOf[id], `${name} ${id} paper`).toBeDefined();
+        expect(x0 >= 0 && y0 >= 0 && x1 <= tier.pageWidth && y1 <= tier.pageHeight && x1 > x0 && y1 > y0, `${name} ${id} box`).toBe(true);
+      }
+    }
+  });
+
+  it("shares no paper and no equation with any other set, so the sealed set stays unseen", () => {
+    const papers = new Set(survey.sources.map((s) => s.arxiv));
+    expect(papers.size).toBeGreaterThanOrEqual(250);
+    for (const m of [manifest, heldout, sealed]) {
+      for (const s of (m as unknown as { sources: { arxiv: string }[] }).sources) expect(papers.has(s.arxiv), s.arxiv).toBe(false);
+    }
+    const others = new Set([...Object.values(manifest.equations), ...Object.values(heldout.equations), ...Object.values(sealed.equations)].map((l) => canonicalLatex(l)));
+    const seen = new Set<string>();
+    for (const [id, latex] of Object.entries(survey.equations)) {
+      const key = canonicalLatex(latex);
+      expect(others.has(key), `${id} is in another set`).toBe(false);
+      expect(seen.has(key), `${id} duplicates another survey equation`).toBe(false);
+      seen.add(key);
+    }
+    for (const s of survey.sources) {
+      expect(["http://creativecommons.org/licenses/by/4.0/", "http://creativecommons.org/publicdomain/zero/1.0/"]).toContain(s.licence);
+    }
+  });
+});
+
 describe("clusterInterval", () => {
   it("is wider than an interval that takes equations as independent when papers differ", () => {
     // Ten papers of 30 equations: nine perfect, one half wrong.

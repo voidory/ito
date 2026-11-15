@@ -28,7 +28,7 @@
 
 import type { MathGlyph, MathRule } from "./mathLayout";
 import type { ModelGlyph, PageMathModel } from "./pageMathModel";
-import { TEX_ASSEMBLIES, TEX_COMPOSITES, TEX_FONT_INK, TEX_FONT_SLOTS, TEX_KEYED_BY_CHARACTER } from "./texFontSlots";
+import { TEX_ASSEMBLIES, TEX_BRACES, TEX_COMPOSITES, TEX_FONT_INK, TEX_FONT_SLOTS, TEX_KEYED_BY_CHARACTER } from "./texFontSlots";
 
 /** TeX's math axis sits a quarter of an em above the baseline. */
 const AXIS = 0.25;
@@ -307,6 +307,39 @@ function mergeAssemblies(items: Item[]): Item[] {
   return used.size === 0 ? items : [...items.filter((g) => !used.has(g)), ...made];
 }
 
+/**
+ * Replace the pieces of each horizontal brace by the brace: `\underbrace` and
+ * `\overbrace` are the same four pieces, in a different order.
+ */
+function mergeBraces(items: Item[]): Item[] {
+  const used = new Set<Item>();
+  const made: Item[] = [];
+  for (const brace of TEX_BRACES) {
+    const is = (g: Item, k: number): boolean => g.family === brace.parts[k]![0] && g.slot === brace.parts[k]![1];
+    for (const first of items) {
+      if (used.has(first) || !is(first, 0)) continue;
+      // Pieces in the recorded order, left to right; a piece may repeat (the
+      // fill of a font that draws no rules).
+      const row = items
+        .filter((g) => !used.has(g) && g.size === first.size && Math.abs(g.y - first.y) < 0.05 * first.size && g.x0 > first.x0)
+        .sort((p, q) => p.x0 - q.x0);
+      const parts: Item[] = [first];
+      let at = 0;
+      const last = brace.parts.length - 1;
+      for (const g of row) {
+        if (is(g, at + 1)) at++;
+        else if (!is(g, at)) break;
+        parts.push(g);
+        if (at === last && !is(g, last - 1)) break;
+      }
+      if (at !== last) continue;
+      parts.forEach((p) => used.add(p));
+      made.push({ ...union(parts, brace.tex, "brace"), axis: false });
+    }
+  }
+  return used.size === 0 ? items : [...items.filter((g) => !used.has(g)), ...made];
+}
+
 /** A rectangle in the model's units (viewport points at scale 1, y downwards). */
 export interface ModelRect {
   readonly x0: number;
@@ -340,7 +373,7 @@ export function regionMathGlyphs(
     if (cut > CUT_TOLERANCE * (item.bottom - item.top)) continue;
     inside.push(item);
   }
-  const items = mergeAssemblies(mergeComposites(mergeOverprints(inside)));
+  const items = mergeAssemblies(mergeBraces(mergeComposites(mergeOverprints(inside))));
   // mathptmx takes its summation and product signs from the Symbol font
   // enlarged and its integrals from the extension font reduced, so their own
   // size is not the size of the line they are on. An operator in a script is

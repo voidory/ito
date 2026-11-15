@@ -192,6 +192,9 @@ for (const name of ACCENTS) ask(`$\\${name}{\\hphantom{x}}$`, "accent", `\\${nam
 for (const name of WIDE_ACCENTS) {
   for (const arg of ["x", "xx", "xxx", "xxxx", "xxxxxx"]) ask(`$\\${name}{\\hphantom{${arg}}}$`, "accent", `\\${name}`, "accent");
 }
+// Horizontal braces: four pieces in a row with rules between them. The same
+// four pieces make both; their order says which.
+for (const name of ["underbrace", "overbrace"]) ask(`$\\${name}{\\hphantom{xxxxxxxx}}$`, "brace", `\\${name}`, "brace");
 // Delimiters at every size TeX has: its ready-made variants, then the built-up
 // form. The strut makes the delimiter grow; `\right.` is the empty partner.
 const HEIGHTS = [];
@@ -256,6 +259,7 @@ function texDocument(preamble) {
 const slots = new Map();
 const composites = [];
 const assemblies = new Map();
+const braces = [];
 const problems = [];
 
 const entryOf = (family, slot) => slots.get(family)?.get(slot);
@@ -279,6 +283,16 @@ function record(req, glyphs) {
     const rest = glyphs.filter((g) => entryOf(g.family, g.slot)?.tex !== "x");
     if (rest.length !== 1) return void problems.push(`${req.src}: expected one accent glyph, saw ${rest.length}`);
     return claim(rest[0].family, rest[0].slot, entry);
+  }
+
+  if (req.kind === "brace") {
+    const pieces = [...glyphs].sort((a, b) => a.x - b.x);
+    if (pieces.length < 3) return void problems.push(`${req.src}: ${pieces.length} pieces`);
+    // A piece that repeats is the fill of a font that draws no rules: once is enough.
+    const order = pieces.map((g) => [g.family, g.slot]).filter((part, i, all) => i === 0 || part.join() !== all[i - 1].join());
+    if (!braces.some((b) => b.parts.join() === order.join())) braces.push({ tex: req.tex, parts: order });
+    for (const g of pieces) claim(g.family, g.slot, { tex: "", cls: "part" });
+    return;
   }
 
   if (req.kind === "delimiter") {
@@ -524,6 +538,11 @@ lines.push("export const TEX_ASSEMBLIES: readonly { readonly tex: string; readon
 for (const a of [...assemblies.values()].sort((x, y) => x.tex.localeCompare(y.tex) || x.slots.length - y.slots.length)) {
   lines.push(`  { tex: ${JSON.stringify(a.tex)}, cls: ${JSON.stringify(a.cls)}, family: ${JSON.stringify(a.family)}, slots: ${JSON.stringify(a.slots)} },`);
 }
+lines.push("];");
+lines.push("");
+lines.push("/** Horizontal braces: the pieces as [family, slot], left to right. A piece may repeat on the page. */");
+lines.push("export const TEX_BRACES: readonly { readonly tex: string; readonly parts: readonly (readonly [string, number])[] }[] = [");
+for (const b of braces) lines.push(`  { tex: ${JSON.stringify(b.tex)}, parts: ${JSON.stringify(b.parts)} },`);
 lines.push("];");
 lines.push("");
 lines.push("/** family -> flat [slot, lowest ink, highest ink, ...] in thousandths of the font size, baseline at 0. */");
