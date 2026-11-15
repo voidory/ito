@@ -11,11 +11,10 @@
  * from that cache SYNCHRONOUSLY on the next load — before (or without waiting
  * for) a full pdf.js textLayer render.
  *
- * It also fixes scanned / OCR PDFs: an OCR span can report 0×0 client rects, or
- * an image-only page can have 0 text items. {@link synthesizeOcrPageSpans}
- * injects deterministic horizontal text-band spans so such pages stay
- * selectable + highlightable; the normalized rects here always clamp to a
- * non-zero minimum so a zero-height OCR span is never stored as `0×0`.
+ * It also covers scanned / OCR PDFs: an OCR span can report 0×0 client rects,
+ * so normalized rects clamp to a non-zero minimum. An image-only page has no
+ * text and stays unselectable; {@link synthesizeOcrPageSpans} only places
+ * recognised lines it is given.
  */
 
 import type { PreParsedPageLayout, PreParsedSpan } from "../model";
@@ -165,19 +164,19 @@ export function hydrateTextLayerFromCache(
 /**
  * M17 (§1.2) synthesize deterministic selectable OCR text-line spans for an
  * image-only / scanned page that pdf.js reports with `0` native text items.
- * Produces evenly-spaced horizontal text bands down the page so the page can
- * still be selected + highlighted. When `fallbackLines` is omitted a small
- * deterministic band set is generated (so the geometry is reproducible for
- * tests + reloads). Every span's rect is clamped to {@link MIN_SPAN_NORM}.
+ * Places the given recognised lines as evenly-spaced horizontal bands so an
+ * image-only page can be selected + highlighted. The line positions are an
+ * approximation, not measured. With no `fallbackLines` it returns no spans: the
+ * app has no OCR of its own, and invented placeholder text must never be
+ * selectable or stored as a quote. Every rect is clamped to {@link MIN_SPAN_NORM}.
  */
 export function synthesizeOcrPageSpans(
-  pageIndex: number,
+  _pageIndex: number,
   fallbackLines?: readonly string[],
 ): PreParsedSpan[] {
-  const lines =
-    fallbackLines && fallbackLines.length > 0
-      ? fallbackLines
-      : defaultOcrBandLines(pageIndex);
+  // Only real recognised text is ever placed. With no lines there is nothing to
+  // select, so the page stays honestly unselectable (the reader says so).
+  const lines = fallbackLines ?? [];
   const n = lines.length;
   const spans: PreParsedSpan[] = [];
   const marginX = 0.06;
@@ -198,14 +197,6 @@ export function synthesizeOcrPageSpans(
 }
 
 /** Deterministic placeholder OCR band text for a scanned page with no lines. */
-function defaultOcrBandLines(pageIndex: number): readonly string[] {
-  const n = 12;
-  const out: string[] = [];
-  for (let i = 0; i < n; i++) {
-    out.push(`[OCR] page ${pageIndex + 1} line ${i + 1}`);
-  }
-  return out;
-}
 
 /**
  * M17 (§1.2) convenience: inject synthesized OCR spans directly into a live

@@ -17,7 +17,6 @@ import type { PageBox } from "./anchor";
 import {
   extractPreParsedPageLayout,
   hydrateTextLayerFromCache,
-  injectSyntheticOcrTextLayer,
   type PreParsedPageLayout,
   type TextItemLike,
   type ViewportLike,
@@ -343,8 +342,9 @@ export async function renderPage(
     const stageW = viewport.width || 1;
     const stageH = viewport.height || 1;
     if (textContent.items.length === 0) {
-      // Image-only / scanned page: inject selectable synthetic OCR bands.
-      injectSyntheticOcrTextLayer(textLayer, pageIndexOf(), stageW, stageH);
+      // Image-only / scanned page: there is no text to select. Placeholder
+      // bands used to be injected here; they carried fake text, so none now.
+      // Real recognised lines can be injected with injectSyntheticOcrTextLayer.
       return;
     }
     const spans = textLayer.querySelectorAll<HTMLElement>("span");

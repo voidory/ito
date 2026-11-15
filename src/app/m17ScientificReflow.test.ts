@@ -583,3 +583,10 @@ describe("M17 Test 8 — mechanism vectorised from figure pixels", () => {
     expect(spec.arrows[0]!.barb).toBe("fishhook");
   });
 });
+
+describe("image-only pages carry no invented text", () => {
+  it("synthesizes no spans unless real recognised lines are given", () => {
+    expect(synthesizeOcrPageSpans(0)).toEqual([]);
+    expect(synthesizeOcrPageSpans(3, [])).toEqual([]);
+  });
+});
