@@ -10,12 +10,12 @@ Nobody has read this set's failures and the runner refuses to dump them. It is t
 
 | Tier | Selections | Exact | Exact rate | 95% interval, by paper | Papers all exact | Worst paper | Development rate | Target |
 |---|---|---|---|---|---|---|---|---|
-| `real-display` | 716 | 667 | 93.16% | 89.43% to 96.18% | 11 of 30 | 64.71% | 98.03% | 99.90% |
-| `real-inline` | 863 | 853 | 98.84% | 98.03% to 99.54% | 21 of 29 | 93.33% | 99.32% | 99.90% |
-| `real-inline-punct` | 863 | 853 | 98.84% | 98.03% to 99.54% | 21 of 29 | 93.33% | 99.32% | 99.90% |
-| `real-display-numbered` | 716 | 667 | 93.16% | 89.43% to 96.18% | 11 of 30 | 64.71% | 98.03% | 99.90% |
-| `real-display-dvips` | 716 | 666 | 93.02% | 89.31% to 96.04% | 11 of 30 | 64.71% | 98.03% | 99.90% |
-| `real-display-lm` | 716 | 664 | 92.74% | 89.04% to 95.70% | 10 of 30 | 64.71% | 98.03% | 99.90% |
+| `real-display` | 716 | 669 | 93.44% | 89.69% to 96.48% | 12 of 30 | 64.71% | 98.03% | 99.90% |
+| `real-inline` | 863 | 854 | 98.96% | 98.16% to 99.65% | 22 of 29 | 93.33% | 99.32% | 99.90% |
+| `real-inline-punct` | 863 | 854 | 98.96% | 98.16% to 99.65% | 22 of 29 | 93.33% | 99.32% | 99.90% |
+| `real-display-numbered` | 716 | 669 | 93.44% | 89.69% to 96.48% | 12 of 30 | 64.71% | 98.03% | 99.90% |
+| `real-display-dvips` | 716 | 669 | 93.44% | 89.69% to 96.48% | 12 of 30 | 64.71% | 98.03% | 99.90% |
+| `real-display-lm` | 716 | 666 | 93.02% | 89.34% to 96.07% | 11 of 30 | 64.71% | 98.03% | 99.90% |
 
 - `real-display`: display equations from the source of 30 openly licensed arXiv papers, set by the benchmark harness (pdfLaTeX, Computer Modern 10pt)
 - `real-inline`: inline formulas from the same 30 papers, each inside a line of prose

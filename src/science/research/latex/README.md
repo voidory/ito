@@ -126,10 +126,15 @@ real-paper tiers of the other two sets are no longer unseen:
 - **This set's failures have not been read.** Measured before and after those
   rules it stood at 92.9% and 93.2%. Rules written against one set of papers
   barely carry to the next: what fails is each paper's own notation.
+- **Third look**, after the font tables and the survey fixes (rules written
+  against 300 other papers, never against these): `real-display` 93.4%
+  (89.7% to 96.5% by paper), `real-inline` 99.0%. The survey fixes moved the
+  survey by a point and this set by a quarter of one, which is what the
+  survey rate overstating unseen papers looks like.
 
 Rules of use, stricter than the held-out set's:
 
-- **Gates only, and count the looks.** Two so far, both recorded above.
+- **Gates only, and count the looks.** Three so far, all recorded above.
 - **Aggregates only.** No dump, no failures, no breakdown by construct, which
   would say where to look. `scripts/dev/latex-score.ts` gives counts for it
   and refuses anything else.
