@@ -634,7 +634,7 @@ function mergeStyledRuns(mains: Box[], size: number, all: readonly Box[] = mains
   for (const b of mains) {
     const last = run[run.length - 1];
     if (b.exact && b.style && b.kind === "glyph") {
-      if (last && (last.style !== b.style || b.x0 - last.x1 > 0.12 * size)) flush();
+      if (last && (last.style !== b.style || b.x0 - last.x1 > 0.09 * size)) flush();
       run.push(b);
     } else {
       flush();

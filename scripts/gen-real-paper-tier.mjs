@@ -49,14 +49,25 @@ const SEALED_STORE = resolve(HERE, "math-corpus/real-papers-sealed.json");
  * the extractor does on papers it was never developed against.
  */
 const SEALED = process.argv[3] === "sealed";
-const STORE = SEALED ? SEALED_STORE : MAIN_STORE;
+/**
+ * `harvest survey` fetches a third kind of set: ten times as many papers, to
+ * be read. Thirty papers show what thirty authors write; a rule made for one
+ * of them seldom helps the next thirty. The survey is large enough to rank
+ * what goes wrong by how many papers it goes wrong in (corpus-survey/,
+ * `npm run survey:latex`).
+ */
+const SURVEY = process.argv[3] === "survey";
+const SURVEY_STORE = resolve(HERE, "math-corpus/real-papers-survey.json");
+const STORE = SEALED ? SEALED_STORE : SURVEY ? SURVEY_STORE : MAIN_STORE;
 
 /** Papers wanted per arXiv set; in the main store half go to each corpus. */
-const QUOTAS = SEALED
+const QUOTAS = SURVEY
+  ? [["math", 80], ["physics:hep-th", 40], ["physics:quant-ph", 40], ["physics:cond-mat", 30], ["physics:astro-ph", 30], ["cs", 50], ["stat", 30]]
+  : SEALED
   ? [["math", 8], ["physics:hep-th", 4], ["physics:quant-ph", 4], ["physics:cond-mat", 3], ["physics:astro-ph", 3], ["cs", 5], ["stat", 3]]
   : [["math", 16], ["physics:hep-th", 8], ["physics:quant-ph", 8], ["physics:cond-mat", 6], ["physics:astro-ph", 6], ["cs", 10], ["stat", 6]];
 /** Records last touched in this window are the candidates: fixed, so a re-harvest finds the same papers. */
-const WINDOW = SEALED ? { from: "2024-09-09", until: "2024-09-11" } : { from: "2024-03-04", until: "2024-03-06" };
+const WINDOW = SURVEY ? { from: "2024-06-03", until: "2024-06-14" } : SEALED ? { from: "2024-09-09", until: "2024-09-11" } : { from: "2024-03-04", until: "2024-03-06" };
 const LICENCES = new Set([
   "http://creativecommons.org/licenses/by/4.0/",
   "http://creativecommons.org/publicdomain/zero/1.0/",
@@ -69,9 +80,21 @@ const USER_AGENT = "math-corpus-builder/1.0";
 /** The harness preamble for this tier: bold symbols and script letters are common in papers. */
 const PREAMBLE = [
   String.raw`\usepackage{bm}`,
-  String.raw`\DeclareFontFamily{U}{rsfs}{}\DeclareFontShape{U}{rsfs}{m}{n}{<-> rsfs10}{}`,
-  String.raw`\DeclareMathAlphabet{\mathscr}{U}{rsfs}{m}{n}`,
+  // A font package that brings its own script alphabet keeps it.
+  String.raw`\ifdefined\mathscr\else\DeclareFontFamily{U}{rsfs}{}\DeclareFontShape{U}{rsfs}{m}{n}{<-> rsfs10}{}`,
+  String.raw`\DeclareMathAlphabet{\mathscr}{U}{rsfs}{m}{n}\fi`,
 ].join("\n");
+
+/** Tiers that set the development papers' display equations in other fonts: [tier, preamble, description]. */
+const FONT_TIERS = [
+  ["real-display-times", String.raw`\usepackage{times}`, "Times text with Computer Modern math (the `times` package, as IEEEtran and REVTeX's `times` option give)"],
+  ["real-display-ptm", String.raw`\usepackage{mathptmx}`, "Times with mathptmx"],
+  ["real-display-tx", String.raw`\usepackage{txfonts}`, "Times with txfonts"],
+  ["real-display-newtx", String.raw`\usepackage{newtxtext,newtxmath}`, "Times with newtx"],
+  ["real-display-pazo", String.raw`\usepackage{mathpazo}`, "Palatino with mathpazo"],
+  ["real-display-newpx", String.raw`\usepackage{newpxtext,newpxmath}`, "Palatino with newpx"],
+  ["real-display-stix", String.raw`\usepackage{stix2}`, "STIX Two"],
+];
 
 // ---------------------------------------------------------------------------
 // Vocabulary: the only commands an equation may contain
@@ -88,7 +111,7 @@ const STRUCTURE = words(`frac dfrac tfrac binom dbinom tbinom sqrt left right mi
   rbrace lbrack rbrack langle rangle lfloor rfloor lceil rceil ast colon prime backslash owns
   sin cos tan cot sec csc sinh cosh tanh coth arcsin arccos arctan log ln lg exp lim liminf limsup
   max min sup inf det dim ker arg deg gcd hom Pr mathop mathbin mathrel mathord nonumber notag
-  perp parallel dag ddag`);
+  perp parallel dag ddag ensuremath`);
 const ENVIRONMENTS = new Set(words(`aligned gathered cases matrix pmatrix bmatrix Bmatrix vmatrix Vmatrix
   smallmatrix array`));
 const VOCABULARY = new Set(STRUCTURE);
@@ -138,7 +161,7 @@ const unxml = (s) =>
 async function listPapers(set) {
   const out = [];
   let url = `https://oaipmh.arxiv.org/oai?verb=ListRecords&metadataPrefix=arXiv&set=${encodeURIComponent(set)}&from=${WINDOW.from}&until=${WINDOW.until}`;
-  for (let page = 0; url && page < 4; page++) {
+  for (let page = 0; url && page < (SURVEY ? 12 : 4); page++) {
     const body = (await politeFetch(url))?.toString("utf8");
     if (!body) break;
     for (const rec of body.split("<record>").slice(1)) {
@@ -160,7 +183,13 @@ async function listPapers(set) {
 
 /** The .tex files of a paper's source, or null when there is no TeX source. */
 async function fetchSource(id) {
-  const raw = await politeFetch(`https://arxiv.org/e-print/${id}`);
+  // ITO_SOURCE_CACHE names a directory that keeps what was fetched, so a harvest that is run again asks arXiv for nothing twice.
+  const cache = process.env.ITO_SOURCE_CACHE ? join(process.env.ITO_SOURCE_CACHE, `${id}.gz`) : null;
+  let raw = cache && existsSync(cache) ? readFileSync(cache) : null;
+  if (!raw) {
+    raw = await politeFetch(`https://arxiv.org/e-print/${id}`);
+    if (cache) writeFileSync(cache, raw ?? Buffer.alloc(0));
+  }
   if (!raw || raw.length > MAX_SOURCE_BYTES) return null;
   let data;
   try {
@@ -284,6 +313,16 @@ function expand(tex, macros) {
   return null; // still expanding after twelve rounds: recursive
 }
 
+/** A paper's document class and the packages it loads: what decides the fonts its PDF is set in. */
+function setupOf(source) {
+  const cls = /\\documentclass\s*(?:\[[^\]]*\])?\s*\{([^{}]+)\}/.exec(source);
+  const packages = new Set();
+  for (const m of source.matchAll(/\\usepackage\s*(?:\[[^\]]*\])?\s*\{([^{}]+)\}/g)) {
+    for (const name of m[1].split(",")) if (/^[\w-]+$/.test(name.trim())) packages.add(name.trim());
+  }
+  return { class: cls ? cls[1].trim() : "", options: /\\documentclass\s*\[([^\]]*)\]/.exec(source)?.[1].replace(/\s+/g, "") ?? "", packages: [...packages].sort() };
+}
+
 const DISPLAY_ENVS = ["equation", "equation*", "align", "align*", "gather", "gather*", "displaymath"];
 
 /** Display and inline math of a document body, in order of appearance. */
@@ -314,6 +353,29 @@ function findMath(body) {
   return { display, inline };
 }
 
+const OLD_FONTS = { rm: "mathrm", bf: "mathbf", it: "mathit", cal: "mathcal", sf: "mathsf", tt: "mathtt" };
+/**
+ * `{\rm d}` is the plain TeX spelling of `\mathrm{d}`, and still common. Only
+ * the form where the switch opens its group is rewritten: there its reach is
+ * exactly the group.
+ */
+function modernFonts(tex) {
+  let out = "";
+  for (let i = 0; i < tex.length; ) {
+    const m = tex[i] === "{" ? /^\{\s*\\(rm|bf|it|cal|sf|tt)(?![A-Za-z])\s*/.exec(tex.slice(i, i + 12)) : null;
+    const group = m ? readGroup(tex, i) : null;
+    if (!m || !group) {
+      const take = tex[i] === "\\" ? 2 : 1;
+      out += tex.slice(i, i + take);
+      i += take;
+      continue;
+    }
+    out += `{\\${OLD_FONTS[m[1]]}{${modernFonts(group[0].slice(m[0].length - 1))}}}`;
+    i = group[1];
+  }
+  return out;
+}
+
 /** Tidy one equation's source, or say why it cannot be used. */
 function prepare(raw, macros, kind) {
   let tex = raw
@@ -325,7 +387,7 @@ function prepare(raw, macros, kind) {
     .trim();
   tex = expand(tex, macros);
   if (tex == null) return { why: "macro could not be expanded" };
-  tex = tex.replace(/\s+/g, " ").trim();
+  tex = modernFonts(tex.replace(/\s+/g, " ").trim());
   if (!/^[\x20-\x7e]*$/.test(tex)) return { why: "non-ASCII characters" };
   if (tex.includes("$") || tex.includes("#") || tex.includes("~")) return { why: "nested math, parameter or tie" };
   if (tex.length > (kind === "display" ? 260 : 110)) return { why: "too long" };
@@ -433,10 +495,10 @@ async function harvest() {
   const count = (map, key) => map.set(key, (map.get(key) ?? 0) + 1);
   // The sealed set takes no paper and no equation that the main store has.
   const taken = new Set();
-  if (SEALED) {
-    const main = JSON.parse(readFileSync(MAIN_STORE, "utf8"));
-    for (const p of main.papers) taken.add(p.id);
-    for (const e of main.equations) seen.add(canonicalLatex(e.latex));
+  for (const other of SEALED ? [MAIN_STORE] : SURVEY ? [MAIN_STORE, SEALED_STORE] : []) {
+    const store = JSON.parse(readFileSync(other, "utf8"));
+    for (const p of store.papers) taken.add(p.id);
+    for (const e of store.equations) seen.add(canonicalLatex(e.latex));
   }
 
   for (const [set, quota] of QUOTAS) {
@@ -485,8 +547,8 @@ async function harvest() {
       const inline = compileClean(work, "probe-i", spread(usable.inline, PER_PAPER * 3), { inline: true });
       const fitsI = inline.equations.filter((e) => inline.boxes.get(e.id).wd <= 230 && inline.boxes.get(e.id).ht + inline.boxes.get(e.id).dp <= 14);
       totals.compiled += fitsD.length + fitsI.length;
-      const split = SEALED ? "sealed" : accepted % 2 === 0 ? "dev" : "heldout";
-      papers.push({ ...paper, set, split });
+      const split = SEALED ? "sealed" : SURVEY ? "survey" : accepted % 2 === 0 ? "dev" : "heldout";
+      papers.push({ ...paper, set, split, ...(SURVEY ? { setup: setupOf(source) } : {}) });
       for (const [kind, list] of [["display", spread(fitsD, PER_PAPER)], ["inline", spread(fitsI, PER_PAPER)]]) {
         for (const e of list) {
           seen.add(e.key);
@@ -522,10 +584,11 @@ async function harvest() {
 
 function build() {
   const store = JSON.parse(readFileSync(MAIN_STORE, "utf8"));
-  if (existsSync(SEALED_STORE)) {
-    const sealed = JSON.parse(readFileSync(SEALED_STORE, "utf8"));
-    store.papers.push(...sealed.papers);
-    store.equations.push(...sealed.equations);
+  for (const other of [SEALED_STORE, SURVEY_STORE]) {
+    if (!existsSync(other)) continue;
+    const more = JSON.parse(readFileSync(other, "utf8"));
+    store.papers.push(...more.papers);
+    store.equations.push(...more.equations);
   }
   const work = mkdtempSync(join(tmpdir(), "ito-real-"));
   // An equation that either corpus already has from the grammar or the
@@ -534,10 +597,10 @@ function build() {
   for (const dir of ["corpus", "corpus-heldout"]) {
     const manifest = JSON.parse(readFileSync(resolve(LATEX_DIR, dir, "manifest.json"), "utf8"));
     for (const [id, latex] of Object.entries(manifest.equations)) {
-      if (!/^[rqs][di]\d/.test(id)) taken.add(canonicalLatex(latex));
+      if (!/^[rqsv][di]\d/.test(id)) taken.add(canonicalLatex(latex));
     }
   }
-  for (const [split, dir, prefix] of [["dev", "corpus", "r"], ["heldout", "corpus-heldout", "q"], ["sealed", "corpus-sealed", "s"]]) {
+  for (const [split, dir, prefix] of [["dev", "corpus", "r"], ["heldout", "corpus-heldout", "q"], ["sealed", "corpus-sealed", "s"], ["survey", "corpus-survey", "v"]]) {
     const papers = store.papers.filter((p) => p.split === split);
     if (papers.length === 0) continue;
     const ids = new Set(papers.map((p) => p.id));
@@ -559,6 +622,29 @@ function build() {
     if (d.equations.length !== display.length || i.equations.length !== inline.length) {
       throw new Error(`${split}: some stored equations no longer compile; run the harvest again`);
     }
+    if (split === "survey") {
+      // The survey is read, not gated: the two plain tiers are enough.
+      const out = resolve(LATEX_DIR, dir);
+      writeFileSync(join(out, "real-display.pdf"), d.pdf);
+      writeFileSync(join(out, "real-inline.pdf"), i.pdf);
+      const whole = {
+        version: 1,
+        set: "survey",
+        note: "Survey set, written by `node scripts/gen-real-paper-tier.mjs`. Equations from papers that no other set uses, many enough to rank failures by how many papers they occur in (`npm run survey:latex`). It is read and developed against. Boxes are PDF points, origin bottom-left: [id, page, x0, y0, x1, y1].",
+        sources: papers.map((p) => ({ arxiv: p.id, title: p.title, authors: p.authors.join(", "), licence: p.licence })),
+        paperOf: Object.fromEntries([...display, ...inline].map((e) => [e.id, e.paper])),
+        tiers: {
+          "real-display": tier("real-display.pdf", `display equations from the source of ${papers.length} openly licensed arXiv papers, set by the benchmark harness (pdfLaTeX, Computer Modern 10pt)`, placements(display, d.boxes, PAD_DISPLAY, PAD_DISPLAY)),
+          "real-inline": tier("real-inline.pdf", `inline formulas from the same ${papers.length} papers, each inside a line of prose`, placements(inline, i.boxes, PAD_INLINE_X, PAD_INLINE_Y)),
+        },
+        equations: Object.fromEntries([...display, ...inline].map((e) => [e.id, e.latex])),
+      };
+      const text = JSON.stringify(whole, null, 1)
+        .replace(/\[\n\s+("[^"]+"),\n\s+(\d+),\n\s+([-\d.]+),\n\s+([-\d.]+),\n\s+([-\d.]+),\n\s+([-\d.]+)\n\s+\]/g, "[$1,$2,$3,$4,$5,$6]");
+      writeFileSync(join(out, "manifest.json"), text + "\n");
+      console.log(`${split}: ${papers.length} papers, ${display.length} display and ${inline.length} inline equations -> ${out}`);
+      continue;
+    }
     // The same equations as a reader meets them: a sentence's mark against the
     // formula, a number beside the equation with a box as wide as the column,
     // and the older dvips route to PDF.
@@ -568,6 +654,10 @@ function build() {
     // Latin Modern as papers load it: T1 text, the math fonts in TeX's own encodings.
     const lm = compileClean(work, "real-display-lm", display, { preambleBefore: String.raw`\usepackage[T1]{fontenc}\usepackage{lmodern}` });
     const lmDisplay = lm.equations;
+    // The other fonts papers set mathematics in. Development corpus only: the
+    // tables that read them come from TeX, not from reading failures, so there
+    // is nothing for a second set to catch.
+    const fonts = split === "dev" ? FONT_TIERS.map(([name, preamble, what]) => ({ name, what, ...compileClean(work, name, display, { preambleBefore: preamble }) })) : [];
     const out = resolve(LATEX_DIR, dir);
     writeFileSync(join(out, "real-display.pdf"), d.pdf);
     writeFileSync(join(out, "real-inline.pdf"), i.pdf);
@@ -575,6 +665,7 @@ function build() {
     writeFileSync(join(out, "real-display-numbered.pdf"), numbered.pdf);
     writeFileSync(join(out, "real-display-dvips.pdf"), dvips.pdf);
     writeFileSync(join(out, "real-display-lm.pdf"), lm.pdf);
+    for (const f of fonts) writeFileSync(join(out, `${f.name}.pdf`), f.pdf);
     const manual = {
       note: "Written by `node scripts/gen-real-paper-tier.mjs`; merged into manifest.json by scripts/gen-math-corpus.mjs. Do not edit by hand.",
       sources: papers.map((p) => ({ arxiv: p.id, title: p.title, authors: p.authors.join(", "), licence: p.licence })),
@@ -610,6 +701,7 @@ function build() {
           "the same display equations in Latin Modern (lmodern with T1 text), less any with a glyph Latin Modern lacks",
           placements(lmDisplay, lm.boxes, PAD_DISPLAY, PAD_DISPLAY),
         ),
+        ...Object.fromEntries(fonts.map((f) => [f.name, tier(`${f.name}.pdf`, `the same display equations in ${f.what}, less any that font setup cannot set`, placements(f.equations, f.boxes, PAD_DISPLAY, PAD_DISPLAY))])),
       },
     };
     const json = JSON.stringify(manual, null, 1)
@@ -651,7 +743,7 @@ function build() {
     ...store.papers.map((p) => {
       const licence = p.licence.includes("publicdomain") ? `[CC0 1.0](${p.licence})` : `[CC BY 4.0](${p.licence})`;
       const cell = (t) => t.replace(/\|/g, "\\|");
-      return `| [${p.id}](https://arxiv.org/abs/${p.id}) | ${cell(p.title)} | ${cell(p.authors.join(", "))} | ${licence} | ${p.split === "dev" ? "development" : p.split === "heldout" ? "held-out" : "sealed"} |`;
+      return `| [${p.id}](https://arxiv.org/abs/${p.id}) | ${cell(p.title)} | ${cell(p.authors.join(", "))} | ${licence} | ${p.split === "dev" ? "development" : p.split === "heldout" ? "held-out" : p.split} |`;
     }),
     "",
   ];

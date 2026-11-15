@@ -16,16 +16,19 @@
  *     delimiters on the math axis and their own origin is at their top, so
  *     they are given the baseline of the line they are centred on.
  *
- * A glyph from a font with no table (anything but Computer Modern and the AMS
- * fonts) keeps the character pdf.js reports and no class: the layout then
- * falls back to its character heuristics for that glyph, with exact geometry.
+ * The tables cover Computer Modern and the AMS fonts, and the fonts of the
+ * packages papers use to set mathematics in Times, Palatino and STIX
+ * (mathptmx, txfonts, newtx, mathpazo, pxfonts, newpx, stix, stix2). A glyph
+ * from any other font keeps the character pdf.js reports and no class: the
+ * layout then falls back to its character heuristics for that glyph, with
+ * exact geometry.
  *
  * Pure and DOM-free.
  */
 
 import type { MathGlyph, MathRule } from "./mathLayout";
 import type { ModelGlyph, PageMathModel } from "./pageMathModel";
-import { TEX_ASSEMBLIES, TEX_COMPOSITES, TEX_FONT_INK, TEX_FONT_SLOTS } from "./texFontSlots";
+import { TEX_ASSEMBLIES, TEX_COMPOSITES, TEX_FONT_INK, TEX_FONT_SLOTS, TEX_KEYED_BY_CHARACTER } from "./texFontSlots";
 
 /** TeX's math axis sits a quarter of an em above the baseline. */
 const AXIS = 0.25;
@@ -33,6 +36,27 @@ const AXIS = 0.25;
 const COMPOSITE_TOLERANCE = 0.09;
 /** Font families whose glyphs are centred on the math axis, not set on the baseline. */
 const AXIS_FAMILIES = new Set(["CMEX"]);
+/** Classes a font may draw hanging from the origin even when most of its glyphs sit on the baseline (STIX Two Math). */
+const HANGS = new Set(["open", "close", "fence", "radical"]);
+const hanging = new Map<string, boolean>();
+/**
+ * Whether a family is an extension font: TeX's convention for those is that a
+ * glyph hangs from its origin, so the origin says nothing about the line the
+ * glyph is on. Computer Modern's is named; the others (txex, the STIX
+ * extensions...) are known by their ink, most of which lies below the origin.
+ */
+function isAxisFamily(family: string): boolean {
+  if (AXIS_FAMILIES.has(family)) return true;
+  let hit = hanging.get(family);
+  if (hit === undefined) {
+    const flat = TEX_FONT_INK[family] ?? [];
+    let below = 0;
+    for (let i = 0; i + 2 < flat.length; i += 3) if (flat[i + 2]! <= 60 && flat[i + 1]! < -400) below++;
+    hit = below >= 3 && below > flat.length / 3 / 2;
+    hanging.set(family, hit);
+  }
+  return hit;
+}
 
 /** How much of a glyph's height the selection's top or bottom edge may cut off. */
 const CUT_TOLERANCE = 0.25;
@@ -58,6 +82,8 @@ const LATIN_MODERN: readonly (readonly [RegExp, string, "slot" | "character"])[]
   [/^LMSANS\d+-REGULAR$/, "CMSS", "character"],
   [/^LMMONO\d+-REGULAR$/, "CMTT", "character"],
 ];
+/** Families that are several fonts under one name: a slot and the character together name a glyph. */
+const KEYED_BY_CHARACTER = new Set(TEX_KEYED_BY_CHARACTER);
 const resolved = new Map<string, { family: string; by: "slot" | "character" } | null>();
 /** The family whose table reads this font, and whether by slot or by character. */
 function tableOf(family: string): { family: string; by: "slot" | "character" } | null {
@@ -150,8 +176,17 @@ interface Item {
 function toItem(g: ModelGlyph): Item {
   const table = tableOf(g.family);
   const family = table?.family ?? g.family;
-  const slot = table?.by === "character" ? (slotOfCharacter(family, g.unicode) ?? -1) : g.slot;
-  const entry = TEX_FONT_SLOTS[family]?.[slot];
+  const slot = table?.by === "character"
+    ? (slotOfCharacter(family, g.unicode) ?? -1)
+    : KEYED_BY_CHARACTER.has(family) ? g.slot + 256 * (g.unicode.codePointAt(0) ?? 0) : g.slot;
+  let entry = TEX_FONT_SLOTS[family]?.[slot];
+  // A text font may appear in a second encoding (TeX Gyre: OT1 for `\mathrm`,
+  // T1 for `\text`), where a slot the table has not seen still draws a
+  // character it has.
+  if (!entry && table?.by === "slot" && TEX_FONT_SLOTS[family] != null) {
+    const other = slotOfCharacter(family, g.unicode);
+    if (other != null) entry = TEX_FONT_SLOTS[family]![other];
+  }
   const extent = inkOf(family, slot);
   return {
     family,
@@ -166,7 +201,8 @@ function toItem(g: ModelGlyph): Item {
     tex: entry ? entry[0] : null,
     cls: entry ? entry[1] : null,
     style: entry?.[2] ?? null,
-    axis: AXIS_FAMILIES.has(family),
+    // TeX centres every operator on the axis, whatever font it is from.
+    axis: isAxisFamily(family) || (entry != null && (entry[1] === "op" || entry[1] === "int" || (HANGS.has(entry[1]) && extent != null && extent[1] <= 0.08 && extent[0] < -0.4))),
   };
 }
 
@@ -217,6 +253,28 @@ function mergeComposites(items: Item[]): Item[] {
   return used.size === 0 ? items : [...items.filter((g) => !used.has(g)), ...made];
 }
 
+/**
+ * A font with no bold has its symbols made bold by printing each three times
+ * a hair apart (`\pmb`, and `\boldsymbol` under mathptmx). The copies are one
+ * bold symbol.
+ */
+function mergeOverprints(items: Item[]): Item[] {
+  const gone = new Set<Item>();
+  for (let i = 0; i < items.length; i++) {
+    const a = items[i]!;
+    if (gone.has(a) || a.tex == null || a.tex === "") continue;
+    const copies = items.filter(
+      (b, j) => j > i && !gone.has(b) && b.family === a.family && b.slot === a.slot && b.size === a.size &&
+        Math.abs(b.x0 - a.x0) < 0.06 * a.size && Math.abs(b.y - a.y) < 0.06 * a.size,
+    );
+    if (copies.length < 2) continue;
+    copies.forEach((b) => gone.add(b));
+    a.x1 = Math.max(a.x1, ...copies.map((b) => b.x1));
+    if (a.cls === "ord") a.style = a.style === "rm" ? "bf" : "bm";
+  }
+  return gone.size === 0 ? items : items.filter((g) => !gone.has(g));
+}
+
 /** Replace each stack of delimiter or radical pieces by the symbol it builds. */
 function mergeAssemblies(items: Item[]): Item[] {
   const pieces = items
@@ -243,7 +301,8 @@ function mergeAssemblies(items: Item[]): Item[] {
     const assembly = ASSEMBLY_BY_KEY.get(assemblyKey(first.family, stack.map((p) => p.slot)));
     if (!assembly) continue;
     stack.forEach((p) => used.add(p));
-    made.push(union(stack, assembly.tex, assembly.cls));
+    // A built-up delimiter is centred on the axis whatever its pieces' origins are.
+    made.push({ ...union(stack, assembly.tex, assembly.cls), axis: true });
   }
   return used.size === 0 ? items : [...items.filter((g) => !used.has(g)), ...made];
 }
@@ -281,7 +340,16 @@ export function regionMathGlyphs(
     if (cut > CUT_TOLERANCE * (item.bottom - item.top)) continue;
     inside.push(item);
   }
-  const items = mergeAssemblies(mergeComposites(inside));
+  const items = mergeAssemblies(mergeComposites(mergeOverprints(inside)));
+  // mathptmx takes its summation and product signs from the Symbol font
+  // enlarged and its integrals from the extension font reduced, so their own
+  // size is not the size of the line they are on. An operator in a script is
+  // smaller than either.
+  const lineSize = Math.max(0, ...items.filter((it) => it.cls !== "op" && it.cls !== "int").map((it) => it.size));
+  for (const it of items) {
+    if (it.cls !== "op" && it.cls !== "int") continue;
+    if (it.size > 1.15 * lineSize ? !isAxisFamily(it.family) : it.size > 0.85 * lineSize) it.size = lineSize;
+  }
 
   const glyphs: MathGlyph[] = [];
   for (const it of items) {

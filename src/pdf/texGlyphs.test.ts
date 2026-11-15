@@ -40,10 +40,15 @@ describe("the generated slot table", () => {
     for (const a of TEX_ASSEMBLIES) for (const slot of a.slots) expect(TEX_FONT_SLOTS[a.family]?.[slot]).toBeDefined();
   });
 
-  it("covers Computer Modern and AMS, not Times", () => {
+  it("covers Computer Modern, AMS and the Times, Palatino and STIX packages, not fonts TeX was never asked about", () => {
     expect(hasSlotTable("CMMI")).toBe(true);
     expect(hasSlotTable("MSBM")).toBe(true);
-    expect(hasSlotTable("NIMBUSROMNO9L-REGU")).toBe(false);
+    expect(hasSlotTable("NIMBUSROMNO9L-REGU")).toBe(true);
+    expect(hasSlotTable("TXSY")).toBe(true);
+    expect(hasSlotTable("NEWTXMI")).toBe(true);
+    expect(hasSlotTable("PAZOMATH-ITALIC")).toBe(true);
+    expect(hasSlotTable("STIXTWOMATH")).toBe(true);
+    expect(hasSlotTable("ARIALMT")).toBe(false);
   });
 });
 
@@ -132,9 +137,46 @@ describe("regionMathGlyphs", () => {
   });
 
   it("keeps the character and no class for a font with no table", () => {
-    const { glyphs } = regionMathGlyphs(page([g("NIMBUSROMNO9L-REGU", 120, 40, 5, { unicode: "x" })]), PAGE);
+    const { glyphs } = regionMathGlyphs(page([g("ARIALMT", 120, 40, 5, { unicode: "x" })]), PAGE);
     expect(glyphs[0]!.ch).toBe("x");
     expect(glyphs[0]!.tex).toBeUndefined();
+  });
+
+  it("reads Times and its math fonts from their own tables", () => {
+    const { glyphs } = regionMathGlyphs(page([
+      g("NIMBUSROMNO9L-REGUITAL", 120, 40, 5, { unicode: "x" }),
+      g("NIMBUSROMNO9L-REGU", 49, 50, 5, { unicode: "1" }),
+      g("NIMBUSROMNO9L-REGU", 97, 60, 5, { unicode: "a" }),
+    ]), PAGE);
+    expect(glyphs.map((x) => [x.tex, x.style])).toEqual([["x", undefined], ["1", undefined], ["a", "rm"]]);
+  });
+
+  it("takes three copies of a symbol printed a hair apart as one bold symbol", () => {
+    const copies = [0, 0.2, 0.1].map((dx) => g("CMMI", 0x0d, 40 + dx, 5.2));
+    const { glyphs } = regionMathGlyphs(page([...copies, g("CMMI", 0x78, 60, 5.7)]), PAGE);
+    expect(glyphs.map((x) => [x.tex, x.style])).toEqual([["\\gamma", "bm"], ["x", undefined]]);
+  });
+
+  it("gives an enlarged or reduced operator the size of its line", () => {
+    const { glyphs } = regionMathGlyphs(page([
+      g("STANDARDSYML", 229, 40, 10, { unicode: "∑", size: 14.35 }),
+      g("CMEX", 90, 60, 5, { unicode: "Z", size: 8.97 }),
+      g("CMMI", 0x78, 70, 5.7),
+    ]), PAGE);
+    expect(glyphs.map((x) => [x.tex, x.size])).toEqual([["\\sum", 10], ["\\int", 10], ["x", 10]]);
+  });
+
+  it("finds a character under another slot when a text font comes in a second encoding", () => {
+    const { glyphs } = regionMathGlyphs(page([g("TEXGYREPAGELLAX-REGULAR", 11, 40, 5, { unicode: "ff" })]), PAGE);
+    expect(glyphs[0]).toMatchObject({ tex: "ff", style: "rm" });
+  });
+
+  it("names a glyph of a font with several encodings by slot and character together", () => {
+    const { glyphs } = regionMathGlyphs(page([
+      g("STIXTWOMATH", 50, 40, 5, { unicode: "2" }),
+      g("STIXTWOMATH", 60, 50, 5, { unicode: "∗" }),
+    ]), PAGE);
+    expect(glyphs.map((x) => x.tex)).toEqual(["2", "*"]);
   });
 
   it("takes only what is inside the box, and skips spaces and rotated text", () => {
