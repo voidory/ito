@@ -13,12 +13,12 @@ Only aggregates are reported. Individual failures are deliberately left out, and
 | `tex-display` | 3259 | 3189 | 97.85% | 0.996 | 99.90% | 99.91% |
 | `tex-inline` | 2435 | 2376 | 97.58% | 0.998 | 99.90% | 99.88% |
 | `tex-display-12pt` | 760 | 746 | 98.16% | 0.996 | 99.90% | 99.61% |
-| `real-display` | 589 | 577 | 97.96% | 0.997 | 99.90% | 99.49% |
-| `real-inline` | 859 | 851 | 99.07% | 0.997 | 99.90% | 99.65% |
-| `real-inline-punct` | 859 | 852 | 99.19% | 0.998 | 99.90% | 99.65% |
-| `real-display-numbered` | 589 | 577 | 97.96% | 0.997 | 99.90% | 99.49% |
-| `real-display-dvips` | 589 | 577 | 97.96% | 0.997 | 99.90% | 99.49% |
-| `real-display-lm` | 589 | 577 | 97.96% | 0.997 | 99.90% | 99.49% |
+| `real-display` | 589 | 577 | 97.96% | 0.997 | 95.00% | 99.49% |
+| `real-inline` | 859 | 851 | 99.07% | 0.997 | 99.00% | 99.65% |
+| `real-inline-punct` | 859 | 852 | 99.19% | 0.998 | 99.00% | 99.65% |
+| `real-display-numbered` | 589 | 577 | 97.96% | 0.997 | 95.00% | 99.49% |
+| `real-display-dvips` | 589 | 577 | 97.96% | 0.997 | 95.00% | 99.49% |
+| `real-display-lm` | 589 | 577 | 97.96% | 0.997 | 95.00% | 99.49% |
 
 - `tex-display`: pdfLaTeX, Computer Modern 10pt, display style, one equation per line
 - `tex-inline`: pdfLaTeX, Computer Modern 10pt, text style, equation inside a line of prose

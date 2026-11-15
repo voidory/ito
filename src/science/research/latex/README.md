@@ -52,11 +52,19 @@ with). Both build the app and take about two minutes.
 
 `thresholds.json` holds a `target` and a `floor` per tier.
 
-- The **target** is 99.9% exact match, claimed for pdfLaTeX with Computer
-  Modern and AMS fonts: the `tex-display`, `tex-inline` and `tex-tounicode`
-  tiers. Tiers in other fonts (`tex-times`, `real-display-times` to
-  `real-display-stix`) and scanned pages have a floor and no target: part of
-  what they miss is not on the page (see "Tiers in other fonts").
+- There are two targets. **99.9% exact match** is claimed for the generated
+  tiers (`tex-display`, `tex-inline`, `tex-tounicode`: pdfLaTeX, Computer
+  Modern and AMS fonts, a seeded grammar): a statement about TeX typesetting.
+  **95% for display equations and 99% for inline ones** is the target for the
+  real-paper tiers, and the number that checks it is the sealed set's, the
+  only one on papers the extractor was not developed against. It stood at
+  93.4% and 99.0% at the third look. The 99.9% once set for real papers was
+  retired: three independent sets of thirty papers sat near 93% before their
+  failures were read, and the failures are a long tail of single-paper
+  notation (see "Survey set"). Tiers in other fonts (`tex-times`,
+  `real-display-times` to `real-display-stix`) and scanned pages have a floor
+  and no target: part of what they miss is not on the page (see "Tiers in
+  other fonts").
 - The **floor** is what CI enforces (`.github/workflows/latex-benchmark.yml`).
   It sits one point under the measured baseline and should only be raised.
 

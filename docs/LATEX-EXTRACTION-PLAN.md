@@ -19,6 +19,15 @@ engines (XeLaTeX and LuaLaTeX with OpenType math) and old bitmap-font PDFs are
 different problems; each gets its own tier and its own target once its baseline
 is understood. The Times tier already exists and has no target yet.
 
+**Restated after the sealed set** (third look, 93.4% display and 99.0% inline
+on 30 unseen papers): 99.9% stands for the generated tiers, which test TeX
+typesetting. For real papers the target is **95% of display equations and
+99% of inline ones, exact**, measured on the sealed set with its by-paper
+interval; the 99.9% for real papers is retired. Three independent sets of
+thirty papers sat near 93% before their failures were read, and what fails is
+a long tail of single-paper notation, so the remaining gain is in saying when
+a draft is doubtful (Phase 5), not in more rules.
+
 Measured, pooled over 6,825 selections on the three target tiers:
 
 | | Display | Inline | ToUnicode | Pooled |
@@ -614,7 +623,7 @@ Acceptance: each item has a test that fails before the fix and passes after.
 | Real-paper tier: which papers | Before the target is claimed | Done: 60 CC BY 4.0 and CC0 arXiv papers, ground truth harvested from source |
 | Renderer: KaTeX or Temml | Phase 5a | Decide on the Word paste test |
 | Structured math editor dependency | Phase 5c | Spike before committing |
-| Accuracy target on TeX PDFs | Decided | 99.9% exact match |
+| Accuracy target on TeX PDFs | Decided | 99.9% on generated tiers; 95% display and 99% inline on the sealed real papers |
 | What counts as a TeX PDF for that target | Decided | pdfLaTeX with Computer Modern and AMS fonts |
 | Metric strictness | Decided | Word spaces inside text count; delimiter height does not |
 | Accuracy targets for other tiers | After their baselines | Set from measured numbers |

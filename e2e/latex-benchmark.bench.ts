@@ -402,7 +402,7 @@ function renderHeldoutReport(): string {
 
 function renderReport(): string {
   const lines: string[] = [];
-  // The tiers the 99.9% claim is made for (thresholds.json).
+  // The tiers that have a target (thresholds.json).
   const targetTiers = tierNames.filter((t) => thresholds.tiers[t]?.target != null);
   const pooled = targetTiers.flatMap(all);
 
@@ -441,11 +441,13 @@ function renderReport(): string {
   }
   lines.push(
     "",
-    "The **target** of 99.9% exact match is claimed for pdfLaTeX with Computer Modern and AMS " +
-      "fonts only; other font families and scanned pages get their own targets once their " +
-      "baselines are understood. *Best provable* is the highest success rate a tier of that size " +
-      "could demonstrate at 95% confidence with zero failures. A tier must be larger than about " +
-      "3,000 selections before a 99.9% claim is even testable.",
+    "There are two kinds of **target**. The generated tiers (pdfLaTeX, Computer Modern and AMS fonts) " +
+      "have 99.9% exact match, a statement about TeX typesetting. The real-paper tiers have 95% for " +
+      "display equations and 99% for inline ones, and only the sealed set says whether they are met on " +
+      "papers the extractor was not developed against (`BENCHMARK-SEALED.md`). Tiers in other fonts and " +
+      "scanned pages have a floor and no target. *Best provable* is the highest success rate a tier of " +
+      "that size could demonstrate at 95% confidence with zero failures. A tier must be larger than " +
+      "about 3,000 selections before a 99.9% claim is even testable.",
     "",
   );
   for (const name of tierNames) {

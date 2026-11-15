@@ -1,5 +1,5 @@
 {
-  "comment": "Per-tier exact-match targets and CI floors for the LaTeX extraction benchmark. `target` is the goal: 99.9% is claimed for pdfLaTeX with Computer Modern and AMS fonts only, so tiers set in other fonts (and scanned pages) have no target until their baselines are understood. `floor` is the gate: a run below it fails. Floors sit just under the measured rate (see BENCHMARK.md) and only move up. Since Phase 2 the extractor reads glyphs and rules from the PDF itself, so the result does not depend on the machine's fonts and a floor can sit within a point of the measurement. The `real-*` tiers hold equations from the source of openly licensed arXiv papers, set in Computer Modern by the benchmark harness, so they are inside the target. `heldout` lists the tiers of the held-out set (corpus-heldout/), which has targets but no floors: it is measured at phase gates, not gated in CI. Edited by hand; the corpus builder never touches this file. `real-inline-punct`, `real-display-numbered` and `real-display-dvips` set the real tiers' equations as a reader meets them: with the sentence's mark against the formula, with an equation number and a box as wide as the column, and through dvips and Ghostscript. `real-display-lm` sets them in Latin Modern, whose math fonts the extractor reads with the Computer Modern tables. `sealed` lists the tiers of the sealed set (corpus-sealed/): real papers that no other set uses and whose failures nobody reads. Like the held-out set it has targets and no floors. The seven `real-display-times` to `real-display-stix` tiers set the development papers' display equations in the other fonts papers use (Times through the `times`, mathptmx, txfonts and newtx packages, Palatino through mathpazo and newpx, STIX Two). Their slot tables are generated from TeX like Computer Modern's. They have floors and no target: some of what they miss the page does not show (mathptmx draws `\\\\epsilon` and `\\\\varepsilon` with one glyph).",
+  "comment": "Per-tier exact-match targets and CI floors for the LaTeX extraction benchmark. `target` is the goal and `floor` is the gate: a run below it fails. Floors sit just under the measured rate (see BENCHMARK.md) and only move up. There are two kinds of target. The generated tiers (tex-display, tex-inline, tex-tounicode) are typeset from a grammar in pdfLaTeX with Computer Modern and AMS fonts: 99.9% is claimed for them, which is a statement about TeX typesetting. The real-paper tiers hold equations from the source of openly licensed arXiv papers: their targets are 95% for display equations and 99% for inline ones, measured on the sealed set, which is the only number that says how the extractor does on papers it was not developed against (it stood at 93.4% and 99.0% at the third look, so the display goal is not yet met). The earlier 99.9% for real papers was retired when three independent sets of thirty papers sat near 93% before any of their failures were read: the failures are a long tail of single-paper notation, and a rule written for one paper helps the next barely. Tiers in other fonts and scanned pages have a floor and no target. `heldout` and `sealed` list the tiers of those sets, which have targets and no floors: the held-out set is measured at phase gates and not gated in CI; the sealed set is looked at once per gate (see README). `real-inline-punct`, `real-display-numbered` and `real-display-dvips` set the real tiers' equations as a reader meets them (sentence mark against the formula, an equation number beside it with a box as wide as the column, the older dvips route); `real-display-lm` sets them in Latin Modern; the `real-display-times` to `real-display-stix` tiers set the development papers' display equations in Times, Palatino and STIX math through eight font packages and have a floor and no target (mathptmx draws `\\\\epsilon` and `\\\\varepsilon` with one glyph, so part of what they miss is not on the page). Edited by hand; the corpus builder never touches this file.",
   "extractionScale": 2,
   "tiers": {
     "tex-display": {
@@ -23,27 +23,27 @@
       "floor": 0
     },
     "real-display": {
-      "target": 0.999,
+      "target": 0.95,
       "floor": 0.98
     },
     "real-inline": {
-      "target": 0.999,
+      "target": 0.99,
       "floor": 0.99
     },
     "real-inline-punct": {
-      "target": 0.999,
+      "target": 0.99,
       "floor": 0.99
     },
     "real-display-numbered": {
-      "target": 0.999,
+      "target": 0.95,
       "floor": 0.98
     },
     "real-display-dvips": {
-      "target": 0.999,
+      "target": 0.95,
       "floor": 0.98
     },
     "real-display-lm": {
-      "target": 0.999,
+      "target": 0.95,
       "floor": 0.98
     },
     "real-display-times": {
@@ -86,42 +86,42 @@
       "target": 0.999
     },
     "real-display": {
-      "target": 0.999
+      "target": 0.95
     },
     "real-inline": {
-      "target": 0.999
+      "target": 0.99
     },
     "real-inline-punct": {
-      "target": 0.999
+      "target": 0.99
     },
     "real-display-numbered": {
-      "target": 0.999
+      "target": 0.95
     },
     "real-display-dvips": {
-      "target": 0.999
+      "target": 0.95
     },
     "real-display-lm": {
-      "target": 0.999
+      "target": 0.95
     }
   },
   "sealed": {
     "real-display": {
-      "target": 0.999
+      "target": 0.95
     },
     "real-inline": {
-      "target": 0.999
+      "target": 0.99
     },
     "real-inline-punct": {
-      "target": 0.999
+      "target": 0.99
     },
     "real-display-numbered": {
-      "target": 0.999
+      "target": 0.95
     },
     "real-display-dvips": {
-      "target": 0.999
+      "target": 0.95
     },
     "real-display-lm": {
-      "target": 0.999
+      "target": 0.95
     }
   }
 }

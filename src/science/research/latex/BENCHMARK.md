@@ -15,12 +15,12 @@ Metric: **exact match** of the canonical structure tree (`normalize.ts`), so spe
 | `tex-times` | 760 | 725 | 95.39% | 0.996 | n/a | 95.00% | 99.61% |
 | `tex-tounicode` | 760 | 750 | 98.68% | 0.998 | 99.90% | 98.00% | 99.61% |
 | `scanned` | 110 | 0 | 0.00% | 0.000 | n/a | 0.00% | 97.31% |
-| `real-display` | 610 | 598 | 98.03% | 0.998 | 99.90% | 98.00% | 99.51% |
-| `real-inline` | 888 | 882 | 99.32% | 0.999 | 99.90% | 99.00% | 99.66% |
-| `real-inline-punct` | 888 | 882 | 99.32% | 0.999 | 99.90% | 99.00% | 99.66% |
-| `real-display-numbered` | 610 | 598 | 98.03% | 0.998 | 99.90% | 98.00% | 99.51% |
-| `real-display-dvips` | 610 | 598 | 98.03% | 0.998 | 99.90% | 98.00% | 99.51% |
-| `real-display-lm` | 610 | 598 | 98.03% | 0.998 | 99.90% | 98.00% | 99.51% |
+| `real-display` | 610 | 598 | 98.03% | 0.998 | 95.00% | 98.00% | 99.51% |
+| `real-inline` | 888 | 882 | 99.32% | 0.999 | 99.00% | 99.00% | 99.66% |
+| `real-inline-punct` | 888 | 882 | 99.32% | 0.999 | 99.00% | 99.00% | 99.66% |
+| `real-display-numbered` | 610 | 598 | 98.03% | 0.998 | 95.00% | 98.00% | 99.51% |
+| `real-display-dvips` | 610 | 598 | 98.03% | 0.998 | 95.00% | 98.00% | 99.51% |
+| `real-display-lm` | 610 | 598 | 98.03% | 0.998 | 95.00% | 98.00% | 99.51% |
 | `real-display-times` | 610 | 598 | 98.03% | 0.998 | n/a | 97.00% | 99.51% |
 | `real-display-ptm` | 610 | 592 | 97.05% | 0.998 | n/a | 96.00% | 99.51% |
 | `real-display-tx` | 610 | 596 | 97.70% | 0.998 | n/a | 97.00% | 99.51% |
@@ -30,7 +30,7 @@ Metric: **exact match** of the canonical structure tree (`normalize.ts`), so spe
 | `real-display-stix` | 607 | 591 | 97.36% | 0.997 | n/a | 97.00% | 99.51% |
 | **all target tiers** | 11041 | 10847 | 98.24% | 0.998 |  |  | 99.97% |
 
-The **target** of 99.9% exact match is claimed for pdfLaTeX with Computer Modern and AMS fonts only; other font families and scanned pages get their own targets once their baselines are understood. *Best provable* is the highest success rate a tier of that size could demonstrate at 95% confidence with zero failures. A tier must be larger than about 3,000 selections before a 99.9% claim is even testable.
+There are two kinds of **target**. The generated tiers (pdfLaTeX, Computer Modern and AMS fonts) have 99.9% exact match, a statement about TeX typesetting. The real-paper tiers have 95% for display equations and 99% for inline ones, and only the sealed set says whether they are met on papers the extractor was not developed against (`BENCHMARK-SEALED.md`). Tiers in other fonts and scanned pages have a floor and no target. *Best provable* is the highest success rate a tier of that size could demonstrate at 95% confidence with zero failures. A tier must be larger than about 3,000 selections before a 99.9% claim is even testable.
 
 - `tex-display`: pdfLaTeX, Computer Modern, display style, one equation per line
 - `tex-inline`: pdfLaTeX, Computer Modern, text style, equation inside a line of prose
