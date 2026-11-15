@@ -19,6 +19,8 @@
  * rather than dropping text.
  */
 
+import { margin, note, withProbe, type LayoutProbe } from "./layoutProbe";
+
 /** One glyph of the selection: its horizontal extent, baseline and font size. */
 export interface MathGlyph {
   readonly ch: string;
@@ -428,6 +430,8 @@ function applyRules(input: Box[], rules: readonly MathRule[]): Box[] {
     boxes = boxes.filter((b) => !consumed.has(b));
     boxes.push(made);
   }
+  // A rule that formed nothing is a stroke the layout could not account for.
+  note("ruleUnused", pending.length);
   return boxes;
 }
 
@@ -450,6 +454,7 @@ function splitLines(boxes: Box[]): Line[] {
   // smallest size a script is as large as its base, so split less eagerly.
   const lineGap = (large.every((b) => b.exact || b.kind !== "glyph") ? 0.7 : 0.4) * maxS;
   for (const b of large) {
+    if (cur.length > 0) margin("lineGap", Math.abs(b.base - mean - lineGap) / maxS);
     if (cur.length > 0 && b.base - mean > lineGap) {
       lines.push(makeLine(cur));
       cur = [];
@@ -493,6 +498,7 @@ function splitLines(boxes: Box[]): Line[] {
               b.bottom > g.top - 0.6 * l.size && b.top < g.bottom + 0.6 * l.size) ||
               (!l.large.has(g) && far(g) && b.bottom > g.top - 0.3 * l.size && b.top < g.bottom + 0.3 * l.size)),
         );
+        margin("lineJoin", Math.abs(d - 1.7 * l.size) / l.size);
         if ((d > 1.7 * l.size && !onGrid && !onCorner) || b.x1 < e.x0 - 1.2 * l.size || b.x0 > e.x1 + 1.2 * l.size) return;
         if (d < bestD) {
           bestD = d;
@@ -628,6 +634,9 @@ function mergeStyledRuns(mains: Box[], size: number, all: readonly Box[] = mains
       const gap = prev ? run[0]!.x0 - prev.x1 : Infinity;
       const first = run[0]!;
       const clear = prev != null && !all.some((b) => cx(b) > prev.x1 && cx(b) < first.x0);
+      if (prev && prev.kind === "text" && prev.exact && Number.isFinite(gap)) {
+        margin("wordSpace", Math.min(Math.abs(gap - 0.2 * size), Math.abs(gap - 0.9 * size)) / size);
+      }
       if (prev && prev.kind === "text" && prev.exact && gap > 0.2 * size && gap < 0.9 * size && clear) {
         // A word space, not math spacing: the same piece of text goes on.
         prev.tex = `${prev.tex.slice(0, -1)} ${word}}`;
@@ -643,6 +652,7 @@ function mergeStyledRuns(mains: Box[], size: number, all: readonly Box[] = mains
   for (const b of mains) {
     const last = run[run.length - 1];
     if (b.exact && b.style && b.kind === "glyph") {
+      if (last && last.style === b.style) margin("runGap", Math.abs(b.x0 - last.x1 - 0.09 * size) / size);
       if (last && (last.style !== b.style || b.x0 - last.x1 > 0.09 * size)) flush();
       run.push(b);
     } else {
@@ -768,6 +778,7 @@ function lineToTex(line: Line): string {
       : isTall(b) ? (b.size >= 0.85 * s ? 0.35 : -1)
       : b.exact ? (b.size <= 0.85 * s || primed ? -1 : b.tex === "\\prime" ? 0.3 : 0.14)
       : b.size <= 0.85 * s ? 0.08 : 0.28;
+    if (tol > 0 && b.exact && !isAnchor(b)) margin("scriptBand", Math.abs(Math.abs(d) - tol));
     if ((line.large.has(b) && !b.exact) || isAnchor(b) || Math.abs(d) <= tol) mainsRaw.push(b);
     else scripts.push(b);
   }
@@ -791,7 +802,10 @@ function lineToTex(line: Line): string {
       // On one baseline it may hold a word space or a `\mod`.
       const level = Math.abs(a.base - b.base) < 0.25 * Math.max(a.size, b.size);
       const near = under ? (level ? 1.3 : 0.45) : drawn ? 0.2 : 0.3;
-      if (gap < near * s && Math.abs(a.base - b.base) < 0.45 * Math.max(a.size, b.size)) {
+      const levelOk = Math.abs(a.base - b.base) < 0.45 * Math.max(a.size, b.size);
+      if (levelOk) margin("scriptGap", Math.abs(gap - near * s) / s);
+      else if (gap < near * s) margin("scriptLevel", Math.abs(Math.abs(a.base - b.base) - 0.45 * Math.max(a.size, b.size)) / s);
+      if (gap < near * s && levelOk) {
         parent[find(i)] = find(j);
       }
     }
@@ -1015,6 +1029,7 @@ function rowCuts(boxes: readonly Box[], rules: readonly MathRule[]): number[] {
   const baselines: number[] = [];
   let group: number[] = [];
   for (const y of evidence) {
+    if (group.length > 0) margin("rowApart", Math.abs(y - group.reduce((a, b) => a + b, 0) / group.length - ROW_APART * s) / s);
     if (group.length > 0 && y - group.reduce((a, b) => a + b, 0) / group.length > ROW_APART * s) {
       baselines.push(group.reduce((a, b) => a + b, 0) / group.length);
       group = [];
@@ -1321,14 +1336,56 @@ function usableRules(boxes: Box[], rules: readonly MathRule[]): MathRule[] {
  * fraction is only inferred from an unambiguous centred stack.
  */
 export function glyphsToLatex(input: readonly MathGlyph[], rules: readonly MathRule[] = []): string {
-  const glyphs = dropEquationNumbers(input);
-  const boxes = applyAccents(toBoxes(glyphs));
-  if (boxes.length === 0) return "";
-  const good = usableRules(boxes, rules);
-  // With no rule to go by, a fraction can only be guessed from a stack. Exact
-  // glyphs come with the page's real rules, so no rule means no fraction.
-  const guessStacks = good.length === 0 && !boxes.every((b) => b.exact);
-  return dropSentenceMark(build(boxes, good, guessStacks).replace(/\s+/g, " ").trim());
+  return analyzeGlyphs(input, rules).latex;
+}
+
+/** What the layout had to work with, counted on its input. */
+export interface GlyphStats {
+  /** Glyphs handed in. */
+  readonly glyphs: number;
+  /** Of those, identified by a font slot table (`tex` set): no character guessing. */
+  readonly exact: number;
+  /** Dropped as an equation number. */
+  readonly droppedNumbers: number;
+  /** Rules handed in, and how many survived the filter for rules that are really glyph strokes. */
+  readonly rules: number;
+  readonly rulesUsable: number;
+}
+
+/**
+ * {@link glyphsToLatex} with the evidence behind it: the same LaTeX, byte for
+ * byte, plus counts of the input and the closest calls the layout made. The
+ * layout itself never reads the evidence.
+ */
+export function analyzeGlyphs(
+  input: readonly MathGlyph[],
+  rules: readonly MathRule[] = [],
+): { latex: string; stats: GlyphStats; probe: LayoutProbe } {
+  const { value, probe } = withProbe(() => {
+    const glyphs = dropEquationNumbers(input);
+    const boxes = applyAccents(toBoxes(glyphs));
+    if (boxes.length === 0) return { latex: "", droppedNumbers: input.length - glyphs.length, usable: 0 };
+    const good = usableRules(boxes, rules);
+    // With no rule to go by, a fraction can only be guessed from a stack. Exact
+    // glyphs come with the page's real rules, so no rule means no fraction.
+    const guessStacks = good.length === 0 && !boxes.every((b) => b.exact);
+    return {
+      latex: dropSentenceMark(build(boxes, good, guessStacks).replace(/\s+/g, " ").trim()),
+      droppedNumbers: input.length - glyphs.length,
+      usable: good.length,
+    };
+  });
+  return {
+    latex: value.latex,
+    stats: {
+      glyphs: input.length,
+      exact: input.filter((g) => g.tex != null).length,
+      droppedNumbers: value.droppedNumbers,
+      rules: rules.length,
+      rulesUsable: value.usable,
+    },
+    probe,
+  };
 }
 
 /**

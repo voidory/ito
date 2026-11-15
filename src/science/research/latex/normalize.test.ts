@@ -225,4 +225,11 @@ describe("notations that print alike", () => {
     same("\\textbf{\\textit{p}}", "\\boldsymbol{p}");
     expect(canonicalLatex("\\textbf{p}")).not.toBe(canonicalLatex("\\boldsymbol{p}"));
   });
+
+  it("takes < and > after a sizing command as the angle brackets they print as", () => {
+    expect(canonicalLatex("\\left< a,b \\right>")).toBe(canonicalLatex("\\langle a,b\\rangle"));
+    expect(canonicalLatex("\\big<x\\big>")).toBe(canonicalLatex("\\langle x\\rangle"));
+    // A relation is still a relation.
+    expect(canonicalLatex("a<b")).not.toBe(canonicalLatex("a\\langle b"));
+  });
 });

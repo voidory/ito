@@ -6,6 +6,10 @@ import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
 import { describe, expect, it } from "vitest";
 import { scoreEquation } from "../science/research/latex/score";
 import { buildPageMathModel, type OpsTable, type PageMathModel } from "./pageMathModel";
+import { assessEvidence, TRUST_AT } from "./equationConfidence";
+import { MathRecognizer } from "../science/recognition/mathRecognizer";
+import { analyzeModelRegion } from "./equationEvidence";
+import { createGeometryEquationBackend } from "./geometryEquationBackend";
 import { extractLatexFromModel } from "./scienceOcr";
 
 /**
@@ -135,4 +139,64 @@ describe("notation met in the second set of papers", () => {
     // A wide accent over one capital.
     expect(got.get("qd0439")).toMatch(/^\\widetilde\{X\}/);
   }, 60_000);
+});
+
+describe("the extractor behind the recognition backend interface", () => {
+  it("says exactly what the extractor says, with evidence that does not depend on who reads it", async () => {
+    const tier = manifest.tiers["real-display"]!;
+    const doc = await pdfjs.getDocument({ data: new Uint8Array(readFileSync(resolve(ROOT, "corpus", tier.pdf))), verbosity: 0 }).promise;
+    const recognizer = new MathRecognizer([createGeometryEquationBackend()]);
+    const models = new Map<number, PageMathModel>();
+    let checked = 0;
+    for (const [i, [id, pageIndex, x0, y0, x1, y1]] of tier.placements.entries()) {
+      if (i % 6 !== 0) continue;
+      let model = models.get(pageIndex);
+      if (!model) {
+        const page = await doc.getPage(pageIndex + 1);
+        model = buildPageMathModel(await page.getOperatorList(), (fontId) => page.commonObjs.get(fontId), pdfjs.OPS as unknown as OpsTable, page.getViewport({ scale: 1 }));
+        models.set(pageIndex, model);
+      }
+      const rect = { x: x0 / tier.pageWidth, y: (tier.pageHeight - y1) / tier.pageHeight, width: (x1 - x0) / tier.pageWidth, height: (y1 - y0) / tier.pageHeight };
+      const direct = extractLatexFromModel(model, rect);
+      const result = await recognizer.recognizeEquation({ page: { model, rect } });
+      expect(result.latex, id).toBe(direct);
+      expect(result.backend).toEqual({ id: "pdf-geometry", modality: "geometry" });
+      // The evidence is a pure function of the box: asking twice gives the same.
+      expect(JSON.stringify(analyzeModelRegion(model, rect).evidence), id).toBe(JSON.stringify(analyzeModelRegion(model, rect).evidence));
+      checked++;
+    }
+    expect(checked).toBeGreaterThan(90);
+    await doc.destroy();
+  }, 120_000);
+});
+
+describe("the confidence model on papers it was not fitted on", () => {
+  it("trusts most held-out display equations and is nearly always right when it does", async () => {
+    const tier = heldout.tiers["real-display"]!;
+    const doc = await pdfjs.getDocument({ data: new Uint8Array(readFileSync(resolve(ROOT, "corpus-heldout", tier.pdf))), verbosity: 0 }).promise;
+    const models = new Map<number, PageMathModel>();
+    let trusted = 0;
+    let trustedRight = 0;
+    let wrong = 0;
+    let wrongTrusted = 0;
+    for (const [id, pageIndex, x0, y0, x1, y1] of tier.placements) {
+      let model = models.get(pageIndex);
+      if (!model) {
+        const page = await doc.getPage(pageIndex + 1);
+        model = buildPageMathModel(await page.getOperatorList(), (fontId) => page.commonObjs.get(fontId), pdfjs.OPS as unknown as OpsTable, page.getViewport({ scale: 1 }));
+        models.set(pageIndex, model);
+      }
+      const { latex, evidence } = analyzeModelRegion(model, { x: x0 / tier.pageWidth, y: (tier.pageHeight - y1) / tier.pageHeight, width: (x1 - x0) / tier.pageWidth, height: (y1 - y0) / tier.pageHeight });
+      const right = scoreEquation(heldout.equations[id]!, latex).exact;
+      const sure = assessEvidence(evidence).confidence >= TRUST_AT;
+      if (sure) (trusted++, right && trustedRight++);
+      if (!right) (wrong++, sure && wrongTrusted++);
+    }
+    await doc.destroy();
+    const n = tier.placements.length;
+    expect(trusted / n).toBeGreaterThan(0.6);
+    expect(trustedRight / trusted).toBeGreaterThan(0.97);
+    // Most of what is wrong is held back for review.
+    expect(wrongTrusted / wrong).toBeLessThan(0.5);
+  }, 120_000);
 });

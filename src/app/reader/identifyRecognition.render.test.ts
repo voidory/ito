@@ -21,7 +21,7 @@ import { InMemoryStorageAdapter } from "../../test/InMemoryStorageAdapter";
 import { Workbench } from "../workbench";
 import { HighlightEditPopover } from "./AnnotationOverlays";
 import { createRecognitionService } from "../../science/recognition";
-import type { ImageModelBackend } from "../../science/recognition";
+import type { EquationBackend, ImageModelBackend } from "../../science/recognition";
 import { parseSmilesGraph } from "../../science/recognition/chemGraph";
 import { validateSmiles } from "../../science/recognition/chemistryValidation";
 import type { NormalizedRect, Source } from "../../model";
@@ -374,6 +374,39 @@ describe("M18 FEAT-004 — injected fake backend exercises the success verificat
     if (stored.scope.kind === "area") {
       expect(stored.scope.anchor.latex).toBe("E = mc^2");
     }
+  });
+
+  it("a backend that reads the page shows where the answer came from and why it doubts it", async () => {
+    const storage = new InMemoryStorageAdapter();
+    const wb = await Workbench.open(storage);
+    const src = await importOne(wb, "GeometryEq");
+    const area = await wb.commitAreaAnnotation(src.id, 0, RECT, "", CROP);
+    const geometry: EquationBackend = {
+      id: "pdf-geometry",
+      modality: "geometry",
+      trustAt: 0.9,
+      isConfigured: () => true,
+      supports: (input) => input.image != null,
+      async recognize() {
+        return { text: "a_{1}^{2}", verbatim: true, confidence: 0.4, doubts: ["A script sits almost between a superscript and the main line."] };
+      },
+    };
+    const service = createRecognitionService({ mathBackend: [geometry] });
+
+    await render(
+      createElement(HighlightEditPopover, { ...popoverProps(wb, area.annotation.id, src.id), recognitionService: service }),
+    );
+    await flush();
+    await openScientificTools();
+    await click(document.querySelector('[data-testid="identify-equation-btn"]')!);
+
+    // The draft is shown untouched, as the backend spelled it, and is not accepted for the person.
+    expect((document.querySelector('[data-testid="recognized-latex-input"]') as HTMLTextAreaElement).value).toBe("a_{1}^{2}");
+    expect(document.querySelector('[data-testid="recognition-source"]')?.textContent).toContain("40%");
+    expect(document.querySelector('[data-testid="recognition-low-confidence"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="recognition-doubts"]')?.textContent).toContain("almost between");
+    const stored = (await Workbench.open(storage, wb.snapshot().brainId)).rawData().annotations.find((a) => a.id === area.annotation.id)!;
+    if (stored.scope.kind === "area") expect(stored.scope.anchor.latex).toBeUndefined();
   });
 
   it("a low-confidence molecule backend requires explicit review before Accept", async () => {

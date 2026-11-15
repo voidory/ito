@@ -139,10 +139,14 @@ real-paper tiers of the other two sets are no longer unseen:
   (89.7% to 96.5% by paper), `real-inline` 99.0%. The survey fixes moved the
   survey by a point and this set by a quarter of one, which is what the
   survey rate overstating unseen papers looks like.
+- **Fourth look**, for the confidence model (below), frozen before it:
+  display 93.4% exact, of which 69.7% were trusted at 97.2% exact, and the
+  30.3% sent for review held 70% of the wrong drafts; inline 99.0% exact,
+  99.5% trusted. Aggregates only, as for the others.
 
 Rules of use, stricter than the held-out set's:
 
-- **Gates only, and count the looks.** Three so far, all recorded above.
+- **Gates only, and count the looks.** Four so far, all recorded above.
 - **Aggregates only.** No dump, no failures, no breakdown by construct, which
   would say where to look. `scripts/dev/latex-score.ts` gives counts for it
   and refuses anything else.
@@ -176,6 +180,63 @@ what unseen papers get; the sealed set says that. The harvest also records
 each paper's document class and packages (`real-papers-survey.json`), which
 shows what papers set their mathematics in: of the 300, 47 load or select a
 Times package and 13 load `lmodern`, so the font tiers above are not a corner.
+
+## Confidence
+
+A draft that is right 93% of the time is useful only if the person using it
+can tell which 7%. `src/pdf/equationConfidence.ts` gives each draft a
+probability of being exactly right and, when it is low, reasons a person can
+check ("A script sits almost between a superscript and the main line", "The
+box cuts through some of the symbols").
+
+It reads the evidence the extractor already has (`equationEvidence.ts`),
+without touching how the draft is made: the draft is byte for byte what it was
+(`texExtraction.corpus.test.ts` checks it through the recognizer). Four kinds
+of evidence:
+
+- **Stability.** The glyphs are moved by 1% to 6% of their size and the layout
+  is run again, six times at each size. A draft that holds is resting on
+  decisions made well away from every threshold. This reaches decisions no one
+  put a probe on, and is the strongest single signal.
+- **Closest calls.** The layout records how near to its threshold it was when
+  it decided a script's level, a line break or a word space.
+- **Identification.** Whether every symbol came from a font table or some had
+  to be guessed from a character.
+- **The draft itself.** Size, matrices, rows, stacked symbols, a script with
+  nothing to attach to.
+
+A logistic model weighs them (`equationConfidenceModel.json`), fitted on the
+survey papers only. The trust line was chosen on predictions made for each
+paper by a model that had not seen it, so that trusted drafts are at least
+98% exact in display and in inline. Then, frozen, it was scored:
+
+| Set (display) | Exact | Trusted | Exact among trusted | Of the wrong drafts, held for review |
+|---|---|---|---|---|
+| Survey, out of fold | 94.6% | 68% | 98.1% | 76% |
+| Development | 98.0% | 74% | 99.3% | 75% |
+| Held-out | 98.0% | 76% | 99.3% | 75% |
+| Sealed (one look) | 93.4% | 70% | 97.2% | 70% |
+
+Inline formulas are 99% exact to begin with and 99.5% of them are trusted:
+the model has little to add there. The honest summary for display is that
+confidence moves 93% to 97% for the 70% that can be trusted and sends the
+other 30% for review, which holds 70% of what is wrong. It does not find the
+rest: a draft that is stably, systematically wrong (a notation the extractor
+does not know) looks like a good one.
+
+What the calibration cannot see: the benchmark draws every box tightly round
+its equation, so a box that cuts glyphs or sits against one has no data. Those
+raise a doubt of their own and cap the confidence below the trust line; the
+cap is a judgement, not a measurement. `docs/spikes/real-pages.md` measures
+looser boxes.
+
+Refit with `scripts/dev/latex-evidence.ts` (writes rows; refuses the sealed
+set) and `scripts/dev/latex-confidence.ts fit`. `ITO_CURVE=1` prints what each
+trust line buys. The model was fitted before one survey equation turned out to
+be a duplicate under the corrected metric and was dropped; refitting changes
+the weights in the third decimal.
+
+**Metric change, flagged.** After a sizing command (`\left`, `\right`, `\middle`, `\big…`) a bare `<` or `>` now counts as `\langle` / `\rangle`: TeX gives them the same delimiter code and the page cannot tell them apart. This moved 23 equations in 9 papers from wrong to right or merged duplicates (the survey lost one). The sealed report was not regenerated, so its figures are on the old metric; the next sealed look will use the new one.
 
 ## Corpus
 

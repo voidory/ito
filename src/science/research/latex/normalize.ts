@@ -227,6 +227,17 @@ function tokenize(src: string): Tok[] {
         while (k < s.length && s[k] === " ") k++;
         if (s[k] === ".") i = k + 1;
       }
+      // TeX gives `<` and `>` the delimiter codes of the angle brackets: after
+      // `\left` or `\right` (or `\big` and its kin) they print as ⟨ and ⟩.
+      if (/^(?:left|right|middle|[bB]ig{1,2}[lrm]?)$/.test(name)) {
+        let k = i;
+        while (k < s.length && s[k] === " ") k++;
+        if (s[k] === "<" || s[k] === ">") {
+          out.push({ k: "cmd", v: s[k] === "<" ? "langle" : "rangle" });
+          i = k + 1;
+          continue;
+        }
+      }
       if (name === "cr") {
         out.push({ k: "nl" });
         continue;

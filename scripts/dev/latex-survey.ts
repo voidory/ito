@@ -144,6 +144,11 @@ const report = [
 ];
 if (process.env.ITO_WRITE) writeFileSync(resolve(ROOT, "SURVEY.md"), report.join("\n"));
 
+if (process.env.ITO_ID_FILE) {
+  const wanted = new Map(readFileSync(process.env.ITO_ID_FILE, "utf8").split("\n").filter(Boolean).map((l) => l.split(" ") as [string, string]));
+  for (const f of failures.filter((x) => wanted.has(x.id))) console.log(`${f.id} p=${wanted.get(f.id)} [${paperOf[f.id]}] ${f.cls}\n  E: ${f.truth}\n  G: ${f.got}`);
+  process.exit(0);
+}
 if (process.env.ITO_GREP) {
   const pattern = new RegExp(process.env.ITO_GREP);
   const hits = failures.filter((f) => pattern.test(f.truth));

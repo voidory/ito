@@ -193,7 +193,7 @@ describe("regionMathGlyphs", () => {
   });
 
   it("returns nothing for a region with no glyphs", () => {
-    expect(regionMathGlyphs(page([]), PAGE)).toEqual({ glyphs: [], rules: [] });
+    expect(regionMathGlyphs(page([]), PAGE)).toEqual({ glyphs: [], rules: [], report: { cutDropped: 0, cutKept: 0, nearEdge: 0, unidentified: 0 } });
   });
 });
 

@@ -11,7 +11,8 @@
  * real/fake backends to exercise the success / invalid / low-confidence paths.
  */
 
-import { MathRecognizer } from "./mathRecognizer";
+import type { EquationBackend, EquationInput } from "./equationBackend";
+import { MathRecognizer, type MathRecognitionResult } from "./mathRecognizer";
 import { MoleculeRecognizer } from "./moleculeRecognizer";
 import { ReactionRecognizer } from "./reactionRecognizer";
 import {
@@ -24,8 +25,12 @@ import {
 
 /** Options for {@link createRecognitionService}; every backend is optional. */
 export interface RecognitionServiceOptions {
-  /** Backend for equation recognition (default: not configured). */
-  mathBackend?: ImageModelBackend;
+  /**
+   * Backends for equation recognition, asked in order (default: none
+   * configured). An image model (`ImageModelBackend`) and anything that reads
+   * the page (`EquationBackend`) are both accepted.
+   */
+  mathBackend?: ImageModelBackend | EquationBackend | readonly (ImageModelBackend | EquationBackend)[];
   /** Backend for molecule recognition (default: not configured). */
   moleculeBackend?: ImageModelBackend;
   /** Backend for reaction recognition (default: not configured; deferred). */
@@ -50,6 +55,11 @@ export class RecognitionService {
     this.math = new MathRecognizer(mathBackend, opts.confidenceThreshold);
     this.molecule = new MoleculeRecognizer(moleculeBackend, opts.confidenceThreshold);
     this.reaction = new ReactionRecognizer(reactionBackend);
+  }
+
+  /** Recognize an equation from a picture, the page it is on, or both. */
+  recognizeEquation(input: EquationInput): Promise<MathRecognitionResult> {
+    return this.math.recognizeEquation(input);
   }
 
   /** Dispatch to the recognizer for `kind`. The single UI entry point. */

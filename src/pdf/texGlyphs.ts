@@ -356,8 +356,11 @@ export interface ModelRect {
 export function regionMathGlyphs(
   model: PageMathModel,
   rect: ModelRect,
-): { glyphs: MathGlyph[]; rules: MathRule[] } {
+): { glyphs: MathGlyph[]; rules: MathRule[]; report: RegionReport } {
   const inside: Item[] = [];
+  let cutDropped = 0;
+  let cutKept = 0;
+  let nearEdge = 0;
   for (const g of model.glyphs) {
     if (Math.abs(g.angle) > 0.2 || !(g.size > 0)) continue;
     // Cheap reject before the table lookups.
@@ -370,7 +373,13 @@ export function regionMathGlyphs(
     // A glyph the top or bottom edge cuts well into belongs to the line of
     // text next to the selection, not to it.
     const cut = Math.max(rect.y0 - item.top, item.bottom - rect.y1, 0);
-    if (cut > CUT_TOLERANCE * (item.bottom - item.top)) continue;
+    if (cut > CUT_TOLERANCE * (item.bottom - item.top)) {
+      cutDropped++;
+      continue;
+    }
+    if (cut > 0) cutKept++;
+    // A glyph whose centre is within a tenth of an em of the edge could have been in or out.
+    if (Math.min(cx - rect.x0, rect.x1 - cx, cy - rect.y0, rect.y1 - cy) < 0.1 * item.size) nearEdge++;
     inside.push(item);
   }
   const items = mergeAssemblies(mergeBraces(mergeComposites(mergeOverprints(inside))));
@@ -410,5 +419,18 @@ export function regionMathGlyphs(
     if (cx < rect.x0 || cx > rect.x1 || r.y < rect.y0 || r.y > rect.y1) continue;
     rules.push({ x0: r.x0, x1: r.x1, y: r.y, thickness: r.thickness });
   }
-  return { glyphs, rules };
+  const unknown = items.filter((it) => it.tex == null && it.unicode.trim().length > 0).length;
+  return { glyphs, rules, report: { cutDropped, cutKept, nearEdge, unidentified: unknown } };
+}
+
+/** What the box did to the glyphs it was drawn over. */
+export interface RegionReport {
+  /** Glyphs the top or bottom edge cut so deeply they were taken to belong to a neighbouring line. */
+  readonly cutDropped: number;
+  /** Glyphs the edge cut a little (within tolerance) and that were kept. */
+  readonly cutKept: number;
+  /** Glyphs kept whose centre lay within a tenth of an em of the box's edge. */
+  readonly nearEdge: number;
+  /** Glyphs from a font with no slot table: the layout guessed what they are from the character. */
+  readonly unidentified: number;
 }

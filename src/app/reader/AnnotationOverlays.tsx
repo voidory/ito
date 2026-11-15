@@ -17,6 +17,9 @@ import {
   loadRasterFromDataUrl,
   renderMechanismSvg,
 } from "../../pdf/scienceOcr";
+import { assessEvidence, TRUST_AT } from "../../pdf/equationConfidence";
+import { createGeometryEquationBackend } from "../../pdf/geometryEquationBackend";
+import { pageMathModelFor } from "../../pdf/pageMathModel";
 import {
   createRecognitionService,
   type RecognitionService,
@@ -193,6 +196,29 @@ export function LiveSelectionPreview({
         />
       ))}
     </div>
+  );
+}
+
+/**
+ * The recognition service the reader uses unless one is injected: equations
+ * are read from the PDF's own glyphs and rules, with a confidence calibrated
+ * on real papers (`equationConfidence.ts`). Nothing else is configured, so
+ * nothing leaves the machine.
+ */
+let sharedService: RecognitionService | null = null;
+function defaultRecognitionService(): RecognitionService {
+  sharedService ??= createRecognitionService({
+    mathBackend: [createGeometryEquationBackend({ assess: assessEvidence, trustAt: TRUST_AT })],
+  });
+  return sharedService;
+}
+
+/** The rendered stage of a page, which carries its page model. */
+function findPageStage(docId: string, pageIndex: number): HTMLElement | null {
+  const escId = typeof CSS !== "undefined" && CSS.escape ? CSS.escape(docId) : docId;
+  return (
+    document.querySelector<HTMLElement>(`[data-source-id="${escId}"] .pdf-page-stage[data-page-index="${pageIndex}"]`) ??
+    document.querySelector<HTMLElement>(`.pdf-page-stage[data-page-index="${pageIndex}"]`)
   );
 }
 
@@ -642,18 +668,23 @@ function SciencePanel({
     bump();
   };
 
-  // M18 FEAT-004 — the Identify / verify-&-accept state machine. The service
-  // defaults to a not-configured RecognitionService so the out-of-the-box build
-  // makes no network call; a configured/fake service may be injected for tests.
-  const service = useMemo(
-    () => recognitionService ?? createRecognitionService(),
-    [recognitionService],
-  );
+  // M18 FEAT-004 — the Identify / verify-&-accept state machine. The default
+  // service reads equations from the page's own drawing instructions where
+  // they are known (no model, no network call) and has no backend for anything
+  // else, so a scanned page or a molecule is still 'unsupported' until a model
+  // is configured. A configured/fake service may be injected for tests.
+  const service = useMemo(() => recognitionService ?? defaultRecognitionService(), [recognitionService]);
   const [verify, setVerify] = useState<null | {
     kind: ScienceRecognitionKind;
     status: string;
     value: string;
     errors: string[];
+    /** Reasons the recognizer doubts its answer, for the person checking it. */
+    warnings: string[];
+    /** The recognizer's own probability that the answer is exactly right, when it has one. */
+    confidence?: number;
+    /** What read it: "geometry" is the PDF's own glyphs and rules; "image" is a model looking at the crop. */
+    modality?: string;
     busy: boolean;
   }>(null);
 
@@ -701,18 +732,25 @@ function SciencePanel({
 
   const runIdentify = async (kind: "equation" | "molecule"): Promise<void> => {
     const input = buildInput();
-    if (!input) {
+    // An equation on a page whose drawing is known needs no picture at all.
+    const stage = kind === "equation" && anchor ? findPageStage(anchor.docId, anchor.pageIndex) : null;
+    const model = stage ? await pageMathModelFor(stage) : null;
+    if (!input && !model) {
       setVerify({
         kind,
         status: "error",
         value: "",
         errors: ["No captured crop image is available for this area."],
+        warnings: [],
         busy: false,
       });
       return;
     }
-    setVerify({ kind, status: "pending", value: "", errors: [], busy: true });
-    const result = await service.recognize(kind, input);
+    setVerify({ kind, status: "pending", value: "", errors: [], warnings: [], busy: true });
+    const result =
+      kind === "equation"
+        ? await service.recognizeEquation({ ...(input ? { image: input } : {}), ...(model && anchor ? { page: { model, rect: anchor.rect } } : {}) })
+        : await service.recognize(kind, input!);
     const value =
       kind === "equation"
         ? (result as MathRecognitionResult).latex ?? ""
@@ -726,6 +764,9 @@ function SciencePanel({
       // 'unsupported' this is empty, routing the user to manual entry.
       value,
       errors: result.errors ?? [],
+      warnings: result.warnings ?? [],
+      ...(result.confidence !== undefined ? { confidence: result.confidence } : {}),
+      ...((result as MathRecognitionResult).backend ? { modality: (result as MathRecognitionResult).backend!.modality } : {}),
       busy: false,
     });
   };
@@ -795,7 +836,7 @@ function SciencePanel({
           type="button"
           data-testid="identify-equation-btn"
           className="ito-ctx-item"
-          disabled={!imageDataUrl || verify?.busy === true}
+          disabled={(!imageDataUrl && !anchor) || verify?.busy === true}
           onClick={() => void runIdentify("equation")}
         >
           <span className="ito-ctx-item-label">Equation</span>
@@ -869,9 +910,23 @@ function SciencePanel({
             </div>
           )}
 
+          {verify.modality === "geometry" && (verify.status === "success" || verify.status === "low-confidence") && (
+            <div data-testid="recognition-source" className="ito-recognition-note">
+              Read from the PDF&apos;s own text and lines, not from the picture
+              {verify.confidence !== undefined ? ` — about ${Math.round(verify.confidence * 100)}% likely to be exactly right` : ""}.
+            </div>
+          )}
+
           {verify.status === "low-confidence" && (
             <div data-testid="recognition-low-confidence" className="ito-recognition-note">
               Recognition uncertain — review the result before accepting.
+              {verify.warnings.length > 0 && (
+                <ul data-testid="recognition-doubts">
+                  {verify.warnings.map((w) => (
+                    <li key={w}>{w}</li>
+                  ))}
+                </ul>
+              )}
             </div>
           )}
 

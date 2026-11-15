@@ -17,6 +17,15 @@
 
 import { convertLatexToMathML, normalizeToLatex } from "../../pdf/scienceOcr";
 import {
+  isEquationBackend,
+  imageModelAsEquationBackend,
+  type EquationBackend,
+  type EquationBackendOutput,
+  type EquationInput,
+  type EquationModality,
+  type PageRegion,
+} from "./equationBackend";
+import {
   DEFAULT_CONFIDENCE_THRESHOLD,
   notConfiguredBackend,
   type ImageModelBackend,
@@ -29,6 +38,10 @@ export interface MathRecognitionResult extends RecognitionResult {
   kind: "equation";
   /** Normalized LaTeX that compiles to MathML (present only on success). */
   latex?: string;
+  /** Which backend produced it, and what that backend reads. */
+  backend?: { id: string; modality: EquationModality };
+  /** What the backend measured (see `equationEvidence.ts` for the geometric one). */
+  evidence?: unknown;
 }
 
 /**
@@ -44,27 +57,38 @@ function isEmptyMathML(mathml: string): boolean {
   return body === "" || body === "<mrow></mrow>";
 }
 
+type BackendLike = EquationBackend | ImageModelBackend;
+
 /**
- * Recognize an equation from an image crop. The backend defaults to the
- * not-configured backend, so the default behavior is a deterministic
- * 'unsupported'. Inject a backend to exercise the deterministic boundary.
+ * Recognize an equation. Backends are asked in order and the first that has
+ * something to say wins, so a deterministic reader of the page can come ahead
+ * of a model that only sees a picture. With no configured backend, the result
+ * is a deterministic 'unsupported'.
  */
 export class MathRecognizer {
-  private readonly backend: ImageModelBackend;
+  private readonly backends: readonly EquationBackend[];
   private readonly confidenceThreshold: number;
 
   constructor(
-    backend: ImageModelBackend = notConfiguredBackend,
+    backends: BackendLike | readonly BackendLike[] = notConfiguredBackend,
     confidenceThreshold: number = DEFAULT_CONFIDENCE_THRESHOLD,
   ) {
-    this.backend = backend;
+    const list: readonly BackendLike[] = Array.isArray(backends) ? backends : [backends as BackendLike];
+    this.backends = list.map((b) => (isEquationBackend(b) ? b : imageModelAsEquationBackend(b)));
     this.confidenceThreshold = confidenceThreshold;
   }
 
-  async recognize(input: RecognitionInput): Promise<MathRecognitionResult> {
-    const base = { kind: "equation" as const };
+  /** The RecognitionService entry point: a picture of the box, and the page too when it is known. */
+  async recognize(input: RecognitionInput & { page?: PageRegion }): Promise<MathRecognitionResult> {
+    const { page, ...image } = input;
+    return this.recognizeEquation({ image, ...(page ? { page } : {}) });
+  }
 
-    if (!this.backend.isConfigured()) {
+  async recognizeEquation(input: EquationInput): Promise<MathRecognitionResult> {
+    const base = { kind: "equation" as const };
+    const usable = this.backends.filter((b) => b.isConfigured() && b.supports(input));
+
+    if (usable.length === 0) {
       return {
         ...base,
         status: "unsupported",
@@ -72,53 +96,60 @@ export class MathRecognizer {
       };
     }
 
-    let inferred: { text: string; confidence?: number } | null;
-    try {
-      inferred = await this.backend.infer(input);
-    } catch (err) {
-      return {
-        ...base,
-        status: "error",
-        errors: [`Equation backend '${this.backend.id}' failed: ${String(err)}`],
-      };
+    let answered: { backend: EquationBackend; out: EquationBackendOutput } | null = null;
+    const failures: string[] = [];
+    for (const backend of usable) {
+      try {
+        const out = await backend.recognize(input);
+        if (out && out.text.trim().length > 0) {
+          answered = { backend, out };
+          break;
+        }
+      } catch (err) {
+        failures.push(`Equation backend '${backend.id}' failed: ${String(err)}`);
+      }
     }
 
-    if (!inferred || inferred.text.trim().length === 0) {
+    if (!answered) {
+      if (failures.length > 0) return { ...base, status: "error", errors: failures };
       return {
         ...base,
         status: "invalid",
-        rawOutput: inferred?.text,
         errors: ["The equation backend returned no LaTeX."],
       };
     }
 
-    const rawLatex = inferred.text;
-    // Route the model's raw LaTeX through the SAME normalization as text-layer
-    // extraction, then validate it compiles to non-empty MathML.
-    const latex = normalizeToLatex(rawLatex);
+    const { backend, out } = answered;
+    const rawLatex = out.text;
+    // A model's raw LaTeX goes through the SAME normalization as text-layer
+    // extraction. A backend that already produces canonical LaTeX is not
+    // normalized again, since that could change what it measured.
+    const latex = out.verbatim ? rawLatex.trim() : normalizeToLatex(rawLatex);
     const mathml = convertLatexToMathML(latex);
+    const identity = { backend: { id: backend.id, modality: backend.modality }, ...(out.evidence !== undefined ? { evidence: out.evidence } : {}) };
 
     if (latex.length === 0 || isEmptyMathML(mathml)) {
       return {
         ...base,
+        ...identity,
         status: "invalid",
         rawOutput: rawLatex,
         errors: ["The recognized LaTeX did not compile to valid MathML."],
       };
     }
 
-    const confidence = inferred.confidence;
-    const status =
-      confidence !== undefined && confidence < this.confidenceThreshold
-        ? "low-confidence"
-        : "success";
+    const trustAt = backend.trustAt ?? this.confidenceThreshold;
+    const confidence = out.confidence;
+    const status = confidence !== undefined && confidence < trustAt ? "low-confidence" : "success";
 
     return {
       ...base,
+      ...identity,
       status,
       latex,
       rawOutput: rawLatex,
       ...(confidence !== undefined ? { confidence } : {}),
+      ...(out.doubts && out.doubts.length > 0 ? { warnings: [...out.doubts] } : {}),
     };
   }
 }

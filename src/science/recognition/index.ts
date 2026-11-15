@@ -15,6 +15,15 @@ export type {
 } from "./types";
 export { notConfiguredBackend, DEFAULT_CONFIDENCE_THRESHOLD } from "./types";
 
+export {
+  imageModelAsEquationBackend,
+  isEquationBackend,
+  type EquationBackend,
+  type EquationBackendOutput,
+  type EquationInput,
+  type EquationModality,
+  type PageRegion,
+} from "./equationBackend";
 export { MathRecognizer, type MathRecognitionResult } from "./mathRecognizer";
 export { MoleculeRecognizer, type MoleculeRecognitionResult } from "./moleculeRecognizer";
 export { ReactionRecognizer, type ReactionRecognitionResult } from "./reactionRecognizer";
