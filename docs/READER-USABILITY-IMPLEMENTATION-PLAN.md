@@ -960,6 +960,12 @@ ___ in ___ s. Vitest at `9b91ce3`: 1024 passed in about 47 s.
 - **Q6, Q7** ANSWERED (D16, D17).
 - **Q8 (Appendix A)** Does the user want multi-tab started now? Assessment is
   in Appendix A; no decision yet. Phase 0 to 2 are unaffected either way.
+- **Q9 (Appendix B.1)** Adopt the unified "documents -> tabs -> layout" model
+  (Open together stops being its own category; opening a connector opens its
+  tabs in a layout)? Direction proposed by the user 2026-11-16 and assessed
+  favourably in Appendix B. If yes: D2 and D12 are superseded and RU-3.6 is
+  dropped. Also needs an answer to: does the connector workspace open the two
+  *papers*, the two *endpoint pages*, or both (Appendix B.1)?
 
 ### Deviation log
 (Empty. Append `date, item, what changed, why` here when reality differs from
@@ -1069,3 +1075,167 @@ out of scope but must not break; (d) the 10 e2e lines using
   extra cost.
 - **Not recommended:** starting tabs before Phase 1. The popover/menu
   foundation is needed by the tab overflow menu and context menus anyway.
+
+
+---
+
+## Appendix B: architecture review (2026-11-16)
+
+Written after the user proposed dissolving "Open together" into tabs. Scope:
+(1) is that better for the architecture, (2) contradictions inside this plan,
+(3) decisions to make now to avoid rework, (4) efficiency risks now and later.
+Facts are **[read]** unless marked.
+
+### B.1 Dissolving "Open together": yes, with one correction to the idea
+
+**What the code does today.** One structure carries three ideas:
+`Workbench.openSourceIds` (a replace-only list) plus a single
+`openSubjectPageId`, rendered by `Reader` as a row of "pane slots"
+(`paneSlots`: sources and the subject editor), with `PassageEvidenceLines`
+drawn between the panes. "Open together" is just *how the list got >1 entry*.
+There is already a half-tab concept in the code: below
+`WORKSPACE_3PANE_MIN_WIDTH` (1360 px) Paper B is hidden and offered as a "1-click
+quick-swap tab".
+
+**The correction.** Tabs alone cannot replace the workspace, because the
+workspace's value is *co-visibility*: evidence lines, quote-insert, "write
+while reading" need the papers and the page on screen at once, and a
+background tab is unmounted (Appendix A, point 3). So split the concept in two:
+
+- **Documents and tabs**: what is open (paper, website, page).
+- **Layout**: which tabs are visible side by side, in which slots, and which
+  slot has focus.
+
+"Open together" then disappears as a category: it becomes "open these tabs and
+apply a 2- or 3-slot layout". Single-paper reading is a layout of one. The
+existing responsive collapse (3 slots -> 2 slots + background tab) is the same
+rule expressed as layout, not a special case. Keep the layout **a row of 1 to 3
+slots plus presets**; do not build nested splits or arbitrary docking (YAGNI).
+
+**Check against the data model, because it changes what "2 tabs" means.**
+A connecting hub (`Relationship`, ADR-0008) joins *pages* (nodes), N >= 2, and
+may own an explanatory `Page` (`explanatoryPageId`). Papers enter only through
+the evidence/quotes inside those pages. So a connector workspace is
+properly: **endpoint page A, connector page, endpoint page B**, with their cited
+papers reachable beside them, not literally "two papers". Today's layout is
+Paper A | subject page | Paper B; for connector editing the more useful
+default is probably *page A | connector page | page B* with a "show cited
+sources" affordance. That is a product decision (Q9); the architecture
+supports either once page-kind tabs exist.
+
+**What is currently in the way (real work, not free):**
+1. **Single "primary" pane.** Only `slot.sourceId === openSourceIds[0]`
+   registers zoom/page/find commands and nav state with the toolbar, and find's
+   `Ctrl+F` handler is gated by `isPrimary`. In today's 3-pane layout Paper B has
+   no working toolbar zoom/page/find. A layout needs a **focused slot**
+   concept that the toolbar, find, sidebar and shortcuts target. This is the
+   largest prerequisite and it fixes an existing limitation.
+2. **One open page.** `openSubjectPageId` is a single value, `openSubjectPage`
+   replaces, and `PassageEvidenceLines`, `followSource` / `returnTarget` and the
+   N06 subject-association effect (`App.tsx`) assume exactly one subject.
+   Connector editing needs several pages open: make it a list, and define
+   pairing rules (evidence lines are drawn from the *focused page* to the
+   visible source panes only).
+3. **Page-kind tabs.** A tab for a Page (subject, note, connector page). The
+   `SubjectEditor` is already a pane component, so this is mostly state and
+   chrome.
+4. **Source-return** (follow a quote into a source) must become: activate the
+   tab if open, else open it in the focused-adjacent slot or as a background
+   tab; never replace the page the user is writing.
+
+**Effort on top of the tab MVP in Appendix A (rough, +-40 %):** focused-slot
+refactor 1 to 1.5 days; multi-page open + pairing/N06/source-return 2 to 3;
+connector-open command, layout presets and "visible slots" marking in the tab
+strip 1.5 to 2; rework `workspace.spec.ts` and friends 1 to 2. About **5 to 8
+days**, so the full tabs-plus-layout effort is about **10 to 16 days** in total.
+Staging: ship the tab MVP first (library + paper tabs, workspace path
+untouched), then migrate the workspace onto layout; each stage is shippable.
+
+**Verdict:** better for the architecture *if* adopted as documents -> tabs ->
+layout. It removes a special-case category, fixes the primary-pane limitation,
+and matches the already-present quick-swap-tab idea. Worse if done as "tabs
+only": it would lose evidence lines and write-while-reading.
+
+### B.2 Contradictions and conflicts inside this plan
+
+1. **D12 / RU-3.6 vs Q9.** If the unified model is adopted, "Open together" is
+   not a persistent category and "Swap this paper" is just "pick a different
+   tab for this slot". RU-3.6 becomes redundant; drop it then.
+2. **D2 vs Q9.** D2 says session restore excludes multi-paper workspaces. Under
+   the unified model the restored state is `{tabs, activeId, layout}`.
+3. **RU-3.4's title-click switcher vs Appendix A.** If tabs are built, the
+   switcher is mostly superseded. Already conditional on Q8; just do not start
+   Phase 3 before Q8/Q9 are answered.
+4. **RU-2.2 caches the find index "in a ref".** With tabs, `SourcePane`
+   unmounts on every tab switch, so a component-local ref throws the index away.
+   Change: cache at module level (LRU keyed by source content hash), owned by a
+   document service (B.3.1). Edit RU-2.2 accordingly when implementing.
+5. **RU-3.1's session store shape.** `{lastSourceId, perSource}` would need a
+   v2 migration for tabs. Cheap fix now: version 1 should already be
+   `{ tabs: [{id, kind, ref}], activeId, layout, perDoc: {...} }`, with the
+   single-paper case being one tab and a layout of one. Zero extra UI cost.
+6. **Two sources of truth.** After the tab store exists (Appendix A.2),
+   `Workbench.openSourceIds` / `openSubjectPageId` remain and are read by
+   `NodesView`, `testApi`, the N06 effect and mobile mode. Rule: the tab/layout
+   store is the **only writer**; the workbench fields are a derived projection
+   set through one function. Anything writing them elsewhere is a bug. Add a
+   test that greps/forbids new direct writes outside that function.
+7. **Q7 / D17 and BL-1.** Consistent (recents show only existing sources); but
+   once a Deleted view exists, tabs open on a paper that is then deleted must
+   close or show a tombstone. Specify when BL-1 is designed.
+8. **Settings (RU-3.5) vs RU-3.1/5.3.** `reader.defaultPageWidth` interacts with
+   per-paper saved zoom: saved zoom wins when present; the default applies only
+   to papers with no saved position. State this rule in RU-3.1/RU-5.3.
+
+### B.3 Architectural decisions worth making now (candidate ADRs)
+
+1. **A PDF document service.** Today each `SourcePane` reads the bytes and calls
+   `loadDocument(bytes)` itself (`SourcePane.tsx`), the left sidebar borrows the
+   doc through `paneCommandsRef.getDoc()`, and RU-2 would add a third consumer
+   (text index). Introduce one service: `getDocument(sourceId)` returns a
+   ref-counted `PDFDocumentProxy` from a small LRU, plus the text-content cache
+   and find index. Benefits: tab switches do not re-parse, thumbnails/outline/
+   find/panes share one document, memory is bounded. Do this **before** RU-2.2
+   and before tabs; it is the cheapest high-leverage step in this document.
+2. **Persistence rule for local data.** Three mechanisms already coexist (synced
+   brain via `StorageAdapter`; local IndexedDB stores such as
+   `pdfAnalysisStore`; and, after this plan, `localStorage` for settings and
+   session). Write the rule down: *synced, durable user content* -> adapter;
+   *large or structured local caches* -> IndexedDB; *small per-device
+   preferences and navigation state* -> `localStorage` behind typed stores with
+   defaults and try/catch. Multi-window caveat: two browser windows of the app
+   share `localStorage` and would overwrite each other's session; either scope
+   the session key per window (`sessionStorage` id) or listen to `storage`
+   events. Decide before RU-3.1.
+3. **Navigation is not workbench state.** Keep tabs/layout in the app layer
+   (Appendix A.2); keep `workbench.ts` (5.7k lines) from growing further. Put
+   the new code under `src/app/nav/` with its own tests.
+4. **Focused-slot as a first-class concept** (B.1 item 1), not a flag on slot 0.
+
+### B.4 Efficiency risks (measure before optimising; none are verified)
+
+- **Global re-render.** `useWorkbench` exposes `bump()`, which refreshes a state
+  snapshot and re-renders the whole `App`; there is no `React.memo` anywhere in
+  `src/app`. `Reader` calls `setNav` from the primary pane on scroll/zoom, which
+  re-renders the reader tree including panes and sidebars. With 3 visible slots
+  plus an editor this is the likely first jank source. Measure with the React
+  profiler on the 12-page fixture and a 300-page paper before and after the
+  layout work; if needed, memoise `SourcePane`/`SubjectEditor` and throttle
+  `setNav`.
+- **`AnnotationSidebar`** recomputes `views` with `wb.rawData()` in its memo deps;
+  `rawData()` returns the live object, so the memo's dependency changes on any
+  data mutation. Fine today; revisit at thousands of annotations.
+- **`buildSearchIndex`** rebuilds docs, categories and annotations on every
+  keystroke (RU-5.1c notes it; measure, then cache by data revision).
+- **Per-open PDF cost.** Each reader open reads bytes and parses the PDF again;
+  M17's `cachedPages` makes the text layer instant but canvas render still
+  repeats. The document service (B.3.1) and, if needed, a warm-document LRU
+  address this. Measure reopen latency first (Appendix A.2 item 3).
+- **Find on very large PDFs**: indexing is lazy and chunked (RU-2.2) but runs on
+  the main thread; a Web Worker is the later option, not now.
+- **Storage growth**: `Source.cachedPages` and `pageTexts` are stored on the
+  source record, i.e. inside the synced brain payload that is rewritten on save.
+  Large papers inflate every save and every Koofr publish. **UNVERIFIED** size
+  in practice; measure a 300-page paper's `cachedPages` JSON. If large, move to
+  the IndexedDB analysis store (which was designed for this, see
+  `pdfAnalysisStore.ts` header) before sync work depends on it.
