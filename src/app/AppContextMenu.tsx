@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { ContextMenuSurface, type ContextMenuEntry } from "./ui/ContextMenu";
 import { Icons } from "./ui/icons";
+import type { RelationshipId } from "../model";
+import type { Workbench } from "./workbench";
+import {
+  openNodePageAction,
+  openRelationshipPageAction,
+  openRelationshipWorkspaceAction,
+} from "./nodeActions";
 
 /**
  * App-wide right-click menu. The browser's default menu ("Back / Reload / View
@@ -13,34 +20,14 @@ import { Icons } from "./ui/icons";
  *    spell-check), which a custom list cannot replicate;
  *  - everywhere else: view-specific actions, then "Go to…" navigation.
  *
- * Actions are routed through the SAME visible controls (by data-testid) so a
- * menu item can never drift from what the button does or bypass its guards.
+ * Graph actions call the same underlying Workbench command functions as the
+ * selected-node/hub controls. DOM-control simulation is intentionally avoided
+ * for graph operations; legacy shell/library navigation continues to reuse the
+ * existing visible controls.
  */
 
 function press(testId: string): void {
   (document.querySelector(`[data-testid="${testId}"]`) as HTMLElement | null)?.click();
-}
-
-/**
- * Open a node's page the way the canvas does. A click on a node only SELECTS it
- * (select-then-open); the node then offers its own "Open page" control. So:
- * select it, wait for that control to render, and press it — the same path as
- * the visible button, including its camera dive and workspace switch.
- */
-function openNodePage(node: Element): void {
-  (node.querySelector("circle") as unknown as HTMLElement | null)?.dispatchEvent(
-    new MouseEvent("click", { bubbles: true }),
-  );
-  let frames = 0;
-  const tryOpen = (): void => {
-    const open = node.querySelector(".node-open-page") as unknown as HTMLElement | null;
-    if (open) {
-      open.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      return;
-    }
-    if (++frames < 30) requestAnimationFrame(tryOpen);
-  };
-  requestAnimationFrame(tryOpen);
 }
 
 function isEditable(el: Element | null): boolean {
@@ -67,7 +54,12 @@ function navEntries(): ContextMenuEntry[] {
 }
 
 /** Build the entries for a right-click on `target`. Exported for tests. */
-export function buildContextEntries(target: Element, selectedText: string): {
+export function buildContextEntries(
+  target: Element,
+  selectedText: string,
+  wb?: Workbench,
+  bump?: () => void,
+): {
   entries: ContextMenuEntry[];
   label: string;
 } {
@@ -122,38 +114,44 @@ export function buildContextEntries(target: Element, selectedText: string): {
     entries.push({ kind: "separator", id: "s-lib" });
   } else if (node) {
     label = "Node actions";
-    entries.push({
-      id: "node-open",
-      label: "Open page",
-      icon: Icons.open,
-      onSelect: () => openNodePage(node),
-    });
+    const pageId = node.getAttribute("data-page-id");
+    if (wb && bump && pageId) {
+      entries.push({
+        id: "node-open",
+        label: "Open page",
+        icon: Icons.open,
+        onSelect: () => openNodePageAction(wb, pageId, bump),
+      });
+    }
     entries.push({ kind: "separator", id: "s-node" });
   } else if (hub) {
     label = "Connection actions";
-    entries.push({
-      id: "hub-open",
-      label: "Open connecting page",
-      icon: Icons.open,
-      onSelect: () => {
-        // A click on the hub itself only selects it; the explicit control opens.
-        const rel = hub.getAttribute("data-relationship-id");
-        (
-          document.querySelector(`[data-testid="open-connecting-page"][data-relationship-id="${rel}"]`) as unknown as HTMLElement | null
-        )?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      },
-    });
-    entries.push({
-      id: "hub-label",
-      label: "Edit label…",
-      icon: Icons.pencil,
-      onSelect: () => {
-        const rel = hub.getAttribute("data-relationship-id");
-        (
-          document.querySelector(`[data-testid="edit-hub-label"][data-relationship-id="${rel}"]`) as unknown as HTMLElement | null
-        )?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      },
-    });
+    const relationshipId = hub.getAttribute("data-relationship-id");
+    if (wb && bump && relationshipId) {
+      entries.push({
+        id: "hub-open",
+        label: "Open connecting page",
+        icon: Icons.open,
+        onSelect: () => openRelationshipPageAction(wb, relationshipId, bump),
+      });
+      entries.push({
+        id: "hub-workspace",
+        label: "Open workspace",
+        icon: Icons.open,
+        onSelect: () => openRelationshipWorkspaceAction(wb, relationshipId, bump),
+      });
+      entries.push({
+        id: "hub-label",
+        label: "Edit label…",
+        icon: Icons.pencil,
+        onSelect: () => {
+          const current =
+            wb.conceptGraph().links.find((link) => link.relationshipId === relationshipId)?.label ?? "";
+          const next = window.prompt("Connecting page label", current);
+          if (next !== null) void wb.setRelationshipLabel(relationshipId as RelationshipId, next).then(bump);
+        },
+      });
+    }
     entries.push({ kind: "separator", id: "s-hub" });
   } else if (target.closest('[data-testid="nodes-view"]')) {
     label = "Map actions";
@@ -176,7 +174,13 @@ export function buildContextEntries(target: Element, selectedText: string): {
   return { entries, label };
 }
 
-export function AppContextMenu(): JSX.Element | null {
+export function AppContextMenu({
+  wb,
+  bump,
+}: {
+  wb: Workbench;
+  bump: () => void;
+}): JSX.Element | null {
   const [menu, setMenu] = useState<MenuState | null>(null);
   const close = useCallback(() => setMenu(null), []);
 
@@ -195,7 +199,7 @@ export function AppContextMenu(): JSX.Element | null {
       }
       e.preventDefault();
       const sel = window.getSelection()?.toString().trim() ?? "";
-      const { entries, label } = buildContextEntries(target, sel);
+      const { entries, label } = buildContextEntries(target, sel, wb, bump);
       setMenu({ x: e.clientX, y: e.clientY, entries, label });
     };
     document.addEventListener("contextmenu", onContextMenu);

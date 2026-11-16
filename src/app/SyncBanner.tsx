@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { KoofrStorageAdapter } from "../storage";
+import { KoofrStorageAdapter, clearSyncConfig, loadSyncConfig, saveSyncConfig } from "../storage";
 import type { Workbench } from "./workbench";
 
 /**
@@ -46,9 +46,15 @@ export function SyncBanner({
 }): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
-  const [baseUrl, setBaseUrl] = useState("");
-  const [username, setUsername] = useState("");
-  const [appPassword, setAppPassword] = useState("");
+  // P5: pre-fill the form from any persisted WebDAV config so the user sees the
+  // endpoint that reconnects automatically and can edit/disconnect it.
+  const persisted = loadSyncConfig();
+  const [baseUrl, setBaseUrl] = useState(persisted?.baseUrl ?? "");
+  const [username, setUsername] = useState(persisted?.username ?? "");
+  const [appPassword, setAppPassword] = useState(persisted?.appPassword ?? "");
+  // P5: whether a WebDAV endpoint is persisted (reconnects on reload). Local
+  // state so "Connect"/"Disconnect" update the hint without a full reload.
+  const [savedBaseUrl, setSavedBaseUrl] = useState<string | null>(persisted?.baseUrl ?? null);
   const status = wb.syncStatus();
 
   const publish = async (): Promise<void> => {
@@ -79,12 +85,28 @@ export function SyncBanner({
   const configureWebdav = (): void => {
     if (baseUrl.trim() === "") return;
     const user = username.trim();
-    const adapter = new KoofrStorageAdapter({
+    const config = {
       baseUrl: baseUrl.trim(),
       ...(user === "" ? {} : { username: user }),
       ...(appPassword === "" ? {} : { appPassword }),
-    });
+    };
+    const adapter = new KoofrStorageAdapter(config);
+    // P5: persist the serializable endpoint config so this WebDAV remote
+    // reconnects automatically on the next load (App restores it at boot).
+    saveSyncConfig(config);
+    setSavedBaseUrl(config.baseUrl);
     onConfigureRemote?.(adapter);
+    setConfigOpen(false);
+  };
+
+  // P5: forget the persisted endpoint. Clears stored credentials so the app
+  // starts disconnected next load. Does not alter the in-memory brain.
+  const disconnectWebdav = (): void => {
+    clearSyncConfig();
+    setSavedBaseUrl(null);
+    setBaseUrl("");
+    setUsername("");
+    setAppPassword("");
     setConfigOpen(false);
   };
 
@@ -145,6 +167,12 @@ export function SyncBanner({
       {configOpen && (
         <div data-testid="sync-config-modal" style={styles.modal} role="dialog">
           <div style={styles.modalTitle}>Configure remote sync</div>
+          {savedBaseUrl && (
+            <div data-testid="sync-saved-hint" style={styles.savedHint}>
+              Connected to <strong>{savedBaseUrl}</strong>. Reconnects
+              automatically on reload.
+            </div>
+          )}
           <label style={styles.field}>
             <span style={styles.fieldLabel}>WebDAV base URL</span>
             <input
@@ -179,11 +207,23 @@ export function SyncBanner({
               disabled={baseUrl.trim() === ""}
               onClick={configureWebdav}
             >
-              Connect WebDAV
+              {savedBaseUrl ? "Update connection" : "Connect WebDAV"}
             </button>
+            {savedBaseUrl && (
+              <button data-testid="sync-disconnect-btn" onClick={disconnectWebdav}>
+                Disconnect
+              </button>
+            )}
+          </div>
+          <div style={styles.demoSection}>
             <button data-testid="use-demo-remote-btn" onClick={configureDemo}>
               Use Local Demo Remote
             </button>
+            <p data-testid="sync-demo-note" style={styles.demoNote}>
+              Demo only — an in-memory remote for trying Publish/Refresh. It is
+              <strong> not saved and is cleared on reload</strong>. Enter a
+              WebDAV endpoint above for durable sync.
+            </p>
           </div>
         </div>
       )}
@@ -284,4 +324,22 @@ const styles: Record<string, React.CSSProperties> = {
   field: { display: "flex", flexDirection: "column", gap: "0.15rem", fontSize: "0.72rem" },
   fieldLabel: { color: "#4b5563" },
   modalActions: { display: "flex", gap: "0.4rem", marginTop: "0.3rem", flexWrap: "wrap" },
+  savedHint: {
+    fontSize: "0.7rem",
+    color: "#065f46",
+    background: "#ecfdf5",
+    border: "1px solid #a7f3d0",
+    borderRadius: "6px",
+    padding: "0.3rem 0.45rem",
+    wordBreak: "break-all",
+  },
+  demoSection: {
+    marginTop: "0.5rem",
+    paddingTop: "0.5rem",
+    borderTop: "1px solid #e5e7eb",
+    display: "flex",
+    flexDirection: "column",
+    gap: "0.25rem",
+  },
+  demoNote: { margin: 0, fontSize: "0.66rem", color: "var(--ito-warning-fg)", lineHeight: 1.35 },
 };

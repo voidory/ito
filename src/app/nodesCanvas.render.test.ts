@@ -298,28 +298,41 @@ describe("NodesCanvas — renders from live Workbench records", () => {
     expect(d.categories.length).toBe(0);
   });
 
-  it("A13-M2: a rendered hub exposes an open-connecting-page control", async () => {
+  it("A13-M2: selecting a rendered hub exposes an open-connecting-page control", async () => {
     const wb = await Workbench.open(new InMemoryStorageAdapter());
     const [a, b] = await makePages(wb, ["A", "B"]);
     const rel = await wb.createRelationship([a!, b!]);
     const el = await mount(wb);
 
-    const control = el.querySelector('[data-testid="open-connecting-page"]');
+    // The hub is always rendered; its "open connecting page" action is now a
+    // selection-based DOM control (M20 node-interaction redesign): click the
+    // hub to select it, then the selected-hub action panel appears.
+    const hub = el.querySelector('[data-testid="graph-hub"]') as SVGPathElement;
+    expect(hub).not.toBeNull();
+    expect(hub.getAttribute("data-relationship-id")).toBe(rel.id);
+    await act(async () => {
+      hub.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    const control = el.querySelector('[data-testid="selected-hub-open-page"]');
     expect(control).not.toBeNull();
-    expect(control!.getAttribute("data-relationship-id")).toBe(rel.id);
-    // The hub itself is still rendered alongside the control (both affordances).
-    expect(el.querySelector('[data-testid="graph-hub"]')).not.toBeNull();
   });
 
-  it("A13-M2: clicking open-connecting-page develops+opens the explanatory page", async () => {
+  it("A13-M2: clicking the selected hub's open-page control develops+opens the explanatory page", async () => {
     const wb = await Workbench.open(new InMemoryStorageAdapter());
     const [a, b] = await makePages(wb, ["A", "B"]);
     const rel = await wb.createRelationship([a!, b!], "relates", "bridges");
     const el = await mount(wb);
 
+    // Select the hub, then invoke its "Open connecting page" action.
+    const hub = el.querySelector('[data-testid="graph-hub"]') as SVGPathElement;
+    await act(async () => {
+      hub.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
     const control = el.querySelector(
-      '[data-testid="open-connecting-page"]',
-    ) as SVGTextElement;
+      '[data-testid="selected-hub-open-page"]',
+    ) as HTMLButtonElement;
+    expect(control).not.toBeNull();
     await act(async () => {
       control.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });

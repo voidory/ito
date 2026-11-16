@@ -1,6 +1,6 @@
 /**
  * Unit coverage for the superseded-staging-key cleanup policy
- * (LocalFileStorageAdapter). Every writeBrain stores a FULL brain copy under a
+ * (IndexedDbStorageAdapter). Every writeBrain stores a FULL brain copy under a
  * `${brainId}:staged:${revision}` key, so after the published pointer advances
  * the adapter must delete the strictly-older staged payloads (otherwise the
  * store grows by one complete snapshot per keystroke-save) while never touching
@@ -17,7 +17,7 @@ import {
   stagedKeyFor,
   stagedKeyPrefix,
   supersededStagedKeys,
-} from "./LocalFileStorageAdapter";
+} from "./IndexedDbStorageAdapter";
 import type { BrainId } from "../model";
 
 const BRAIN = "brain-a" as BrainId;

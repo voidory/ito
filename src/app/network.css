@@ -576,3 +576,92 @@
 [data-testid="category-link-layer"] {
   transition: opacity 120ms ease;
 }
+
+/* M21: compact DOM action row for the currently selected node/hub.
+   It is rendered outside the SVG so actions are real keyboard-focusable
+   controls while the graph itself remains visually minimal. */
+.nodes-selection-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  max-width: min(34rem, calc(100% - 1rem));
+  padding: 0.28rem 0.4rem;
+  border: 1px solid rgba(138, 127, 112, 0.5);
+  border-radius: 8px;
+  background: rgba(251, 250, 247, 0.96);
+  box-shadow: 0 4px 14px rgba(40, 40, 40, 0.14);
+  font: 500 12px system-ui, sans-serif;
+  white-space: nowrap;
+}
+
+.nodes-selection-actions button {
+  border: 0;
+  border-radius: 5px;
+  padding: 0.28rem 0.5rem;
+  background: transparent;
+  color: #3a3733;
+  cursor: pointer;
+  font: inherit;
+}
+
+.nodes-selection-actions button:hover,
+.nodes-selection-actions button:focus-visible {
+  background: #f1ede4;
+  outline: none;
+}
+
+.nodes-selection-actions button:first-of-type {
+  font-weight: 600;
+  color: #8f4f35;
+}
+
+.nodes-selection-label {
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #5f5a54;
+}
+
+@media (max-width: 700px) {
+  .nodes-selection-actions {
+    max-width: calc(100% - 1rem);
+    white-space: normal;
+    flex-wrap: wrap;
+  }
+
+  .nodes-selection-label {
+    max-width: 8rem;
+  }
+}
+
+/* Visually hidden keyboard hit targets: accessible without adding graph clutter. */
+.nodes-accessible-controls {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.nodes-accessible-controls button {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.nodes-accessible-controls button:focus-visible {
+  position: fixed;
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: 0.4rem 0.6rem;
+  clip: auto;
+  clip-path: none;
+  z-index: 20;
+}

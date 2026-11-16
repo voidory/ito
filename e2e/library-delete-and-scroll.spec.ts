@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { seedSampleLibrary } from "./helpers";
 
 /**
  * Library delete + fixed-viewport shell, validated in real chromium.
@@ -15,7 +16,8 @@ async function boot(page: Page): Promise<void> {
   await expect(page.getByTestId("app-status")).toHaveAttribute("data-state", "ready", {
     timeout: 15_000,
   });
-  await expect(page.getByTestId("library-item").first()).toBeVisible({ timeout: 15_000 });
+  // Automatic seeding was removed: load the sample workspace explicitly.
+  await seedSampleLibrary(page);
 }
 
 async function documentOverflow(page: Page): Promise<{ v: number; h: number }> {

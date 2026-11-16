@@ -4,7 +4,7 @@ import type { BrainData, BrainId, BrainManifest } from "../model";
  * StorageAdapter is the boundary between the app and whatever persists a brain
  * (spec sections 14, 20, D09). The app NEVER talks to IndexedDB / OPFS / WebDAV
  * directly; it goes through this interface so storage back-ends are pluggable
- * (LocalFileStorageAdapter now; Koofr/WebDAV deferred to M4).
+ * (IndexedDbStorageAdapter now; Koofr/WebDAV deferred to M4).
  */
 export interface StorageAdapter {
   /** List the brain ids currently available in this store. */

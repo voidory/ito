@@ -262,3 +262,98 @@ describe("FEAT-003 3.2 SyncBanner configure-sync modal + demo remote", () => {
     ).toBe(false);
   });
 });
+
+describe("P5 SyncBanner — WebDAV config persistence", () => {
+  async function mountConfig(
+    wb: Workbench,
+    onConfigureRemote: (remote: KoofrStorageAdapter) => void,
+  ): Promise<HTMLElement> {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root!.render(
+        createElement(SyncBanner, {
+          wb,
+          remote: null,
+          onChange: () => undefined,
+          onConfigureRemote,
+        }),
+      );
+    });
+    return container;
+  }
+
+  function typeInto(el: Element, testId: string, value: string): Promise<void> {
+    const input = el.querySelector(`[data-testid="${testId}"]`) as HTMLInputElement;
+    return act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        "value",
+      )!.set!;
+      setter.call(input, value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  }
+
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  it("Connect WebDAV persists the endpoint and shows the reconnect hint", async () => {
+    const wb = await Workbench.open(new InMemoryStorageAdapter());
+    let configured: KoofrStorageAdapter | null = null;
+    const el = await mountConfig(wb, (r) => {
+      configured = r;
+    });
+
+    await click(el.querySelector('[data-testid="configure-sync-btn"]')!);
+    await typeInto(el, "sync-base-url-input", "https://dav.example/Koofr");
+    await typeInto(el, "sync-username-input", "alice");
+    await typeInto(el, "sync-app-password-input", "pw");
+    await click(el.querySelector('[data-testid="sync-connect-webdav-btn"]')!);
+
+    // A real adapter was lifted AND the endpoint was persisted to localStorage.
+    expect(configured).not.toBeNull();
+    const { loadSyncConfig } = await import("../storage");
+    expect(loadSyncConfig()).toEqual({
+      baseUrl: "https://dav.example/Koofr",
+      username: "alice",
+      appPassword: "pw",
+    });
+
+    // Re-opening the modal shows the persisted-endpoint reconnect hint.
+    await click(el.querySelector('[data-testid="configure-sync-btn"]')!);
+    expect(el.querySelector('[data-testid="sync-saved-hint"]')!.textContent).toContain(
+      "https://dav.example/Koofr",
+    );
+  });
+
+  it("Disconnect clears the persisted endpoint", async () => {
+    const wb = await Workbench.open(new InMemoryStorageAdapter());
+    const el = await mountConfig(wb, () => undefined);
+    await click(el.querySelector('[data-testid="configure-sync-btn"]')!);
+    await typeInto(el, "sync-base-url-input", "https://dav.example/Koofr");
+    await click(el.querySelector('[data-testid="sync-connect-webdav-btn"]')!);
+
+    const { loadSyncConfig } = await import("../storage");
+    expect(loadSyncConfig()).not.toBeNull();
+
+    await click(el.querySelector('[data-testid="configure-sync-btn"]')!);
+    await click(el.querySelector('[data-testid="sync-disconnect-btn"]')!);
+    expect(loadSyncConfig()).toBeNull();
+  });
+
+  it("the demo remote is labelled ephemeral and is NOT persisted", async () => {
+    const wb = await Workbench.open(new InMemoryStorageAdapter());
+    const el = await mountConfig(wb, () => undefined);
+    await click(el.querySelector('[data-testid="configure-sync-btn"]')!);
+
+    const note = el.querySelector('[data-testid="sync-demo-note"]')!;
+    expect(note.textContent).toContain("cleared on reload");
+
+    await click(el.querySelector('[data-testid="use-demo-remote-btn"]')!);
+    const { loadSyncConfig } = await import("../storage");
+    expect(loadSyncConfig()).toBeNull(); // demo remote never persists
+  });
+});
