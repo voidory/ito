@@ -17,8 +17,8 @@ import type { KoofrStorageAdapter as KoofrAdapter } from "../storage";
 import { MobileReaderSheet } from "./MobileReaderSheet";
 import { CaptureProcessingQueue } from "./CaptureProcessingQueue";
 import { revealPresentation } from "./threeScene.map";
-import { installTestApi } from "./testApi";
-import type { KoofrStorageAdapter, StagedImport } from "../storage";
+import { KoofrStorageAdapter, loadSyncConfig } from "../storage";
+import type { StagedImport } from "../storage";
 import type { PageId, SourceId } from "../model";
 import { loadDocument, hashBytes } from "../pdf";
 import { importPdfFiles } from "./pdfImport";
@@ -33,6 +33,28 @@ type Boot =
   | { kind: "booting" }
   | { kind: "ready"; detail: string }
   | { kind: "error"; detail: string };
+
+/**
+ * P2: the privileged `window.__ito` test API must never ship in a normal
+ * production bundle (it exposes destructive, unauthenticated mutators). It is
+ * installed only when:
+ *   - running under the Vite dev server (`import.meta.env.DEV`), or
+ *   - an e2e build explicitly opts in with `VITE_ITO_TEST_API=1`.
+ * Playwright serves a PRODUCTION build (`vite build && vite preview`), where
+ * `DEV` is false, so its webServer sets `VITE_ITO_TEST_API=1` to keep the e2e
+ * suite working while a real `npm run build` leaves the API out. The access is
+ * wrapped so it is safe under Node/jsdom where `import.meta.env` may be absent.
+ */
+export function testApiEnabled(): boolean {
+  try {
+    const env = (import.meta as unknown as {
+      env?: { DEV?: boolean; VITE_ITO_TEST_API?: string };
+    }).env;
+    return env?.DEV === true || env?.VITE_ITO_TEST_API === "1";
+  } catch {
+    return false;
+  }
+}
 
 /**
  * App shell for the M1 reading workbench. The Library is the DEFAULT entry
@@ -50,7 +72,15 @@ export function App(): JSX.Element {
   // FEAT-003 (3.2): the live remote-sync adapter, lifted into the shell so the
   // SyncBanner's Configure Sync modal can wire a WebDAV or local demo remote
   // and the publish/refresh controls become enabled once configured.
-  const [remote, setRemote] = useState<KoofrStorageAdapter | null>(null);
+  // P5: restore a persisted WebDAV endpoint at boot so a previously-configured
+  // real remote reconnects automatically (the in-memory demo remote is never
+  // persisted, so it is not restored). The adapter is rebuilt from the stored
+  // serializable config; the non-serializable transport defaults to fetch.
+  const [remote, setRemote] = useState<KoofrStorageAdapter | null>(() => {
+    const cfg = loadSyncConfig();
+    return cfg ? new KoofrStorageAdapter(cfg) : null;
+  });
+  const [subjectsExploreRequest, setSubjectsExploreRequest] = useState(0);
 
   const onRestoreFile = useCallback(
     async (file: File | null) => {
@@ -118,24 +148,36 @@ export function App(): JSX.Element {
     };
   }, []);
 
-  // Seed the library with the two real fixtures on first run.
-  useEffect(() => {
+  // Sample data is opt-in. It is deliberately not tied to an empty library:
+  // an empty persisted library must remain empty across reloads.
+  const loadSampleWorkspace = useCallback(async (): Promise<void> => {
     if (!wb || importing) return;
-    if (wb.rawData().sources.length > 0) return;
     setImporting(true);
-    void (async () => {
+    try {
       await importFixture(wb, fixture3, "Sample Document (3 pages)");
       await importFixture(wb, fixtureMulti, "Multi-Column Fixture");
-      // A third paper so a reader pane can be switched to a third source while
-      // the same subject stays open (spec section 8.2 note).
       await importFixture(wb, fixtureRotated, "Rotated Fixture");
       bump();
-    })();
+    } finally {
+      setImporting(false);
+    }
   }, [wb, importing, bump]);
 
   // Expose the imperative test API for Playwright once the workbench is ready.
+  // P2: it is NOT installed in a normal production build — only under the Vite
+  // dev server or an e2e build that explicitly opts in (see testApiEnabled).
+  // The module is loaded via dynamic import() so Vite code-splits it into a
+  // separate chunk that is never fetched (and whose test-only fakes/credentials
+  // never load) in a normal production build.
   useEffect(() => {
-    if (wb) installTestApi(wb, bump);
+    if (!wb || !testApiEnabled()) return;
+    let cancelled = false;
+    void import("./testApi").then(({ installTestApi }) => {
+      if (!cancelled) installTestApi(wb, bump);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [wb, bump]);
 
   if (boot.kind !== "ready") {
@@ -145,7 +187,7 @@ export function App(): JSX.Element {
           {boot.kind === "booting" && <p>Starting…</p>}
           {boot.kind === "error" && (
             <>
-              <h2 style={{ color: "#c5221f" }}>ERROR</h2>
+              <h2 style={{ color: "var(--ito-danger-fg)" }}>ERROR</h2>
               <p>{boot.detail}</p>
             </>
           )}
@@ -158,7 +200,7 @@ export function App(): JSX.Element {
     return (
       <main style={{ padding: "2rem" }}>
         <section data-testid="app-status" data-state="error">
-          <h2 style={{ color: "#c5221f" }}>ERROR</h2>
+          <h2 style={{ color: "var(--ito-danger-fg)" }}>ERROR</h2>
           <p>{error}</p>
         </section>
       </main>
@@ -182,7 +224,7 @@ export function App(): JSX.Element {
       onDrop={onShellDrop}
       style={{ fontFamily: "system-ui, sans-serif" }}
     >
-      <AppContextMenu />
+      {wb && <AppContextMenu wb={wb} bump={bump} />}
       {/* Hidden boot confirmation retained for traceability to the M0 checks. */}
       <span style={{ display: "none" }} data-testid="boot-detail">
         {boot.detail}
@@ -207,7 +249,11 @@ export function App(): JSX.Element {
             <ViewSwitch viewMode={state.viewMode} onSetViewMode={onSetViewMode} />
             {/* Subjects launcher: open any existing subject page, or create a
                 new standalone one, from the shell header (always reachable). */}
-            <SubjectsLauncher wb={wb} bump={bump} />
+            <SubjectsLauncher
+              wb={wb}
+              bump={bump}
+              openRequest={subjectsExploreRequest}
+            />
             {/*
               Shell-level search surface (FEAT-005): reachable in BOTH Files and
               Nodes. Selecting a result opens the match via existing Workbench
@@ -310,6 +356,12 @@ export function App(): JSX.Element {
                 bump();
               }}
               onImported={() => bump()}
+              onLoadSampleWorkspace={() => void loadSampleWorkspace()}
+              onExploreNodes={() => {
+                wb.setViewMode("nodes");
+                bump();
+              }}
+              onExploreSubjects={() => setSubjectsExploreRequest((n) => n + 1)}
             />
           ) : mobileMode && state.openSourceIds.length === 1 ? (
             // M4/M5 (A21) Phone Reading: a single-document reader whose scroll +
@@ -384,9 +436,9 @@ export function SaveErrorBanner({
         alignItems: "center",
         gap: "0.75rem",
         padding: "0.5rem 1rem",
-        background: "#fdecea",
-        color: "#611a15",
-        borderBottom: "1px solid #f5c6c2",
+        background: "var(--ito-danger-bg)",
+        color: "var(--ito-danger-ink)",
+        borderBottom: "1px solid var(--ito-danger-border)",
         fontSize: "0.85rem",
       }}
     >
@@ -408,11 +460,17 @@ export function SaveErrorBanner({
 export function SubjectsLauncher({
   wb,
   bump,
+  openRequest = 0,
 }: {
   wb: NonNullable<ReturnType<typeof useWorkbench>["wb"]>;
   bump: () => void;
+  openRequest?: number;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (openRequest > 0) setOpen(true);
+  }, [openRequest]);
   const subjects = wb.rawData().pages.filter((p) => p.kind === "subject");
 
   const openSubject = (id: SourceId | string): void => {

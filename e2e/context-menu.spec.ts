@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { seedSampleLibrary } from "./helpers";
 
 /**
  * App-wide right-click menu: the browser's default menu is replaced everywhere
@@ -9,7 +10,8 @@ test.use({ reducedMotion: "reduce" });
 
 async function boot(page: Page): Promise<void> {
   await page.goto("/");
-  await expect(page.getByTestId("library-item").first()).toBeVisible({ timeout: 15_000 });
+  // Automatic seeding was removed: load the sample workspace explicitly.
+  await seedSampleLibrary(page);
   await page.waitForFunction(() => !!window.__ito);
 }
 

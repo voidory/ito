@@ -53,12 +53,15 @@ async function click(el: Element): Promise<void> {
 }
 
 describe("Library — Import Zotero button + modal (§2.3)", () => {
-  it("renders a visible Import Zotero button in the header", async () => {
+  it("renders a visible Import Zotero button on an empty library", async () => {
     const wb = await Workbench.open(new InMemoryStorageAdapter());
     const el = await mount(wb, () => undefined);
-    const btn = el.querySelector('[data-testid="import-zotero-btn"]');
+    // On an EMPTY library the Zotero entry point lives in the empty-state CTA
+    // block (the header toolbar only appears once the library has sources —
+    // see "Reduce empty-state header clutter"). Both open the same modal.
+    const btn = el.querySelector('[data-testid="empty-import-zotero"]');
     expect(btn).not.toBeNull();
-    expect(btn!.textContent).toBe("Import Zotero");
+    expect(btn!.textContent).toBe("Import from Zotero");
     // The modal is not open until the button is clicked.
     expect(el.querySelector('[data-testid="import-zotero-modal"]')).toBeNull();
   });
@@ -70,7 +73,7 @@ describe("Library — Import Zotero button + modal (§2.3)", () => {
       imported += 1;
     });
 
-    await click(el.querySelector('[data-testid="import-zotero-btn"]')!);
+    await click(el.querySelector('[data-testid="empty-import-zotero"]')!);
     const modal = el.querySelector('[data-testid="import-zotero-modal"]');
     expect(modal).not.toBeNull();
 

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { clickCenter } from "./helpers";
+import { clickCenter, seedSampleLibrary } from "./helpers";
 
 /**
  * M1 READING WORKBENCH — runtime validation in real chromium (spec section 24,
@@ -19,9 +19,9 @@ async function bootLibrary(page: Page): Promise<void> {
   await expect(page.getByTestId("app-status")).toHaveAttribute("data-state", "ready", {
     timeout: 15_000,
   });
-  // The library seeds two fixtures on first run.
   await expect(page.getByTestId("library")).toBeVisible();
-  await expect(page.getByTestId("library-item").first()).toBeVisible({ timeout: 15_000 });
+  // Automatic seeding was removed: load the sample workspace explicitly.
+  await seedSampleLibrary(page);
 }
 
 async function openFirstDocument(page: Page, titleMatch?: RegExp): Promise<void> {
