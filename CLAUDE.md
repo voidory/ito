@@ -32,7 +32,11 @@ unless asked.
 
 ## Environment notes
 
-- Do not run `npx playwright install` in the cloud sandbox. Use
-  `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/opt/pw-browsers/chromium` (see plan
-  section 3.1 and RU-0.2).
+- Do not run `npx playwright install` in the cloud sandbox. The browser is at
+  `/opt/pw-browsers/chromium`. Playwright ignores
+  `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` until RU-0.2 makes `playwright.config.ts`
+  read it; until then run e2e through a wrapper config that spreads the base config
+  and sets `launchOptions: { executablePath, args: ['--no-sandbox'] }` (plan 3.1).
+- Known-red e2e baseline (2026-11-16): 6 map/hub specs fail, also in PR #19's CI
+  (plan 1.1, RU-0.5). Gate on "no new failures".
 - Checks: `npm run typecheck`, `npx vitest run`.

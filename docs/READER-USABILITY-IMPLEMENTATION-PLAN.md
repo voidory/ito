@@ -1,6 +1,10 @@
 # Reader & app usability: implementation plan (binding spec)
 
-Status: **active**. Created 2026-11-16 against code at `9b91ce3`
+Status: **active**. Created 2026-11-16 against code at `9b91ce3`. Baseline after the
+second pass: `9b91ce3` + PR #19 head `b9115ae` (planning branch). Text tagged
+`[corrected]` replaces a claim found false or stale on 2026-11-16; the old claim
+is recorded in section 11. Plan decision IDs are now `RD-n` (they collided with
+the master spec's D01-D22).
 (docs commit `f297ae9`). This file supersedes the sequencing summary in
 `docs/READER-USABILITY-ROADMAP.md`; the roadmap stays as the short overview.
 
@@ -54,8 +58,16 @@ in headless Chromium (marked **[run]**) or by reading code (marked **[read]**).
 ### 1.1 Health baseline
 - `npm run typecheck`: clean. **[run]**
 - `npx vitest run`: 118 files, 1024 tests, all pass, about 47 s. **[run]**
-- Playwright e2e (22 specs) and the LaTeX browser benchmark: **not run** in the
-  audit. Phase 0 records their baseline.
+  **[corrected]** On the merged baseline: 120 files, 1040 tests pass; typecheck
+  and build clean.
+- Playwright e2e: **[corrected]** the "22 specs" was a file count (18 spec files on
+  `main`, 19 merged). On the merged baseline: 106 tests, **100 pass, 6 fail**
+  **[run]**, 2.5 min with 3 workers. The same six fail in PR #19's own CI at
+  `b9115ae` (all 10 CI runs of that PR are red on e2e; unit job green):
+  `concept-network.spec.ts` lines 200, 300, 383 and `m21-ui-ux.spec.ts` lines 61,
+  102, 126 (map/hub selection). CI did not run e2e on `main` before PR #19
+  (`m17-playtest.yml` ran one unit file, typecheck, build). The LaTeX benchmark
+  is green on `main` (last 4 runs, 1.6-2.2 min each).
 
 ### 1.2 What already works (do not regress)
 - Text selection, then Highlight/Underline from the selection toolbar, creates
@@ -92,7 +104,7 @@ in headless Chromium (marked **[run]**) or by reading code (marked **[read]**).
 | F3 | Popovers not clamped to viewport; selection toolbar close button overlaps swatch | RU-1.1, RU-1.3 |
 | F4 | Area drag leaves the page; blank sidebar preview | RU-4.x |
 | F5 | Subjects menu ignores Esc / outside click | RU-1.2 |
-| F6 | Permanent "Stale" badge with no remote | RU-3.2 |
+| F6 | Sync badge does not reflect sync state: "Stale" at every boot (also with a remote), "Up to date" after a publish whatever is edited later **[corrected, widened]** | RU-3.2 |
 | F7 | No way to search papers by title anywhere (top search does not index sources) | RU-5.1a/b/c |
 | F8 | Reload loses the open paper, page, zoom | RU-3.1 |
 | F9 | Sidebar not in page order | RU-5.2 |
@@ -103,6 +115,7 @@ in headless Chromium (marked **[run]**) or by reading code (marked **[read]**).
 | F14 | `favicon.ico` 404 in console (noise) | RU-5.5 |
 | F15 | Clicking the highlighted "Files" tab inside the reader does nothing; the only way back is an unlabelled icon | RU-3.4 |
 | F16 | Reader overflow menu "Switch paper..." silently swaps to an arbitrary paper (`switchable[0]`); a persistent per-pane `<select>` duplicates it | RU-3.6 |
+| F17 | Page context menu rows `ctx-switch-paper` and `ctx-select-area` do nothing (`onPageAction` handles only range/lines/motion) **[read, 2026-11-16]** | RU-1.5, RU-3.6 |
 
 ---
 
@@ -115,6 +128,10 @@ in headless Chromium (marked **[run]**) or by reading code (marked **[read]**).
   Launch with `executablePath: '/opt/pw-browsers/chromium'` and
   `args: ['--no-sandbox']`. RU-0.2 makes `playwright.config.ts` honour
   `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` so specs run unmodified.
+  **[corrected]** Playwright itself ignores that variable and `playwright.config.ts`
+  does not read it yet, so until RU-0.2 lands use a wrapper config that spreads the
+  base config and sets `launchOptions` (this is how the baseline was run). RU-0.2
+  is therefore the FIRST item to build.
 - Dev server: `npx vite --host 127.0.0.1 --port 5173 --strictPort` (kill it
   afterwards: `pkill -f "vite --host"`). The e2e config instead builds and
   serves `vite preview` on 4173.
@@ -178,6 +195,12 @@ Goal: make later phases measurable and stop unrelated CI cost.
   npx playwright test e2e/ready.spec.ts` passes in the sandbox.
 
 ### RU-0.3 Stop the LaTeX benchmark running on reader PRs
+
+**[corrected] Demoted to optional.** The premise was overstated: the benchmark
+takes about 2 min (`timeout-minutes: 30` is only a ceiling), and
+`m17-playtest.yml` no longer exists (replaced by `ci.yml`). The real per-PR cost
+is the new `ci.yml` e2e job (5.9 min on CI with retries). Do this only if the
+benchmark's cost or noise becomes a problem. Original text follows.
 - File: `.github/workflows/latex-benchmark.yml` (push and pull_request on
   `main`, 30 min timeout, installs Chromium).
 - Add `paths:` filters to both triggers covering at least `src/science/**`,
@@ -208,7 +231,20 @@ Goal: make later phases measurable and stop unrelated CI cost.
 - Acceptance: file typechecks; fixme tests are skipped in a normal run and
   listed by `--list`.
 
-Phase 0 exit: RU-0.1 numbers recorded; RU-0.2 to RU-0.4 merged.
+### RU-0.5 Quarantine the known-red e2e specs (new, 2026-11-16)
+- The six failures listed in section 1.1 are map/hub interaction specs and
+  pre-date this plan's work. For each: run with a trace (EVAL-1) and decide **fix
+  test-side** or **`test.fixme` with a reason and a tracker note**. Do not touch
+  map product code (RD-19: the map is not touched).
+- Likely cause for the node ones **[inferred, not proven]**: Playwright clicks the
+  bounding-box centre of `g.graph-node`, which includes an invisible
+  `pointer-events:none` label, so `svg.nodes-canvas` intercepts. Hub ones: not
+  diagnosed.
+- Acceptance: whole-suite gate becomes "no failures beyond the recorded list";
+  the list shrinks to zero or is all `fixme` with reasons.
+
+Phase 0 exit: RU-0.2 first; RU-0.1 numbers recorded; RU-0.4 and RU-0.5 merged.
+RU-0.3 optional.
 
 ---
 
@@ -234,6 +270,13 @@ own height.
 (`src/app/reader.feat002.render.test.ts` "clampFixedAnchor centres over the
 anchor and clamps 12px from each edge"; `src/app/ui/primitives.render.test.ts`).
 **Do not change its behaviour.** Add a new function and migrate `Popover` to it.
+**[corrected]** There are TWO copies of `clampFixedAnchor`: `ui/primitives.tsx`
+(used by `Popover`, pinned by `primitives.render.test.ts`) and
+`reader/overlayShared.ts` (re-exported via `AnnotationOverlays`, pinned by
+`reader.feat002.render.test.ts`). Freeze both. Two menus already measure their
+own height and flip (`ReaderContextMenu` in `AnnotationMenus.tsx`,
+`ui/ContextMenu.tsx`); `placeSurface` should become the one implementation
+(RU-1.5), without widening RU-1.1 itself.
 
 **Design:**
 1. New pure function in `primitives.tsx` (or a new `src/app/ui/placement.ts`
@@ -366,7 +409,15 @@ site. Keep the `data-testid`s.
 assert the old strings (`grep -rn "Delete highlight" src e2e`) updated in the
 same commit.
 
-Phase 1 exit: F3, F5, F10 fixmes are real tests; full suite green.
+### RU-1.5 Page context menu cleanup and placement convergence (new, F17)
+- Remove the dead row `ctx-select-area` (the Area tool is selected from the
+  toolbar; the handler comment says so). `ctx-switch-paper` stays hidden until
+  RU-3.6 implements it. Update `reader.feat002.render.test.ts`.
+- Optional, after RU-1.1: migrate `ReaderContextMenu` and `ui/ContextMenu` to
+  `placeSurface` so there is one placement implementation (about 0.5-1 day).
+- Test: no menu row exists that has no handler (unit over the row table).
+
+Phase 1 exit: F3, F5, F10, F17 fixmes are real tests; no new e2e failures.
 
 ---
 
@@ -404,7 +455,7 @@ Independent of Phase 1; may run in parallel.
   `example`) while keeping the offset map correct.
 - `findAll(pageIndex, query)` returns non-overlapping occurrences as
   `{ start, end }` over `text`; `toItemRanges(...)` maps them to item indices.
-- Diacritic folding (decision D7): when the setting `find.ignoreAccents` is on
+- Diacritic folding (decision RD-7): when the setting `find.ignoreAccents` is on
   (default **on**, see RU-3.5), additionally strip combining marks after NFD
   decomposition (query and page text alike) so "cafe" matches "caf\u00e9". The
   offset map must stay correct when characters are removed (same mechanism as
@@ -491,6 +542,9 @@ text: accept misses in v1 and record them.
 
 ## 7. Phase 3: state on launch (F6, F8, F11)
 
+**[corrected] Phase 3 is split.** **3A (unconditional):** RU-3.1, RU-3.2, RU-3.5.
+**3B (gated on Q8/Q9 and RU-7):** RU-3.4, RU-3.6. RU-3.3 is done by PR #19.
+
 ### RU-3.1 Restore the reading position (F8)
 
 **Evidence [run]:** after `reload`, the app returns to the Library
@@ -537,7 +591,7 @@ between devices. The project already keeps local-only data in IndexedDB
 5. Honour `reader.restoreLastSession` (RU-3.5): when off, never auto-open on
    start (the session is still recorded so "Recent" in RU-3.4 works).
 6. Scope: only the reader session. Do not restore Nodes/History/Captures view
-   mode or multi-paper workspaces (decision D2).
+   mode or multi-paper workspaces (decision RD-2).
 
 **Tests:** unit tests for the store (round trip; corrupt JSON returns empty;
 `localStorage` throwing; LRU eviction at 201 entries; clear). Playwright (flip
@@ -548,6 +602,32 @@ reload, assert Library. Run **all** specs that `reload` (e.g.
 contexts have no session, so they should be unaffected. **UNVERIFIED**, check.
 
 ### RU-3.2 Honest sync status badge (F6)
+
+**[corrected] The premise below was wrong; this block supersedes the original
+design.** `Workbench.syncStatus()` only echoes the outcome of the last
+publish/refresh (`syncState`, `lastSyncedRevision`); nothing compares
+`lastSyncedRevision` with the live `manifest.publicationRevision`, `persist()`
+never touches `syncState`, and neither is persisted across reloads **[read]**.
+So the badge reads "Stale" at every boot (also with a remote, which PR #19 now
+restores at boot) and "Up to date" after a publish whatever is edited afterwards.
+The tooltip "Local changes not yet published" would be false.
+
+New design (about 1 day, not a one-component change; decision RD-23/DEC-6 for
+wording):
+1. Persist `{ remoteKey, lastPublishedRevision }` device-locally (shared local
+   store helper, see RU-3.1).
+2. Derive the badge: no remote -> **Local only**; remote and
+   `publicationRevision > lastPublishedRevision` -> **Unpublished changes**;
+   remote and equal -> **Up to date**; remote and nothing recorded this session
+   -> **Not checked this session**. No network call at boot (PR #19 decision).
+3. `refreshFromRemote` replaces the manifest and does not persist (EVAL-6): set
+   `lastPublishedRevision` from the adopted pointer and persist after the swap.
+4. Keep `data-testid="sync-publication-status"` and `data-state`; add
+   `data-local`/`data-dirty`.
+Tests: publish, edit, badge says Unpublished changes; reload with remote says Not
+checked; no remote says Local only; refresh then reload keeps Up to date.
+
+Original design (narrow; kept for the record):
 
 **Evidence [run]:** header badge reads "Stale", tooltip "Stale", in a fresh
 local-only install.
@@ -571,6 +651,12 @@ asserting the old text in the same commit.
 remote (`configureDemo` in `SyncBanner.tsx`) => state-dependent labels return.
 
 ### RU-3.3 Stop seeding test documents (F11)
+
+**[corrected] DONE by PR #19 with a different design (RD-8 superseded):** the
+library starts empty with a "Load Sample Workspace" button, and the e2e helper
+`seedSampleLibrary` exists. Nothing to build. Remaining decision (DEC-12): the
+three fixture PDFs still ship in the production bundle through static `?url`
+imports in `App.tsx`. Original text below is historical.
 
 **Evidence [run]:** a brand-new profile already lists "Multi-Column Fixture",
 "Rotated Fixture" and "Sample Document (3 pages)".
@@ -605,7 +691,7 @@ depended on the seed are fixed by importing explicitly in those specs.
 
 ### RU-3.4 Seamless navigation between papers and the Library (F15)
 
-Depends on RU-5.1a (shared source search). Decisions D11 and D12 apply.
+Depends on RU-5.1a (shared source search). Decisions RD-11 and RD-12 apply.
 
 **Evidence [run]:** inside the reader the top-level "Files" tab stays
 highlighted, but clicking it leaves the reader open (`reader` 1, `library` 0).
@@ -655,20 +741,23 @@ item is the **minimum foundation**, not the whole revamp (see Q6).
 
 **Facts [read]:** the gear (`SettingsMenu` in `App.tsx`) is a menu of Configure
 Sync, Publish, Refresh, Backup, Restore, Mobile. There is no preferences store;
-`localStorage` is not used by application code.
+**[corrected]** `localStorage` IS used: `src/storage/syncConfigStore.ts` (WebDAV
+endpoint and app password) and `Library.tsx` (orientation flag). RU-3.1 and RU-3.5
+should share ONE small versioned local-store helper (try/catch, in-memory test
+implementation, `storage` event for multi-window) instead of adding two more.
 
 **Design:**
 1. `src/app/settings.ts`: a typed, versioned, **device-local** store
    (`localStorage` key `ito.settings.v1`, try/catch on every access, in-memory
    implementation for tests, defaults merged over stored values, unknown keys
-   dropped, values validated). Local-only for the same reason as D3: these are
+   dropped, values validated). Local-only for the same reason as RD-3: these are
    per-device preferences and must not enter the synced payload.
 2. Initial settings:
-   - `find.ignoreAccents: boolean`, default `true` (RU-2.1, D7).
-   - `reader.restoreLastSession: boolean`, default `true` (RU-3.1, D10).
+   - `find.ignoreAccents: boolean`, default `true` (RU-2.1, RD-7).
+   - `reader.restoreLastSession: boolean`, default `true` (RU-3.1, RD-10).
    - `reader.defaultPageWidth: "comfortable" | "fit"`, default `"comfortable"`
      (RU-5.3).
-3. **A screen, not a dropdown or a flat dialog (D16).** "Settings..." (top of
+3. **A screen, not a dropdown or a flat dialog (RD-16).** "Settings..." (top of
    the gear menu) opens a settings screen laid out for growth: a left
    section list and a content pane, large enough for long sections (a
    full-height modal or a dedicated view; match `BackupExportModal.tsx` only
@@ -695,7 +784,16 @@ off, then "cafe" no longer matches "caf\u00e9" (use a fixture containing an
 accented word; add one to `scripts/gen-fixtures.mjs` if none exists); settings
 persist across reload.
 
-### RU-3.6 "Swap this paper" in multi-paper mode (F16; user decision D12)
+### RU-3.6 "Swap this paper" in multi-paper mode (F16; user decision RD-12)
+
+**[corrected]** (a) `ctx-switch-paper` is a dead row today: `onPageAction` in
+`SourcePane` handles only range/lines/motion, so "switch" and "area" do nothing.
+This item is therefore new work (implement the action), not a relabel.
+(b) The plan missed persistent swap UI that already exists in `Reader.tsx`:
+`workspace-source-switcher` ("Swap to:", cited sources ranked by citation count),
+`compact-second-source-tab`, `promoteOpenSource`. Whether they stay is DEC-5; the
+recommendation is to keep them and narrow RD-12 to the per-pane `<select>` and the
+overflow item. (c) Gated on Q8/Q9 (phase 3B).
 
 **Context:** "Open together" exists for editing a link between nodes (user,
 2026-11-16). Changing one pane to a different paper is rare, so it should be
@@ -782,7 +880,7 @@ nothing. Unit test for the clamp helper if extracted.
 
 ### Phase 5: smaller polish
 
-**RU-5.1 Paper search (F7), decided: A now, B after (D13).** Re-checked
+**RU-5.1 Paper search (F7), decided: A now, B after (RD-13).** Re-checked
 2026-11-16 **[run]**: searching the title "Rotated" in the top box returns 0
 results of any kind: `wb.search` does not index source titles. Verified by
 reading: `Workbench.buildSearchIndex` (`workbench.ts`) builds `docs` (pages),
@@ -830,7 +928,7 @@ must be applied by limiting the fitted **scale** in the fit computation
 (`setFitScale` in `SourcePane.tsx`), not by CSS. Proposed: default on open =
 `min(fit-to-pane, comfortable width)` centred; the explicit **Fit width**
 button still fills the pane. This needs a notion of zoom mode (fit-comfortable
-vs fit-width vs manual). Decided (D9, D14): cap = **960 CSS px** of page
+vs fit-width vs manual). Decided (RD-9, RD-14): cap = **960 CSS px** of page
 width, `reader.defaultPageWidth` setting (RU-3.5) switches the open-time
 default between "comfortable" and "fit". Re-verify 960 against a real
 Letter/A4 paper at 1440x900 and 1920x1080 before finalising; adjust and record
@@ -851,7 +949,7 @@ console logs.
 
 ## 9. Parked (explicitly not now)
 
-- **Phone layout (F2).** Out of scope by decision (D1). Known issues, for the
+- **Phone layout (F2).** Out of scope by decision (RD-1). Known issues, for the
   future: reader toolbar controls clip off-screen at 390 px, header clips
   "Subjects (0)", tap targets are 30x30 (swatches 18x18), and a
   user-visible banner says "see docs/MILESTONE-MATRIX.md". The only
@@ -887,23 +985,25 @@ Update in the same commit as the work. Status: `todo` / `doing` / `done` /
 | Item | Finding | Status | Commit | Notes |
 |---|---|---|---|---|
 | RU-0.1 e2e baseline | | todo | | record counts here |
-| RU-0.2 Playwright browser env | | todo | | |
-| RU-0.3 CI path filter | | todo | | check required-check status first |
+| RU-0.2 Playwright browser env | | todo | | build FIRST; CLAUDE.md env var is inert until then |
+| RU-0.3 CI path filter | | optional | | benchmark ~2 min; low value |
 | RU-0.4 Tracker spec | | todo | | |
+| RU-0.5 Quarantine 6 red e2e | | todo | | EVAL-1; no map code changes |
 | RU-1.1 placeSurface | F3 | todo | | |
 | RU-1.2 useDismiss | F5 | todo | | |
 | RU-1.3 Toolbar layout | F3 | todo | | |
 | RU-1.4 Kind labels | F10 | todo | | |
+| RU-1.5 Dead menu rows, placement convergence | F17 | todo | | convergence optional |
 | RU-2.1 Matcher | F1 | todo | | |
 | RU-2.2 Doc index | F1 | todo | | measure large PDF |
 | RU-2.3 Navigation | F1 | todo | | spike span mapping first |
 | RU-2.4 Contract kept | F1 | todo | | |
 | RU-3.1 Reading position | F8 | todo | | |
-| RU-3.2 Sync badge | F6 | todo | | |
-| RU-3.3 No seed | F11 | todo | | run whole e2e |
+| RU-3.2 Sync badge | F6 | todo | | rewritten, about 1 day; phase 3A |
+| RU-3.3 No seed | F11 | done (PR #19) | b9115ae | different design; fixtures still bundled (DEC-12) |
 | RU-3.4 Library navigation + title switcher | F15 | todo | | depends on RU-5.1a, RU-3.1 |
 | RU-3.5 Settings store + dialog | | todo | | before RU-2.1 finishes (accent flag) or stub flag |
-| RU-3.6 Swap this paper (right-click) | F16 | todo | | update workspace.spec.ts |
+| RU-3.6 Swap this paper (right-click) | F16 | todo | | phase 3B; row is dead today; DEC-5 |
 | RU-4.1 Repro | F4 | todo | | |
 | RU-4.2 Clamp drag | F4 | todo | | |
 | RU-4.3 Blank preview | F4 | todo | | |
@@ -914,72 +1014,82 @@ Update in the same commit as the work. Status: `todo` / `doing` / `done` /
 | RU-5.3 Page width | F12 | todo | | cap 960, setting in RU-3.5 |
 | RU-5.4 Empty states | F13 | todo | | |
 | RU-5.5 Favicon | F14 | todo | | |
-| RU-6 Second audit | | todo | | after Phase 3 |
+| RU-6 Second audit | | todo | | after Phase 3A |
+| RU-7 Back stack | | todo | | phase 3B; DEC-7, Q10 |
 
-Baseline numbers (fill in at RU-0.1): e2e passed ___ / failed ___ / skipped
-___ in ___ s. Vitest at `9b91ce3`: 1024 passed in about 47 s.
+Baseline (merged `9b91ce3` + `b9115ae`, 2026-11-16): e2e 100 passed / 6 failed /
+0 skipped in 2.5 min (3 workers); Vitest 1040 passed (120 files); typecheck and
+build clean. RU-0.1 re-records this at the start of Phase 0.
 
 ## 11. Decision log, open questions, deviations
 
 ### Decisions
-- **D1** Phone layout is out of scope (user, 2026-11-16).
-- **D2** Session restore covers only the reader (open source, page, offset,
+- **RD-1** Phone layout is out of scope (user, 2026-11-16).
+- **RD-2** Session restore covers only the reader (open source, page, offset,
   zoom). Not view mode, not multi-paper workspaces.
-- **D3** Reading position is local-only (`localStorage`), never in the synced
+- **RD-3** Reading position is local-only (`localStorage`), never in the synced
   payload.
-- **D4** `clampFixedAnchor` is frozen; new placement logic lives in
+- **RD-4** `clampFixedAnchor` is frozen; new placement logic lives in
   `placeSurface`.
-- **D5** Popover outside-click stays on `mouseup` (blur-autosave ordering).
-- **D6** Find indexes the whole document lazily on first use from pdf.js text
+- **RD-5** Popover outside-click stays on `mouseup` (blur-autosave ordering).
+- **RD-6** Find indexes the whole document lazily on first use from pdf.js text
   content, not from `pageTexts` or `cachedPages`.
-- **D7** (revised 2026-11-16, user) Diacritics ARE folded in find by default,
+- **RD-7** (revised 2026-11-16, user) Diacritics ARE folded in find by default,
   with an Advanced setting to disable (RU-3.5, `find.ignoreAccents`).
-- **D8** Fixture seeding becomes a build-time flag with dynamic imports.
-- **D9** (user, 2026-11-16) RU-5.3: yes, cap the default page width; the "Fit width" button still fills the pane. Cap value still to be chosen (proposed 900 to 1000 CSS px).
+- **RD-8** Fixture seeding becomes a build-time flag with dynamic imports.
+- **RD-9** (user, 2026-11-16) RU-5.3: yes, cap the default page width; the "Fit width" button still fills the pane. Cap value still to be chosen (proposed 900 to 1000 CSS px).
 
-- **D10** (user) Reload auto-resumes the last paper (position and zoom),
+- **RD-10** (user) Reload auto-resumes the last paper (position and zoom),
   unless the user left via the Library; togglable via `reader.restoreLastSession`.
-- **D11** (user) The user's "menu" means the Library (Files view).
-- **D12** (user) "Open together" stays; it is for editing a link between
+- **RD-11** (user) The user's "menu" means the Library (Files view).
+- **RD-12** (user) "Open together" stays; it is for editing a link between
   nodes. Swapping a pane's paper is rare and lives only in the right-click menu
   as "Swap this paper..." (RU-3.6); no persistent control.
-- **D13** (user, "go with recommendations") Paper search: filter first
+- **RD-13** (user, "go with recommendations") Paper search: filter first
   (RU-5.1b), global search including papers after (RU-5.1c), both on a shared
   pure `searchSources` (RU-5.1a).
-- **D14** Default page-width cap 960 CSS px (recommendation accepted).
-- **D15** (recommendation accepted) Reader navigation: working Files tab,
+- **RD-14** Default page-width cap 960 CSS px (recommendation accepted).
+- **RD-15** (recommendation accepted) Reader navigation: working Files tab,
   labelled back control, and a title-click paper switcher (RU-3.4).
 
-- **D16** (user) Settings is a screen designed to grow (section list + registry),
+- **RD-16** (user) Settings is a screen designed to grow (section list + registry),
   not a dropdown. Only the three initial settings are in scope now.
-- **D18** (user, 2026-11-16) Simultaneous editing across windows is expected
+- **RD-18** (user, 2026-11-16) Simultaneous editing across windows is expected
   behaviour; see proposal Move 5 (committed, staged).
-- **D19** (user, 2026-11-16) The map/Nodes view is not touched for now (planned
+- **RD-19** (user, 2026-11-16) The map/Nodes view is not touched for now (planned
   redesign; PR #19 also edits it). "Map as tab" is deferred; no preparatory
   edits to the map. Clarification given: the idea was to make the map one *kind*
   of tab alongside paper tabs, never to replace the Library (the Library is
   itself a tab kind).
-- **D20** (user) Back stack (RU-7) is approved, with the push policy below, built
+- **RD-20** (user) Back stack (RU-7) is approved, with the push policy below, built
   as a pure, easily changeable module so the policy can be tuned after a
   prototype.
-- **D17** (user) "Recent papers" excludes deleted papers. Deleted papers
+- **RD-17** (user) "Recent papers" excludes deleted papers. Deleted papers
   belong in a future "Deleted papers" tab (BL-1); today deletion is a hard
   delete (see section 9).
 
 ### Open questions (answer before the dependent item)
-- **Q6, Q7** ANSWERED (D16, D17).
+- **Q6, Q7** ANSWERED (RD-16, RD-17).
 - **Q8 (Appendix A)** Does the user want multi-tab started now? Assessment is
   in Appendix A; no decision yet. Phase 0 to 2 are unaffected either way.
 - **Q9 (Appendix B.1)** Adopt the unified "documents -> tabs -> layout" model
   (Open together stops being its own category; opening a connector opens its
   tabs in a layout)? Direction proposed by the user 2026-11-16 and assessed
-  favourably in Appendix B. If yes: D2 and D12 are superseded and RU-3.6 is
+  favourably in Appendix B. If yes: RD-2 and RD-12 are superseded and RU-3.6 is
   dropped. Also needs an answer to: does the connector workspace open the two
   *papers*, the two *endpoint pages*, or both (Appendix B.1)?
 
 ### Deviation log
-(Empty. Append `date, item, what changed, why` here when reality differs from
-this plan.)
+Append `date, item, what changed, why`.
+- **2026-11-16 (second pass)** Section 1.1: "22 specs / CI covers e2e" was false; baseline is 100/6 and CI had no e2e on `main`.
+- **2026-11-16** Appendix C, F5: "outside click closes Subjects menu" was wrong [run]. Fully present.
+- **2026-11-16** RU-3.2: premise ("Stale" = unpublished changes) was false; rewritten.
+- **2026-11-16** RU-3.3: done by PR #19 (explicit sample button); RD-8 superseded.
+- **2026-11-16** RU-3.5: "localStorage unused" false (`syncConfigStore`, Library).
+- **2026-11-16** RU-3.6: `ctx-switch-paper` is dead; persistent swap UI exists (DEC-5).
+- **2026-11-16** RU-0.2/CLAUDE.md: env var inert until RU-0.2; RU-0.3 premise (30 min) false, demoted.
+- **2026-11-16** RU-1.1: two `clampFixedAnchor` copies; two self-measuring menus (RU-1.5).
+- **2026-11-16** Decision IDs renamed `D<n>` -> `RD-<n>` (collision with master spec).
 
 
 ---
@@ -1014,7 +1124,7 @@ of multi-tab functionality"). This is an **assessment, not a commitment**
    (one source). The existing multi-paper/subject workspace is NOT split
    into tabs: it remains one tab of a third kind, `workspace`, rendered by the
    unchanged `Reader` path. Rationale: Zotero has no equivalent of "Open
-   together to edit a link between nodes" (D12), so forcing it into
+   together to edit a link between nodes" (RD-12), so forcing it into
    one-paper-per-tab would destroy its meaning.
 2. **State lives above the workbench.** A small `ReaderTabs` store in the app
    layer (local-only, persisted next to the RU-3.1 session store, never in the
@@ -1168,10 +1278,10 @@ only": it would lose evidence lines and write-while-reading.
 
 ### B.2 Contradictions and conflicts inside this plan
 
-1. **D12 / RU-3.6 vs Q9.** If the unified model is adopted, "Open together" is
+1. **RD-12 / RU-3.6 vs Q9.** If the unified model is adopted, "Open together" is
    not a persistent category and "Swap this paper" is just "pick a different
    tab for this slot". RU-3.6 becomes redundant; drop it then.
-2. **D2 vs Q9.** D2 says session restore excludes multi-paper workspaces. Under
+2. **RD-2 vs Q9.** RD-2 says session restore excludes multi-paper workspaces. Under
    the unified model the restored state is `{tabs, activeId, layout}`.
 3. **RU-3.4's title-click switcher vs Appendix A.** If tabs are built, the
    switcher is mostly superseded. Already conditional on Q8; just do not start
@@ -1190,7 +1300,7 @@ only": it would lose evidence lines and write-while-reading.
    store is the **only writer**; the workbench fields are a derived projection
    set through one function. Anything writing them elsewhere is a bug. Add a
    test that greps/forbids new direct writes outside that function.
-7. **Q7 / D17 and BL-1.** Consistent (recents show only existing sources); but
+7. **Q7 / RD-17 and BL-1.** Consistent (recents show only existing sources); but
    once a Deleted view exists, tabs open on a paper that is then deleted must
    close or show a tombstone. Specify when BL-1 is designed.
 8. **Settings (RU-3.5) vs RU-3.1/5.3.** `reader.defaultPageWidth` interacts with
@@ -1274,7 +1384,7 @@ worktree of `main` + the PR head (`b9115ae`), merged cleanly (one auto-merge in
 | Plan item | Effect |
 |---|---|
 | F11 / RU-3.3 seeding | **Done in PR #19** [run]: fresh library has 0 rows and a proper empty state with Import PDF and "Load Sample Workspace". Drop RU-3.3's seeding work. Also covers the library half of F13. Still check Nodes/History/Captures empty states. |
-| F5 / RU-1.2 | **Partly fixed** [run]: outside click now closes the Subjects menu; `Esc` still does not. Remaining work: `Esc` handling only. |
+| F5 / RU-1.2 | **Not fixed** **[corrected, re-run 2026-11-16 on the merged build]**: Esc and outside clicks (header and body) leave the Subjects menu open, and it stays open when Settings opens. The earlier "outside click closes it" was wrong. RU-1.2 scope is unchanged (full). |
 | F6 / RU-3.2 | **Not fixed** [run]: badge still reads "Stale" with no remote. PR #19 adds Connect/Disconnect and persists the endpoint (`syncConfigStore.ts`), which changes where the `remote` signal comes from; re-read `SyncBanner.tsx` on the merged tree first. |
 | F3 / RU-1.1 | **Still present** [run]: highlight popover bottom at y=1114 in a 900px viewport. |
 | F1 / RU-2 | **Still present** [run]: find "Page 9" returns 0/0. |
@@ -1299,8 +1409,7 @@ merged, rebased or commented on the PR; those are repository-owner decisions.
 **Status 2026-11-16:** PR #19's head (`b9115ae`) is now merged into this planning
 branch (merge commit `1c7cbcf`, no conflicts). Verified on the merged tree:
 `npm run typecheck` clean, `npx vitest run` 120 files / 1040 tests passing
-(`main` alone: 118 / 1024), `npm run build` succeeds. Playwright e2e was **not**
-run. `main` and PR #19 on GitHub are untouched. Baseline for planning is
+(`main` alone: 118 / 1024), `npm run build` succeeds. **[corrected]** Playwright e2e was run on 2026-11-16: 100 pass, 6 fail (the same six as PR #19's own CI; section 1.1). `main` and PR #19 on GitHub are untouched. Baseline for planning is
 therefore `main@9b91ce3` + `#19@b9115ae`.
 
 ### C.3 Corrected statement about `bump()`
@@ -1312,7 +1421,7 @@ is "redundant" for correctness, but whole-tree re-render per change remains
 
 ---
 
-## RU-7 Back stack (navigation history of loci) - approved (D20)
+## RU-7 Back stack (navigation history of loci) - approved (RD-20)
 
 Decisions and suggestions from the 2026-11-16 discussion, made concrete.
 
@@ -1320,7 +1429,7 @@ Decisions and suggestions from the 2026-11-16 discussion, made concrete.
 like a browser tab. A locus is a small serialisable record of "a place":
 `{ kind: "source", sourceId, pageIndex, anchor? }`,
 `{ kind: "page", pageId, blockId?, evidenceId? }`,
-`{ kind: "map", scope?, focusPageId? }` (type reserved only; D19: the map is not
+`{ kind: "map", scope?, focusPageId? }` (type reserved only; RD-19: the map is not
 touched). Back moves the pointer back, Forward forward; a new push after Back
 discards the forward entries. Cap 50 entries (drop oldest).
 
@@ -1367,7 +1476,7 @@ discards the forward entries. Cap 50 entries (drop oldest).
 3. Keys and toolbar buttons.
 4. Annotation sidebar "open source" and search-result open.
 5. Later: replace the mobile sheet round trip and the Nodes "Return to
-   Map/Reader" buttons **only after** the map redesign (D19).
+   Map/Reader" buttons **only after** the map redesign (RD-19).
 
 **Effort (rough, +-40 %, unmeasured):** module and tests about 1 day; reader and
 subject-editor integration 1.5 to 2; keys and buttons 0.5 to 1; e2e and polish 1.
@@ -1382,3 +1491,61 @@ block; Forward reverses; scrolling alone creates no entries.
 **Acceptance.** Following a citation and pressing Back (button or `Alt+Left`)
 returns to the exact previous position, at least two levels deep, and scrolling
 never pollutes the stack.
+
+
+**[corrected 2026-11-16] RU-7 additions.**
+- There is no routing in the app (no `pushState`, hash, `popstate` anywhere), so
+  browser Back, the mouse side button and swipe leave the app. **Q10:** mirror the
+  active tab's top locus into `history`/URL hash and map `popstate` to
+  back/forward? pdf.js's own `PDFHistory` is prior art (push on explicit jumps,
+  replace on position updates). Recommended: keep the pure reducer, add the mirror;
+  settle in the EVAL-13 prototype.
+- Keys: Option+Left/Right is word navigation on macOS in the editor. Use Cmd+[ and
+  Cmd+] on macOS, Alt+Left/Right elsewhere, and ignore the shortcut while an
+  editable element has focus.
+- Gated on Q8/Q9; phase 3B.
+
+---
+
+## 12. Decision and evaluation register (open items)
+
+Each row has a gate. No item starts while a gate it names is open.
+
+### Decisions
+| ID | Decision | Blocks | Recommendation | Status |
+|---|---|---|---|---|
+| DEC-1 | PR #19: merge with 6 red e2e, fix tests first, or leave unmerged | baseline | Quarantine six (RU-0.5), then merge | open |
+| DEC-2 | Governance: corrections commit, then `docs/plan/` layout, review protocol, `RD-n` rename | all | Yes | **approved 2026-11-16** |
+| DEC-3 | Tabs now or after Phase 2 (Q8); unified documents-tabs-layout (Q9) | 3B, RU-7, Moves 1 and 4 | Decide after Phase 2; build only the seam now | open |
+| DEC-4 | Connector workspace opens: endpoint pages + connector page, cited papers, or both | Move 4 recipes | Prototype both; lean pages-first | open |
+| DEC-5 | Keep source-switcher pill and compact tab vs RD-12 | RU-3.6 | Keep; narrow RD-12 | open |
+| DEC-6 | Sync badge states/wording; boot remote check | RU-3.2 | Local only / Unpublished changes / Up to date / Not checked; no boot network | open |
+| DEC-7 | Back stack: history mirror (Q10), keys, push policy, per-tab or global | RU-7 | Mirror active locus; policy from prototype | open |
+| DEC-8 | Rule for concurrent edits to the same entity | Move 5 stage 2 | Lean: per-entity ops + soft lock for the same page only | **open, to be discussed next** |
+| DEC-9 | Architecture proposal move by move | Moves 1-5 | See proposal section 11 | open |
+| DEC-10 | Device-local state stored in the synced brain (map zoom, active3D, lastDiveTarget) | map redesign | Move to session store with the map redesign | open |
+| DEC-11 | Trash (BL-1) timing and sync tombstones | BL-1 | ADR first, after 3A | open |
+| DEC-12 | Ship sample fixtures in production; accept WebDAV password in plain localStorage; 960 px cap | small | Keep; accept but keep out of exports; confirm in EVAL-5 | open |
+
+### Evaluations
+| ID | Establish | Trigger / method | Gates |
+|---|---|---|---|
+| EVAL-1 | Root cause of the 6 red e2e; can a user click a hub at the canvas edge | traced run | RU-0.5 |
+| EVAL-2 | Is e2e a required check; wall time (5.9 min with retries) | repo settings | DEC-1 |
+| EVAL-3 | Find: span-to-item mapping, index time/memory on 300 pages, scanned/RTL | chunk if >3 s or >50 MB | RU-2 |
+| EVAL-4 | Area drag: note marker vs second area; blank preview cause | repro | RU-4 |
+| EVAL-5 | 960 px at 1440/1920; sidebar sort over range scopes; specs assuming Library after reload | run, grep | RU-5.3, 5.2, 3.1 |
+| EVAL-6 | Refresh lost on reload; does `commitStagedImport` persist; revision after refresh | read + run | RU-3.2, 5a |
+| EVAL-7 | Reopen cost on user's machine, sizes, N warm docs (one run: 311 ms / 274 pages) | act if >400 ms | Move 3a |
+| EVAL-8 | Save latency vs brain size; size at ~100 papers; typing lag | act if >5 MB or lag | 5b, 3b |
+| EVAL-9 | React commit time with 2-3 panes; double notify | act if >16 ms | Move 2 |
+| EVAL-10 | Search cost at ~500 papers / 5k annotations | act if >50 ms | RU-5.1c |
+| EVAL-11 | What `hydrateFromCache` needs from `cachedPages`; migration risk | read + test | 3b alternative |
+| EVAL-12 | Multi-window prototype: write-token CAS + broadcast adopt, Web Locks leader, same-page rule | prototype | DEC-8, Move 5 |
+| EVAL-13 | Back-stack reducer + history mirror: thresholds, focus return, macOS keys | prototype | DEC-7 |
+| EVAL-14 | Tab unknowns: background-tab meaning, unmount vs hide latency, mobile mode, `__ito.openSourceIds` specs, connector recipes | spike | DEC-3, DEC-4 |
+| EVAL-15 | Second audit (RU-6) on 5-10 real papers, keyboard, cross-page selection | after 3A | new findings |
+
+Critical path: phases 0-2 need DEC-1 and DEC-2 only; 3A needs DEC-6; 3B, RU-7 and
+Moves 1/4 need DEC-3/4/5/7 after EVAL-13/14; Move 5a needs DEC-8/9 after
+EVAL-6/12. Phase numbering of the original plan stands except for the 3A/3B split.

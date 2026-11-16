@@ -180,8 +180,9 @@ is a special entry path rather than a layout.
    fields, then writes the pointer, then deletes superseded payloads. Cost scales
    with brain size on every mutation-save.
 3. `publicationRevision` is incremented on every local save
-   (`persistNow`), so it is really a local save counter that "stale" detection
-   compares against. Works, but the name misleads; the real publication revision
+   (`persistNow`), so it is really a local save counter. **[corrected]** Nothing compares it with
+   the last-synced revision: `syncStatus()` only echoes the last publish/refresh
+   outcome (see usability plan RU-3.2). The name misleads; the real publication revision
    concept (ADR-0005) is on the remote.
 
 **Proposal:**
@@ -253,7 +254,7 @@ have no knowledge of any store.
 | Whole-brain write plus full read-back per save | present; cost scales with brain size | brain payload > ~5 MB or visible typing lag in the page editor | Move 5 (cheap verify, coalesce); Move 3 removes the big payload |
 | Derived text in the synced brain | present on `Source` | any real library (megabytes per paper **[est]**) | Move 3 |
 | Global re-render via `bump()` | present; no memoisation | profiler shows > 16 ms commits while scrolling with 2+ panes | Move 2 |
-| PDF re-read and re-parse on every open/switch | present | reopen > ~400 ms on a 300-page paper (unmeasured) | Move 3 document service; warm LRU |
+| PDF re-read and re-parse on every open/switch | present; **[run 2026-11-16]** 311 ms to first canvas for a 274-page paper, one headless run | reopen > ~400 ms on the user's machine (EVAL-7) | Move 3 document service; warm LRU |
 | Search index rebuilt per keystroke (`buildSearchIndex`) | present; fine small | > ~50 ms per query at ~500 papers / ~5k annotations | cache by data revision |
 | Silent last-writer-wins across windows | present | any second window | Move 5 lock |
 | Main-thread find indexing | planned (RU-2) | indexing a 300-page paper > ~3 s | chunking; worker later |
@@ -347,3 +348,44 @@ contract) and `docs/UI_AUDIT.md`. Its audit item P7 (split `workbench.ts`) is th
 same as this proposal's Move 1 and is deferred there to its own PR. Merge or
 rebase decisions belong to the repository owner; see the usability plan,
 Appendix C.
+
+
+---
+
+## 11. Second-pass corrections (2026-11-16, verified on the merged baseline)
+
+Status of the moves after checking them against the code. Tags: [read], [run].
+
+- **Move 5a is under-specified and, as written, would still clobber data.** [read]
+  `IndexedDbStorageAdapter.stagedKeyFor` is `brainId:staged:<publicationRevision>`.
+  Two windows at the same revision write the same key; one payload can overwrite
+  the other before the pointer swap, and the read-back check compares only brain id
+  and revision. `manifest.publicationRevision` is also not a reliable "version I
+  last saw": `refreshFromRemote` replaces `this.data` (manifest included) and does
+  not persist. **Required spec:** an adapter-owned write token stored in the
+  pointer record; one `readwrite` transaction over payloads and pointers (check
+  token, put under a unique key, put pointer); drop the read-back. AD4 is therefore
+  not optional.
+- **Concurrent edits to the same entity are undefined (DEC-8, open).** CRDT/OT is
+  rejected, but simultaneous editing is committed. Stage 1 cannot rebase a refused
+  write without ops; Stage 2 handles different entities only. A rule is needed
+  before Stage 2.
+- **Move 3a is deferred.** [run] Reader at 73 ms, first canvas 311 ms for a
+  274-page real PDF, below the 400 ms trigger. Build it when tabs or find need
+  shared documents, not for latency.
+- **Move 3b is smaller than estimated.** [run] `cachedPages` costs about 37 KB per
+  page, but only the first rendered window is cached, once, never extended: brain
+  1.7 KB to 75.7 KB for 2 pages (about 0.1-0.4 MB per paper, not megabytes). Still
+  worth fixing; cheaper than a migration: stop writing it where the IndexedDB
+  analysis store exists and strip it on load, after EVAL-11 confirms what
+  `hydrateFromCache` needs.
+- **Move 1 / D19.** [read] Map `zoom`, `active3D` and `lastDiveTarget` live in
+  `BrainData.presentation` and are published to Koofr (`JSON.stringify(this.data)`);
+  backups strip them; ADR-0009 deferred the split. They belong in the Session
+  store, moved with the map redesign (DEC-10).
+- **Move 4 / history.** No routing exists. See usability plan RU-7 / Q10 for
+  mirroring the active locus into the browser history.
+- **Move 2.** `React.memo` is absent [read]; the premise (whole-tree re-render per
+  change) holds but needs EVAL-9 before building.
+- **Decision IDs.** "D19" and similar in this file mean the master spec's decisions;
+  the usability plan's decisions are now `RD-n`.
