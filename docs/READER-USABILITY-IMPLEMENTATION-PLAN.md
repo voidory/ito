@@ -1296,6 +1296,13 @@ tracker. Starting Phase 0 on `main` would build on code that is about to change
 (storage names, e2e/CI setup, empty-state library, observable store). I have not
 merged, rebased or commented on the PR; those are repository-owner decisions.
 
+**Status 2026-11-16:** PR #19's head (`b9115ae`) is now merged into this planning
+branch (merge commit `1c7cbcf`, no conflicts). Verified on the merged tree:
+`npm run typecheck` clean, `npx vitest run` 120 files / 1040 tests passing
+(`main` alone: 118 / 1024), `npm run build` succeeds. Playwright e2e was **not**
+run. `main` and PR #19 on GitHub are untouched. Baseline for planning is
+therefore `main@9b91ce3` + `#19@b9115ae`.
+
 ### C.3 Corrected statement about `bump()`
 The user's recollection is right for PR #19 and wrong for `main`: on `main` the
 manual `bump()` plumbing is still the mechanism (85 call sites); on PR #19 the

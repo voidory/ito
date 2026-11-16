@@ -20,6 +20,13 @@ Rules (full text in section 0 of that file):
    `src/science/` or the synced data model unless the item says so.
 6. Update the tracker table in the plan when an item is done.
 
+`docs/ARCHITECTURE.md` (from PR #19) is the living architecture reference. Its
+maintenance contract applies: if a change alters module responsibilities, the data
+contract, `StorageAdapter`, the Workbench/React store contract, persistence/sync
+wiring or adds a cross-cutting gotcha, update it in the same commit. The
+Workbench is an observable store; do not reintroduce manual `bump()` plumbing
+in new code.
+
 LaTeX extraction (`src/science/`, `src/pdf/tex*`) is paused; do not work on it
 unless asked.
 
