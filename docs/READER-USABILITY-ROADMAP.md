@@ -1,5 +1,10 @@
 # Reader & app usability roadmap
 
+> **Binding detail lives in `docs/READER-USABILITY-IMPLEMENTATION-PLAN.md`.**
+> This file is the short overview only. Where they differ, the implementation
+> plan wins (for example: the shared `Popover` primitive is already in use; the
+> real defect is its vertical placement, see plan RU-1.1).
+
 Source: the usability audit of 2026-11-16 (headless Chromium, 1440x900, 12-page
 two-column fixture). Phone layout is out of scope for now (see "Parked").
 LaTeX extraction work is paused; nothing here touches `src/science/`.
