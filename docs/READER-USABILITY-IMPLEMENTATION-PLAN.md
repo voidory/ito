@@ -101,6 +101,7 @@ in headless Chromium (marked **[run]**) or by reading code (marked **[read]**).
 | F12 | Fit-width gives very wide pages | RU-5.3 |
 | F13 | Bare empty states | RU-5.4 |
 | F14 | `favicon.ico` 404 in console (noise) | RU-5.5 |
+| F15 | Clicking the highlighted "Files" tab inside the reader does nothing; the only way back is an unlabelled icon | RU-3.4 (proposed, pending Q5) |
 
 ---
 
@@ -589,6 +590,21 @@ state; Playwright run with the flag on passes unchanged. Build check as above.
 Run the **whole** e2e suite for this item; failures from specs that implicitly
 depended on the seed are fixed by importing explicitly in those specs.
 
+### RU-3.4 Seamless way back to the Library (F15) - PROPOSED, pending Q5
+
+**Evidence [run]:** inside the reader the top-level "Files" tab stays
+highlighted, but clicking it leaves the reader open (`reader` 1, `library` 0).
+The only route back is the unlabelled `<` icon (`back-to-library`) at the
+far left of the reader toolbar. The pane overflow menu also holds
+"Switch paper..." (a `<select>` in the pane header, `SourcePane.tsx`, listing
+sources not currently open) and "Import PDF...".
+
+**User idea (2026-11-16):** remove the in-reader paper switcher and give the
+reader a smoother way to reach the Library. Design options, and the dependency
+on multi-paper mode, are in section 11 Q5. Do not implement until Q5 is
+answered. Whatever is chosen must at least make the "Files" tab leave the
+reader.
+
 Phase 3 exit: F6, F8, F11 fixmes are real tests; full e2e suite green.
 
 ---
@@ -641,7 +657,7 @@ nothing. Unit test for the clamp helper if extracted.
 
 ### Phase 5: smaller polish
 
-**RU-5.1 Library filter (F7), product decision first.** The top search box is
+**RU-5.1 Library filter (F7), product decision first.** Re-checked 2026-11-16 **[run]**: searching the title "Rotated" in the top box returns 0 results of any kind, so `wb.search` does not index source titles at all: there is currently no way to search papers by title anywhere in the app. The top search box is
 `NetworkSearch` (`wb.search`), described as searching "pages, categories,
 annotations", so not filtering documents is by design. Recommended: add a
 filter input above the library table (`data-testid="library-filter"`),
@@ -719,6 +735,7 @@ Update in the same commit as the work. Status: `todo` / `doing` / `done` /
 | RU-3.1 Reading position | F8 | todo | | |
 | RU-3.2 Sync badge | F6 | todo | | |
 | RU-3.3 No seed | F11 | todo | | run whole e2e |
+| RU-3.4 Library navigation | F15 | proposed | | needs Q5 |
 | RU-4.1 Repro | F4 | todo | | |
 | RU-4.2 Clamp drag | F4 | todo | | |
 | RU-4.3 Blank preview | F4 | todo | | |
@@ -747,6 +764,7 @@ ___ in ___ s. Vitest at `9b91ce3`: 1024 passed in about 47 s.
   content, not from `pageTexts` or `cachedPages`.
 - **D7** Diacritics are not folded in find v1.
 - **D8** Fixture seeding becomes a build-time flag with dynamic imports.
+- **D9** (user, 2026-11-16) RU-5.3: yes, cap the default page width; the "Fit width" button still fills the pane. Cap value still to be chosen (proposed 900 to 1000 CSS px).
 
 ### Open questions (answer before the dependent item)
 - **Q1 (RU-5.1)** Should the Files-view top search also filter the library, or
@@ -759,6 +777,11 @@ ___ in ___ s. Vitest at `9b91ce3`: 1024 passed in about 47 s.
 - **Q4 (RU-3.1)** Proposed behaviour: reload reopens the last paper unless the
   user deliberately left via `back-to-library` (then the Library shows).
   Confirm this is wanted, or whether reload should always show the Library.
+
+- **Q5 (RU-3.4)** Navigation between papers and the Library: see the options
+  recorded in the conversation of 2026-11-16 (title-click switcher; labelled
+  breadcrumb; make the Files tab work). Pending the user's choice and a
+  decision on whether multi-paper "Open together" stays.
 
 ### Deviation log
 (Empty. Append `date, item, what changed, why` here when reality differs from
