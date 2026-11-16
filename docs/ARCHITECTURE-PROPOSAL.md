@@ -173,10 +173,19 @@ is a special entry path rather than a layout.
    concept (ADR-0005) is on the remote.
 
 **Proposal:**
-- A **single-writer lock** per brain via the Web Locks API (`navigator.locks`),
-  and a `BroadcastChannel` notice. A second window opens read-only with a clear
-  banner ("Open in another window") and can take over explicitly. A few hours of
-  work; prevents silent data loss.
+- **Never silently drop a write, without blocking a second window** (revised
+  2026-11-16 after the user objected that a read-only second window is poor UX
+  in an app where annotating is core). Stage 1 (about 1 to 1.5 days): a
+  compare-and-swap on the stored revision (read pointer and write in one
+  IndexedDB `readwrite` transaction; if the stored revision is not the one this
+  window last saw, the write is refused), plus a `BroadcastChannel` notice on each
+  commit so other windows adopt the new state at once when they have no unsaved
+  edits. Alternating use of two windows then just works. If a refused write
+  coincides with unsaved edits, keep the in-memory draft (the page editor already
+  holds it) and show a non-blocking "another window changed this, reloaded"
+  notice. Stage 2, only if simultaneous editing proves real: leader election via
+  Web Locks, with follower windows sending serialisable ops to the leader, which
+  needs the `commit(op)` layer below (about 4 to 6 days).
 - Replace the full read-back with a cheap integrity check (`getKey` plus a small
   header record with revision and brainId, or a checksum). IndexedDB's
   transaction completion already guarantees durability locally; keep the strong
@@ -267,7 +276,7 @@ have no knowledge of any store.
 
 | Move | Effort | Notes |
 |---|---|---|
-| 5a Single-writer lock plus banner | 0.5 to 1 day | independent; do first, prevents data loss |
+| 5a Revision compare-and-swap plus broadcast adopt | 1 to 1.5 days | independent; do first, prevents silent data loss |
 | 5b Cheap local verify, coalescing | 0.5 to 1 day | |
 | 3a Document service | 1.5 to 2 days | prerequisite for find and tabs |
 | 2 Slice store plus hot-component migration | 2 to 3 days | incremental |
@@ -294,10 +303,13 @@ build Moves 1 and 4 together, then 5c.
 
 ## 9. Open decisions
 
-- **AD1** Writer-lock policy: second window read-only with takeover (proposed),
-  or refuse to open?
-- **AD2** Is the Map a tab kind now or later? (Proposed: later, but keep tab kinds
-  an open enum.) History and Captures stay top-level views for now.
+- **AD1** (revised) Second window stays fully editable; CAS plus broadcast adopt
+  now, leader/ops only if simultaneous editing is observed. Read-only rejected.
+- **AD2** Is the Map a tab kind now or later? (Proposed: later, with two cheap
+  preparations: the map takes its scope/focus as props from Session state, and
+  never reads `window` size; optionally a small neighbourhood side panel in the
+  page editor as the interim "see the map while writing". Keep tab kinds an open
+  enum.) History and Captures stay top-level views for now.
 - **AD3** Are loci histories persisted across reload? (Proposed: the active
   locus per tab yes, the back stack no.)
 - **AD4** Rename `publicationRevision`'s local meaning, or leave it? (Proposed: add
