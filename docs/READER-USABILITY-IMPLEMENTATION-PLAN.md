@@ -952,6 +952,16 @@ ___ in ___ s. Vitest at `9b91ce3`: 1024 passed in about 47 s.
 
 - **D16** (user) Settings is a screen designed to grow (section list + registry),
   not a dropdown. Only the three initial settings are in scope now.
+- **D18** (user, 2026-11-16) Simultaneous editing across windows is expected
+  behaviour; see proposal Move 5 (committed, staged).
+- **D19** (user, 2026-11-16) The map/Nodes view is not touched for now (planned
+  redesign; PR #19 also edits it). "Map as tab" is deferred; no preparatory
+  edits to the map. Clarification given: the idea was to make the map one *kind*
+  of tab alongside paper tabs, never to replace the Library (the Library is
+  itself a tab kind).
+- **D20** (user) Back stack (RU-7) is approved, with the push policy below, built
+  as a pure, easily changeable module so the policy can be tuned after a
+  prototype.
 - **D17** (user) "Recent papers" excludes deleted papers. Deleted papers
   belong in a future "Deleted papers" tab (BL-1); today deletion is a hard
   delete (see section 9).
@@ -1247,3 +1257,121 @@ A broader, still **proposed** (not accepted) architecture is in
 services, navigation as documents -> tabs with loci history -> layout with
 recipes, writer lock). It does not change any item in this plan until accepted;
 section 8 of that file lists the items it would alter.
+
+
+---
+
+## Appendix C: reconciliation with open PR #19 (verified 2026-11-16)
+
+**What was missed.** The plan, the audit and the architecture proposal were
+written against `main` (`9b91ce3`) without checking open pull requests. PR #19
+(`m21-ui-ux-priorities`, open, unmerged, `mergeable_state` unknown) overlaps
+them. Facts: **[read]** from the PR and its branch; **[run]** from a throwaway
+worktree of `main` + the PR head (`b9115ae`), merged cleanly (one auto-merge in
+`SourcePane.tsx`), typecheck clean, discarded afterwards.
+
+### C.1 What PR #19 changes for this plan
+| Plan item | Effect |
+|---|---|
+| F11 / RU-3.3 seeding | **Done in PR #19** [run]: fresh library has 0 rows and a proper empty state with Import PDF and "Load Sample Workspace". Drop RU-3.3's seeding work. Also covers the library half of F13. Still check Nodes/History/Captures empty states. |
+| F5 / RU-1.2 | **Partly fixed** [run]: outside click now closes the Subjects menu; `Esc` still does not. Remaining work: `Esc` handling only. |
+| F6 / RU-3.2 | **Not fixed** [run]: badge still reads "Stale" with no remote. PR #19 adds Connect/Disconnect and persists the endpoint (`syncConfigStore.ts`), which changes where the `remote` signal comes from; re-read `SyncBanner.tsx` on the merged tree first. |
+| F3 / RU-1.1 | **Still present** [run]: highlight popover bottom at y=1114 in a 900px viewport. |
+| F1 / RU-2 | **Still present** [run]: find "Page 9" returns 0/0. |
+| F15 / RU-3.4 | **Still present** [run]: Files tab inside the reader does nothing. |
+| F7 / RU-5.1 | **Still present** [run]: title search returns 0. |
+| F8 / RU-3.1 | **Still present** [run]: reload lands on the Library. |
+| RU-0.3 CI path filter | **Changes.** PR #19 deletes `m17-playtest.yml` and adds `ci.yml` (typecheck, full Vitest, build, Playwright e2e on PRs to `main`). `latex-benchmark.yml` is unchanged, so the filter idea still applies to that workflow only. Re-read `ci.yml` before editing. |
+| RU-0.2 browser env | Still needed; PR #19 edits `playwright.config.ts` (webServer builds with `VITE_ITO_TEST_API=1`). Merge first, then add the executable-path option on top. |
+| Test API | `window.__ito` is now gated (`VITE_ITO_TEST_API=1`, dynamic import). Specs that use `window.__ito.*` rely on the e2e build flag; keep that in mind for the new tracker spec and for RU-3.x tests. |
+| Names | `LocalFileStorageAdapter` -> `IndexedDbStorageAdapter` (and its test file). Update references in this plan and the proposal when it merges. |
+| `SCHEMA_VERSION` | Currently 2 per the PR's `ARCHITECTURE.md`. |
+| Handoff files | PR #19 archives `KIRO_HANDOFF_*.md` to `docs/archive/`. (The plain-named `kiro science` file is not mentioned there.) |
+| `docs/ARCHITECTURE.md` | New living reference with a **maintenance contract** ("update in the same PR if you change module responsibilities, the data contract, StorageAdapter, the Workbench/React contract, persistence/sync wiring, or add a cross-cutting gotcha") and a PR template that enforces it. Once merged, `CLAUDE.md` must also point at it, and items that touch those areas (RU-3.1 session store, RU-7 navigation, document and text services) must update it. |
+
+### C.2 Sequencing decision (needs the owner)
+Recommended: merge PR #19 (or rebase this branch on it) **before** starting
+Phase 0, then re-run the audit script against the result and re-baseline the
+tracker. Starting Phase 0 on `main` would build on code that is about to change
+(storage names, e2e/CI setup, empty-state library, observable store). I have not
+merged, rebased or commented on the PR; those are repository-owner decisions.
+
+### C.3 Corrected statement about `bump()`
+The user's recollection is right for PR #19 and wrong for `main`: on `main` the
+manual `bump()` plumbing is still the mechanism (85 call sites); on PR #19 the
+Workbench is an observable store and `bump()` is a shim around `wb.notify()`. It
+is "redundant" for correctness, but whole-tree re-render per change remains
+(single snapshot object), and `persist()` notifies twice per mutation.
+
+---
+
+## RU-7 Back stack (navigation history of loci) - approved (D20)
+
+Decisions and suggestions from the 2026-11-16 discussion, made concrete.
+
+**Concept.** A navigation context keeps an ordered list of *loci* and a pointer,
+like a browser tab. A locus is a small serialisable record of "a place":
+`{ kind: "source", sourceId, pageIndex, anchor? }`,
+`{ kind: "page", pageId, blockId?, evidenceId? }`,
+`{ kind: "map", scope?, focusPageId? }` (type reserved only; D19: the map is not
+touched). Back moves the pointer back, Forward forward; a new push after Back
+discards the forward entries. Cap 50 entries (drop oldest).
+
+**Rules (policy, deliberately a data table so it is easy to retune):**
+1. **Before pushing a destination, update the top entry in place with the
+   current true position** (page/scroll offset or block), so Back returns to where
+   the user actually was, not where they arrived.
+2. **Pushes:** following a citation/evidence atom (`followSource`), opening a
+   source from an annotation ("open source"), opening a search result,
+   "Show in Nodes"/"Return to Reader" jumps, opening a recipe/workspace.
+3. **Does not push (updates the current entry in place):** scrolling, page
+   changes within a document, zoom, thumbnail/outline jumps (unless a
+   configurable jump distance, default off, is exceeded).
+4. **Keys:** `Alt+Left` / `Alt+Right` (and `Cmd+[` / `Cmd+]` on macOS); toolbar
+   Back/Forward buttons shown only when the respective entry exists.
+5. **Focus return:** when a jump moves focus between slots/panes (page -> paper),
+   the entry also records which pane held focus so Back restores it. Settle the
+   exact behaviour in the prototype (below).
+6. **Persistence:** the *active locus* persists via the RU-3.1 session store;
+   the back stack itself does not persist (AD3).
+7. **Scope:** one context now (the whole reader). When tabs exist (Q8), each tab
+   owns its own context; the module takes a context id from day one.
+
+**Design for easy change (prototype requirement).**
+- Pure module `src/app/nav/locusHistory.ts`: types, a reducer
+  `(state, action) => state` with actions `push`, `replaceCurrent`, `back`,
+  `forward`, `clear`, and `PUSH_POLICY`, a plain table mapping navigation
+  *reasons* (`followCitation`, `openFromAnnotation`, `searchResult`, `pageScroll`,
+  ...) to `push` or `replace`. No React, no DOM, no workbench imports.
+- Thin React hook `useLocusHistory(contextId)` over the Session store, and a
+  small `navigate(locus, reason)` function that all call sites use (this is the
+  same "single funnel" as RU-3.4 item 6; do them together).
+- Behind a settings flag `nav.backStack` (RU-3.5, default on) until the policy is
+  settled, so it can be switched off without code removal.
+- Unit tests pin the reducer and policy table; changing a rule is a one-line
+  table edit plus its test.
+
+**Integration order (smallest valuable first).**
+1. Pure module plus tests.
+2. Wire `followSource`/`returnTarget` in `Reader` and `SubjectEditor`
+   (`onFollowSource`) so following a quote pushes and Back returns to the exact
+   page position in the subject page. Existing `returnTarget` behaviour must keep
+   working until replaced; do not remove it in the first step.
+3. Keys and toolbar buttons.
+4. Annotation sidebar "open source" and search-result open.
+5. Later: replace the mobile sheet round trip and the Nodes "Return to
+   Map/Reader" buttons **only after** the map redesign (D19).
+
+**Effort (rough, +-40 %, unmeasured):** module and tests about 1 day; reader and
+subject-editor integration 1.5 to 2; keys and buttons 0.5 to 1; e2e and polish 1.
+About **4 to 5 days**.
+
+**Tests.** Unit: reducer cases (push, truncate forward, cap, replaceCurrent keeps
+position, back/forward bounds, policy table). Playwright: write a page, follow a
+quote into a paper, scroll to another page, `Alt+Left` returns to the paper's
+original passage and a second `Alt+Left` returns to the subject page at the same
+block; Forward reverses; scrolling alone creates no entries.
+
+**Acceptance.** Following a citation and pressing Back (button or `Alt+Left`)
+returns to the exact previous position, at least two levels deep, and scrolling
+never pollutes the stack.

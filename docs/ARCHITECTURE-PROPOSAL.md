@@ -75,6 +75,18 @@ go ahead.
 
 ### Move 2. Replace `bump()` with subscribable slice selectors
 
+> **Status update 2026-11-16 (verified):** open PR #19 (`m21-ui-ux-priorities`,
+> not merged) already makes `Workbench` an observable store (`subscribe`,
+> cached reference-stable `snapshot()`, `useWorkbench` via `useSyncExternalStore`)
+> and keeps `bump()` only as a shim for `wb.notify()`. So on that branch the
+> *manual `bump()` plumbing* is redundant, as the user remembered. What it does
+> **not** give is slice subscriptions: `snapshot()` is one object that is rebuilt on
+> every `notify()`, so every consumer of `state` still re-renders on any change,
+> and `persist()` notifies twice per mutation (immediately and after the write
+> settles). The remaining work for this move is therefore smaller: selector hooks
+> on top of the existing store, and de-duplicating the double notify. On `main`
+> (`9b91ce3`) none of this exists yet.
+
 **Problem [read].** `useWorkbench` exposes `bump()`, which refreshes a whole
 state snapshot and re-renders `App`. There is no `React.memo` anywhere in
 `src/app`. The reader also calls `setNav` on every scroll/zoom tick.
@@ -183,9 +195,11 @@ is a special entry path rather than a layout.
   edits. Alternating use of two windows then just works. If a refused write
   coincides with unsaved edits, keep the in-memory draft (the page editor already
   holds it) and show a non-blocking "another window changed this, reloaded"
-  notice. Stage 2, only if simultaneous editing proves real: leader election via
-  Web Locks, with follower windows sending serialisable ops to the leader, which
-  needs the `commit(op)` layer below (about 4 to 6 days).
+  notice. Stage 2 (**committed**; user 2026-11-16: simultaneous editing is a reasonable
+  expectation): leader election via Web Locks, with follower windows sending
+  serialisable ops to the leader (or every window applying a shared op log),
+  which needs the `commit(op)` layer below (about 4 to 6 days). Build
+  `commit(op)` (5c) before Stage 2.
 - Replace the full read-back with a cheap integrity check (`getKey` plus a small
   header record with revision and brainId, or a checksum). IndexedDB's
   transaction completion already guarantees durability locally; keep the strong
@@ -303,16 +317,33 @@ build Moves 1 and 4 together, then 5c.
 
 ## 9. Open decisions
 
-- **AD1** (revised) Second window stays fully editable; CAS plus broadcast adopt
-  now, leader/ops only if simultaneous editing is observed. Read-only rejected.
-- **AD2** Is the Map a tab kind now or later? (Proposed: later, with two cheap
-  preparations: the map takes its scope/focus as props from Session state, and
-  never reads `window` size; optionally a small neighbourhood side panel in the
-  page editor as the interim "see the map while writing". Keep tab kinds an open
-  enum.) History and Captures stay top-level views for now.
-- **AD3** Are loci histories persisted across reload? (Proposed: the active
-  locus per tab yes, the back stack no.)
+- **AD1** (decided) Second window stays fully editable; CAS plus broadcast adopt
+  first, then leader/ops (committed). Read-only rejected.
+- **AD2** (decided 2026-11-16, user) The map/Nodes view is **not touched** for
+  now: its UI is due to be redesigned and PR #19 is also editing it. It stays a
+  top-level view behind the Files/Nodes switch. The navigation layer must treat
+  it as an opaque view and keep tab kinds an open enum so it can join later. No
+  preparatory edits to `NodesCanvas`/`NodesView`. History and Captures also stay
+  top-level views.
+- **AD3** (decided: user approved the suggestions) The active locus persists
+  across reload via the session store; the back stack does not. See usability
+  plan RU-7.
 - **AD4** Rename `publicationRevision`'s local meaning, or leave it? (Proposed: add
   a clearly named `localSaveCounter` only if confusion costs something.)
 - **AD5** Where do recipes live, and are they user-extensible? (Proposed: a plain
   registry module; not user-extensible.)
+
+---
+
+## 10. Reconciliation with open PR #19 (added 2026-11-16)
+
+Open PR #19 (`m21-ui-ux-priorities`, 32 commits, base `8fb3920`) was not known
+when this proposal was written. A trial merge into `main` (`9b91ce3`) applies with
+no conflicts and typechecks. It already contains: observable store, CI
+(`ci.yml`), test-API gating, `LocalFileStorageAdapter` renamed
+`IndexedDbStorageAdapter`, persisted sync config, theme tokens, **no auto-seeded
+fixtures**, a new `docs/ARCHITECTURE.md` (a living reference with a maintenance
+contract) and `docs/UI_AUDIT.md`. Its audit item P7 (split `workbench.ts`) is the
+same as this proposal's Move 1 and is deferred there to its own PR. Merge or
+rebase decisions belong to the repository owner; see the usability plan,
+Appendix C.
