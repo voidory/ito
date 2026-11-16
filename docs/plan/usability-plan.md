@@ -6,7 +6,7 @@ second pass: `9b91ce3` + PR #19 head `b9115ae` (planning branch). Text tagged
 is recorded in section 11. Plan decision IDs are now `RD-n` (they collided with
 the master spec's D01-D22).
 (docs commit `f297ae9`). This file supersedes the sequencing summary in
-`docs/READER-USABILITY-ROADMAP.md`; the roadmap stays as the short overview.
+the former roadmap file (deleted; all its content is in this plan).
 
 LaTeX extraction work is paused and out of scope. Phone layout is out of scope
 (see section 9).
@@ -1363,7 +1363,7 @@ only": it would lose evidence lines and write-while-reading.
 ### B.5 Pointer to the architecture proposal
 
 A broader, still **proposed** (not accepted) architecture is in
-`docs/ARCHITECTURE-PROPOSAL.md` (state ownership, slice store, document and text
+`docs/plan/architecture-proposal.md` (state ownership, slice store, document and text
 services, navigation as documents -> tabs with loci history -> layout with
 recipes, writer lock). It does not change any item in this plan until accepted;
 section 8 of that file lists the items it would alter.

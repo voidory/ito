@@ -2,7 +2,7 @@
 
 Status: **PROPOSED**, not accepted. Written 2026-11-16 against `9b91ce3`.
 When accepted, split into ADRs (ADR-0015 onwards) and update
-`docs/READER-USABILITY-IMPLEMENTATION-PLAN.md` (see section 8).
+`docs/plan/usability-plan.md` (see section 8).
 
 Method: first state what the programme is for (section 1), keep what already
 fits (section 2), then propose only the changes that earn their cost

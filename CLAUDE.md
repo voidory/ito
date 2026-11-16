@@ -5,7 +5,7 @@
 Before changing the reader (`src/app/reader/`), shared UI primitives
 (`src/app/ui/`), the app shell menus (`src/app/App.tsx`), find, the sync badge,
 library seeding or reading-position persistence, read
-`docs/READER-USABILITY-IMPLEMENTATION-PLAN.md` and follow it.
+`docs/plan/usability-plan.md` and follow it.
 
 Rules (full text in section 0 of that file):
 
