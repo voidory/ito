@@ -1239,3 +1239,11 @@ only": it would lose evidence lines and write-while-reading.
   in practice; measure a 300-page paper's `cachedPages` JSON. If large, move to
   the IndexedDB analysis store (which was designed for this, see
   `pdfAnalysisStore.ts` header) before sync work depends on it.
+
+### B.5 Pointer to the architecture proposal
+
+A broader, still **proposed** (not accepted) architecture is in
+`docs/ARCHITECTURE-PROPOSAL.md` (state ownership, slice store, document and text
+services, navigation as documents -> tabs with loci history -> layout with
+recipes, writer lock). It does not change any item in this plan until accepted;
+section 8 of that file lists the items it would alter.
