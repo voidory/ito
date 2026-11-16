@@ -635,6 +635,14 @@ left of the reader toolbar. Searching a paper's title anywhere finds nothing
 5. Multi-paper mode: the title switcher is hidden when two or more papers are
    open (the panes' roles are meaningful there); RU-3.6 covers swapping.
 
+6. **Single funnel (tab-readiness, cheap).** Route every UI entry point that
+   opens a paper (library open, search result, annotation "open source", the
+   switcher, resume on start) through one function
+   `navigateToPaper(sourceId, opts?)` in the app layer instead of calling
+   `wb.openSource` at each site (7 non-test call sites at `9b91ce3`). Behaviour
+   is unchanged now; it is the single seam where tabs would later plug in
+   (Appendix A).
+
 **Tests:** Playwright: Files tab from reader returns to Library; title popover
 lists recents, filters by typed text ("Rotated" finds "Rotated Fixture"),
 Enter opens it and the previous paper appears in Recent; "All papers" returns
@@ -660,14 +668,24 @@ Sync, Publish, Refresh, Backup, Restore, Mobile. There is no preferences store;
    - `reader.restoreLastSession: boolean`, default `true` (RU-3.1, D10).
    - `reader.defaultPageWidth: "comfortable" | "fit"`, default `"comfortable"`
      (RU-5.3).
-3. A "Settings..." item at the top of the gear menu opens a dialog (use the
-   existing modal pattern, e.g. `BackupExportModal.tsx`) with two sections:
-   **General** (reader options) and **Advanced** (find accent folding, and
-   room for future developer-ish options). Each control writes through the
-   store immediately and takes effect without reload where feasible. A
-   "Reset to defaults" button.
-4. Do **not** move Sync/Backup/Restore/Mobile into the dialog in this item.
-   That is the revamp proper (Q6) and needs its own design pass.
+3. **A screen, not a dropdown or a flat dialog (D16).** "Settings..." (top of
+   the gear menu) opens a settings screen laid out for growth: a left
+   section list and a content pane, large enough for long sections (a
+   full-height modal or a dedicated view; match `BackupExportModal.tsx` only
+   for the open/close mechanics). Sections come from a **declarative
+   registry**, `SETTINGS_SECTIONS: Array<{ id; title; order; render }>` in
+   `src/app/settings/sections.tsx`, so adding a section later is one registry
+   entry plus one component, with no change to the shell. A row primitive
+   (`SettingRow`: label, description, control, optional "requires reload"
+   badge) keeps sections uniform. Initial sections: **General**
+   (`reader.restoreLastSession`), **Reader** (`reader.defaultPageWidth`),
+   **Advanced** (`find.ignoreAccents`). Reserved, not built here: Sync,
+   Backup & Restore, Appearance. Each control writes through the store
+   immediately and takes effect without reload where feasible; a "Reset
+   section" action per section. Deep-linkable: `openSettings("advanced")`.
+4. Do **not** move Sync/Backup/Restore/Mobile into the screen in this item
+   (user, 2026-11-16: "for now only what I said"). The structure above exists
+   so that moving them later is additive.
 5. React access via a small `useSetting(key)` hook backed by
    `useSyncExternalStore` so SourcePane and the find code see changes live.
 
@@ -848,6 +866,19 @@ console logs.
 
 ---
 
+- **BL-1 Deleted papers (trash).** User wants deleted papers in a "Deleted
+  papers" tab. **[read]** today `Workbench.deleteSource` is a **hard delete**:
+  it deletes the PDF binary first, then removes the source, its annotations and
+  its subject associations from the data model, and detaches captures. There is
+  no `deletedAt`, no recoverable state. A trash therefore means: a soft-delete
+  flag on `Source` (a change to the synced data model, with schema-version
+  migration and sync/tombstone semantics for Koofr), keeping the PDF binary
+  and annotations until "Empty trash", a Deleted view, Restore, and
+  "Delete permanently". This is a feature with data-model risk, not a polish
+  item: write its own ADR before building. Until then, "Recent" in RU-3.4
+  simply never lists deleted papers, which is already true because the source
+  no longer exists.
+
 ## 10. Progress tracker
 
 Update in the same commit as the work. Status: `todo` / `doing` / `done` /
@@ -919,16 +950,122 @@ ___ in ___ s. Vitest at `9b91ce3`: 1024 passed in about 47 s.
 - **D15** (recommendation accepted) Reader navigation: working Files tab,
   labelled back control, and a title-click paper switcher (RU-3.4).
 
+- **D16** (user) Settings is a screen designed to grow (section list + registry),
+  not a dropdown. Only the three initial settings are in scope now.
+- **D17** (user) "Recent papers" excludes deleted papers. Deleted papers
+  belong in a future "Deleted papers" tab (BL-1); today deletion is a hard
+  delete (see section 9).
+
 ### Open questions (answer before the dependent item)
-- **Q6 (RU-3.5)** The user said the settings need a revamp. RU-3.5 only adds
-  a store and a Settings dialog with General and Advanced sections. What
-  should the full revamp cover (move Sync/Backup/Restore/Mobile into the
-  dialog? a Sync status page? theme and motion options?). Needs a design pass;
-  do not expand RU-3.5 to include it.
-- **Q7 (RU-3.4)** In single-paper mode should "recent papers" also show
-  papers that were open in earlier sessions even if deleted from the library?
-  Proposed: no, only existing sources.
+- **Q6, Q7** ANSWERED (D16, D17).
+- **Q8 (Appendix A)** Does the user want multi-tab started now? Assessment is
+  in Appendix A; no decision yet. Phase 0 to 2 are unaffected either way.
 
 ### Deviation log
 (Empty. Append `date, item, what changed, why` here when reality differs from
 this plan.)
+
+
+---
+
+## Appendix A: assessment of starting multi-tab (Zotero-style) now vs later
+
+Requested by the user 2026-11-16 ("how hard would it be to introduce the start
+of multi-tab functionality"). This is an **assessment, not a commitment**
+(Q8). Estimates are mine and unmeasured; treat as +-40 %.
+
+### A.1 Facts about the current architecture [read]
+- The shell picks the Files-view body from one number: if
+  `state.openSourceIds.length === 0` it renders the Library, else the Reader
+  (`App.tsx`). That is why the "Files" tab cannot leave the reader (F15), and
+  why there is no notion of "a paper open in the background".
+- `Workbench.openSourceIds` is a private in-memory list with replace
+  semantics (`openSource` sets `[id]`; `openTogether` sets many;
+  `ensureSourceOpen` appends; `closeWorkspace` clears). It doubles as the
+  "workspace": 1 source = reader, 2+ = Open together, plus an optional open
+  Subject page. References at `9b91ce3`: `openSourceIds` 57 non-test source
+  references and 16 test files; `.openSource(` 7; `openTogether(` 4;
+  `switchReaderPane(` 7; `window.__ito.openSourceIds` used by 10 e2e lines.
+- `SourcePane` owns the pdf.js document (`docRef`), the page DOM,
+  virtualisation observers and per-pane UI state, all keyed by `sourceId`;
+  switching sources tears it down and rebuilds. The primary pane registers its
+  zoom/page/find commands into a single `paneCommandsRef` in `Reader`, which the
+  single toolbar drives.
+- `Reader` owns tool, colour, selection and sidebar state for one workspace.
+
+### A.2 Recommended shape of a tab MVP
+1. **Tab kinds.** `library` (pinned, first, not closable) and `paper`
+   (one source). The existing multi-paper/subject workspace is NOT split
+   into tabs: it remains one tab of a third kind, `workspace`, rendered by the
+   unchanged `Reader` path. Rationale: Zotero has no equivalent of "Open
+   together to edit a link between nodes" (D12), so forcing it into
+   one-paper-per-tab would destroy its meaning.
+2. **State lives above the workbench.** A small `ReaderTabs` store in the app
+   layer (local-only, persisted next to the RU-3.1 session store, never in the
+   synced payload) holds `{ tabs: [{ id, kind, sourceId? }], activeId }`. The
+   active tab is *projected* into the workbench by calling the existing
+   `wb.openSource`/`wb.closeWorkspace`. The workbench's single-workspace
+   invariants and its 57 references stay untouched. This is the point of the
+   RU-3.4 "single funnel".
+3. **Inactive tabs are unmounted, not hidden.** Keeping several `SourcePane`s
+   mounted with `display:none` would break measurement-driven code (fit-scale
+   `ResizeObserver`s, `IntersectionObserver` virtualisation, text-layer
+   geometry) and hold several PDFs' canvases in memory. Instead persist each
+   tab's `{page, pageOffset, zoom}` (RU-3.1 already builds exactly this) and
+   restore on activation. M17's `cachedPages` text-layer hydration was built for
+   fast reopen. **UNVERIFIED:** actual reopen latency on a 50-page and a
+   300-page paper; measure in the first spike. If it is > ~400 ms, add a small
+   LRU of warm documents (keep the `PDFDocumentProxy`, not the DOM).
+4. **State split.** Global across tabs (like Zotero): active tool, active
+   colour, annotations-sidebar open/closed. Per tab: page, zoom, left-sidebar
+   state, selected annotation, find query.
+5. **Tab strip placement.** Do not add a fourth stacked bar (M9 complained about
+   exactly this). Put the strip in the reader toolbar row, replacing
+   `reader-title` and the `back-to-library` icon: the Library tab *is* the way
+   back, and the paper title lives on its tab. The top-level Files/Nodes/
+   History/Captures switch stays as is; switching to Nodes and back preserves
+   tabs because they live above view mode.
+6. **Behaviour.** Open from Library = new tab (or focus if already open;
+   Ctrl/middle-click forces new tab, plain click in a paper tab's switcher
+   replaces nothing). Close: `x`, middle-click, `Ctrl/Cmd+W`; closing the active
+   tab activates its neighbour; closing the last returns to Library.
+   `Ctrl+Tab`/`Ctrl+Shift+Tab` and `Ctrl+1..9`. Overflow: horizontal scroll with
+   fade + a tab-list menu. Roles: `tablist`/`tab`/`tabpanel`, roving tabindex.
+   Persist and restore tabs on reload (RU-3.1 "auto-resume" becomes "restore
+   tabs"). Drag-reorder and tab groups: later.
+7. **What it supersedes.** RU-3.4's title-click switcher becomes unnecessary
+   (tabs + Library tab); keep its "Files tab works" and its search field idea
+   as a quick-switcher (`Ctrl+K`) later. RU-3.6 "Swap this paper" is unchanged
+   (it concerns the workspace tab).
+
+### A.3 Effort for the MVP (library + paper tabs, workspace untouched)
+| Piece | Days |
+|---|---|
+| `ReaderTabs` store, persistence, projection to workbench, `navigateToPaper` funnel | 1 to 1.5 |
+| Tab strip UI, a11y, keyboard shortcuts, overflow | 1.5 to 2 |
+| Shell integration: Library as pinned tab, Files-tab semantics, search/annotation "open source" entry points, resume | 1 to 1.5 |
+| Interplay with Open together, Subject pages, Nodes "dive" and source-return (`ensureSourceOpen`) | 1 to 2 (the main uncertainty) |
+| Tests: new tab specs; rework of specs asserting `openSourceIds` length; manual pass | 1 to 1.5 |
+| **Total** | **about 5 to 8 working days** |
+
+Main risks: (a) the N06 effect in `App.tsx` that iterates "every currently open
+source" for subject association (what does "open" mean when a source is open in
+a background tab? decide: only the active tab's sources); (b) source-return
+adding a source "alongside" the subject must not create a stray tab; (c)
+mobile mode (`mobileMode && openSourceIds.length === 1`) assumes the old model;
+out of scope but must not break; (d) the 10 e2e lines using
+`__ito.openSourceIds()`.
+
+### A.4 Now vs later
+- **Cost of waiting rises**, but slowly: every new feature that reads
+  `openSourceIds` adds a migration site, and RU-3.1/3.4/3.6 all edit the same
+  open/switch/session code. Building tabs *after* those would mean rewriting
+  them.
+- **Therefore the sequence that wastes least:** Phases 0 to 2 (independent of
+  navigation) -> decide Q8 -> if yes, build tabs as the navigation layer and
+  fold RU-3.1 (session store, per-tab position), RU-3.4 (Files tab, funnel) and
+  RU-3.6 into it; if no, proceed with RU-3.x as written. The RU-3.4 funnel and
+  the RU-3.1 per-source position store are tab-ready either way at near-zero
+  extra cost.
+- **Not recommended:** starting tabs before Phase 1. The popover/menu
+  foundation is needed by the tab overflow menu and context menus anyway.
