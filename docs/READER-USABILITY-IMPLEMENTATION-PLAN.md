@@ -93,7 +93,7 @@ in headless Chromium (marked **[run]**) or by reading code (marked **[read]**).
 | F4 | Area drag leaves the page; blank sidebar preview | RU-4.x |
 | F5 | Subjects menu ignores Esc / outside click | RU-1.2 |
 | F6 | Permanent "Stale" badge with no remote | RU-3.2 |
-| F7 | Top search box does not filter the library | RU-5.1 |
+| F7 | No way to search papers by title anywhere (top search does not index sources) | RU-5.1a/b/c |
 | F8 | Reload loses the open paper, page, zoom | RU-3.1 |
 | F9 | Sidebar not in page order | RU-5.2 |
 | F10 | "Delete highlight" on underline | RU-1.4 |
@@ -101,7 +101,8 @@ in headless Chromium (marked **[run]**) or by reading code (marked **[read]**).
 | F12 | Fit-width gives very wide pages | RU-5.3 |
 | F13 | Bare empty states | RU-5.4 |
 | F14 | `favicon.ico` 404 in console (noise) | RU-5.5 |
-| F15 | Clicking the highlighted "Files" tab inside the reader does nothing; the only way back is an unlabelled icon | RU-3.4 (proposed, pending Q5) |
+| F15 | Clicking the highlighted "Files" tab inside the reader does nothing; the only way back is an unlabelled icon | RU-3.4 |
+| F16 | Reader overflow menu "Switch paper..." silently swaps to an arbitrary paper (`switchable[0]`); a persistent per-pane `<select>` duplicates it | RU-3.6 |
 
 ---
 
@@ -403,7 +404,17 @@ Independent of Phase 1; may run in parallel.
   `example`) while keeping the offset map correct.
 - `findAll(pageIndex, query)` returns non-overlapping occurrences as
   `{ start, end }` over `text`; `toItemRanges(...)` maps them to item indices.
-- Decision: diacritics are **not** folded in v1 (see open question Q3).
+- Diacritic folding (decision D7): when the setting `find.ignoreAccents` is on
+  (default **on**, see RU-3.5), additionally strip combining marks after NFD
+  decomposition (query and page text alike) so "cafe" matches "caf\u00e9". The
+  offset map must stay correct when characters are removed (same mechanism as
+  the hyphen join). The setting is read when the find index is built or the
+  query is run; changing it clears the cache. Known limit: LaTeX PDFs often
+  extract an accent as a separate mark before the letter ("Scho\u00a8dinger");
+  folding does not repair that and it is out of scope.
+  **Ordering:** Phase 2 precedes RU-3.5, so `findAll`/`buildPageIndex` take an
+  explicit `ignoreAccents` option (default `true`); RU-3.5 wires it to the
+  setting. Do not read `localStorage` from the pure matcher.
 
 **RU-2.2 Document index (in `SourcePane.tsx` or a new hook
 `useDocumentFindIndex`).**
@@ -523,7 +534,9 @@ between devices. The project already keeps local-only data in IndexedDB
    `initialPosition` prop into `SourcePane`; after pages mount (the `ready`
    state), apply zoom then scroll to `page` + `pageOffset`. If the source no
    longer exists (deleted), drop the entry and show the Library.
-5. Scope: only the reader session. Do not restore Nodes/History/Captures view
+5. Honour `reader.restoreLastSession` (RU-3.5): when off, never auto-open on
+   start (the session is still recorded so "Recent" in RU-3.4 works).
+6. Scope: only the reader session. Do not restore Nodes/History/Captures view
    mode or multi-paper workspaces (decision D2).
 
 **Tests:** unit tests for the store (round trip; corrupt JSON returns empty;
@@ -590,22 +603,116 @@ state; Playwright run with the flag on passes unchanged. Build check as above.
 Run the **whole** e2e suite for this item; failures from specs that implicitly
 depended on the seed are fixed by importing explicitly in those specs.
 
-### RU-3.4 Seamless way back to the Library (F15) - PROPOSED, pending Q5
+### RU-3.4 Seamless navigation between papers and the Library (F15)
+
+Depends on RU-5.1a (shared source search). Decisions D11 and D12 apply.
 
 **Evidence [run]:** inside the reader the top-level "Files" tab stays
 highlighted, but clicking it leaves the reader open (`reader` 1, `library` 0).
-The only route back is the unlabelled `<` icon (`back-to-library`) at the
-far left of the reader toolbar. The pane overflow menu also holds
-"Switch paper..." (a `<select>` in the pane header, `SourcePane.tsx`, listing
-sources not currently open) and "Import PDF...".
+The only route back is the unlabelled `<` icon (`back-to-library`) at the far
+left of the reader toolbar. Searching a paper's title anywhere finds nothing
+(F7).
 
-**User idea (2026-11-16):** remove the in-reader paper switcher and give the
-reader a smoother way to reach the Library. Design options, and the dependency
-on multi-paper mode, are in section 11 Q5. Do not implement until Q5 is
-answered. Whatever is chosen must at least make the "Files" tab leave the
-reader.
+**Design:**
+1. **Files tab works from the reader.** Clicking `view-files` while a reader is
+   open returns to the Library (clears the open source; also records
+   `lastSourceId = null`, RU-3.1). Fix this regardless of anything else below.
+2. **Title becomes a paper switcher.** In `ReaderToolbar.tsx` the
+   `reader-title` element becomes a button (chevron affordance, tooltip "Switch
+   paper or go to Library") opening a `Popover` (RU-1.1) containing: a search
+   field (autofocus, uses RU-5.1a `searchSources`), a "Recent" list (the last 8
+   papers by `updatedAt` from the reader session store, RU-3.1, excluding the
+   current one), search results when the field is non-empty, and a fixed last
+   row "All papers (Library)". Keyboard: arrows move, Enter opens, Esc closes.
+   Selecting a paper replaces the current reading session (single-paper mode:
+   `wb.openSource`), restoring that paper's saved position if any.
+3. **Back control labelled.** Keep `back-to-library`, but give it a visible
+   text label ("Library") next to the icon at toolbar widths >= 900 px; icon
+   only below that.
+4. **Remove** the persistent per-pane `switch-paper` `<select>` and the toolbar
+   overflow item "Switch paper..." (see RU-3.6 for what replaces them in
+   multi-paper mode). Keep `Import PDF...` in the overflow menu.
+5. Multi-paper mode: the title switcher is hidden when two or more papers are
+   open (the panes' roles are meaningful there); RU-3.6 covers swapping.
 
-Phase 3 exit: F6, F8, F11 fixmes are real tests; full e2e suite green.
+**Tests:** Playwright: Files tab from reader returns to Library; title popover
+lists recents, filters by typed text ("Rotated" finds "Rotated Fixture"),
+Enter opens it and the previous paper appears in Recent; "All papers" returns
+to Library; Esc closes; no `switch-paper` select exists in the DOM.
+
+### RU-3.5 Settings store and dialog (new; user request 2026-11-16)
+
+The user wants an Advanced settings area and expects a settings revamp. This
+item is the **minimum foundation**, not the whole revamp (see Q6).
+
+**Facts [read]:** the gear (`SettingsMenu` in `App.tsx`) is a menu of Configure
+Sync, Publish, Refresh, Backup, Restore, Mobile. There is no preferences store;
+`localStorage` is not used by application code.
+
+**Design:**
+1. `src/app/settings.ts`: a typed, versioned, **device-local** store
+   (`localStorage` key `ito.settings.v1`, try/catch on every access, in-memory
+   implementation for tests, defaults merged over stored values, unknown keys
+   dropped, values validated). Local-only for the same reason as D3: these are
+   per-device preferences and must not enter the synced payload.
+2. Initial settings:
+   - `find.ignoreAccents: boolean`, default `true` (RU-2.1, D7).
+   - `reader.restoreLastSession: boolean`, default `true` (RU-3.1, D10).
+   - `reader.defaultPageWidth: "comfortable" | "fit"`, default `"comfortable"`
+     (RU-5.3).
+3. A "Settings..." item at the top of the gear menu opens a dialog (use the
+   existing modal pattern, e.g. `BackupExportModal.tsx`) with two sections:
+   **General** (reader options) and **Advanced** (find accent folding, and
+   room for future developer-ish options). Each control writes through the
+   store immediately and takes effect without reload where feasible. A
+   "Reset to defaults" button.
+4. Do **not** move Sync/Backup/Restore/Mobile into the dialog in this item.
+   That is the revamp proper (Q6) and needs its own design pass.
+5. React access via a small `useSetting(key)` hook backed by
+   `useSyncExternalStore` so SourcePane and the find code see changes live.
+
+**Tests:** unit: defaults; corrupt JSON; storage throwing; unknown key
+dropped; invalid value falls back to default. Playwright: toggle accent folding
+off, then "cafe" no longer matches "caf\u00e9" (use a fixture containing an
+accented word; add one to `scripts/gen-fixtures.mjs` if none exists); settings
+persist across reload.
+
+### RU-3.6 "Swap this paper" in multi-paper mode (F16; user decision D12)
+
+**Context:** "Open together" exists for editing a link between nodes (user,
+2026-11-16). Changing one pane to a different paper is rare, so it should be
+hidden, not a persistent control.
+
+**Evidence [read]:** two controls do this today, and one is wrong:
+- `SourcePane.tsx`: a `<select data-testid="switch-paper">` in the pane header
+  (listing unopened sources; calls `wb.switchReaderPane(sourceId, to)`).
+- `Reader.tsx` `onSwitchPaper` (toolbar overflow "Switch paper..."): swaps the
+  **first** open source for `switchable[0]`, the first unopened source in
+  library order, with **no choice offered**. It is a silent swap to an arbitrary
+  paper. **UNVERIFIED**: also check what the page context menu's
+  `onPageAction("switch")` (`AnnotationMenus.tsx`, testid `ctx-switch-paper`)
+  does.
+
+**Design:**
+1. Remove the persistent `switch-paper` `<select>` and the overflow item.
+2. In the page right-click menu (`AnnotationMenus.tsx`, `ctx-switch-paper`),
+   relabel to "Swap this paper..." and show it **only when two or more papers
+   are open**. It opens a small picker (a `Popover`, RU-1.1) with the RU-5.1a
+   search field and the list of unopened papers; choosing one calls
+   `wb.switchReaderPane(<the right-clicked pane's sourceId>, chosen)`. It must
+   target the pane that was right-clicked, not `openSourceIds[0]`.
+3. Single-paper mode: the item is not shown (RU-3.4's title switcher covers
+   it).
+4. Preserve the invariants the existing e2e asserts: the other pane and the
+   open Subject page are untouched.
+
+**Tests:** update `e2e/workspace.spec.ts` (the block around "Switch paper..."
+that selects an option from `switch-paper`) to right-click a pane, choose "Swap
+this paper...", pick a paper, and assert the same invariants; update
+`reader.feat002.render.test.ts` (expects `ctx-switch-paper`; keep the testid,
+update the label expectation and add the "hidden with one paper" case).
+
+Phase 3 exit: F6, F8, F11, F15, F16 fixmes are real tests; full e2e suite green.
 
 ---
 
@@ -657,12 +764,36 @@ nothing. Unit test for the clamp helper if extracted.
 
 ### Phase 5: smaller polish
 
-**RU-5.1 Library filter (F7), product decision first.** Re-checked 2026-11-16 **[run]**: searching the title "Rotated" in the top box returns 0 results of any kind, so `wb.search` does not index source titles at all: there is currently no way to search papers by title anywhere in the app. The top search box is
-`NetworkSearch` (`wb.search`), described as searching "pages, categories,
-annotations", so not filtering documents is by design. Recommended: add a
-filter input above the library table (`data-testid="library-filter"`),
-matching title, authors and year, case-insensitive, local state; leave the
-global search unchanged. Decide per Q1 before building.
+**RU-5.1 Paper search (F7), decided: A now, B after (D13).** Re-checked
+2026-11-16 **[run]**: searching the title "Rotated" in the top box returns 0
+results of any kind: `wb.search` does not index source titles. Verified by
+reading: `Workbench.buildSearchIndex` (`workbench.ts`) builds `docs` (pages),
+`categories` and `annotations` only; `src/network/search.ts` defines
+`SearchResult` as page | category | annotation. The seam is clean and pure.
+
+- **RU-5.1a Shared source search (build first; RU-3.4 and RU-3.6 depend on
+  it).** In `src/network/search.ts` add `SearchSource { sourceId; title;
+  authors; year }` and a pure `searchSources(query, sources, limit?)`:
+  case-insensitive, accent-folded (same normaliser as find where practical),
+  token-AND match over title, authors and year, ranked title-prefix >
+  title-word > authors > year, stable order on ties. Unit tests in
+  `src/network/search.test.ts` (existing search tests live in
+  `src/app/workbench.search.test.ts`; do not break them).
+- **RU-5.1b Library filter (option A).** Filter input above the library table
+  (`data-testid="library-filter"`, `Library.tsx`), using `searchSources`; local
+  state; clears with Esc; shows "No papers match" empty state; works together
+  with the existing column sort and selection (selection must not silently
+  retain hidden rows for "Open together"/"Delete selected": either clear
+  hidden selections or label the counts; decide and record).
+- **RU-5.1c Global search returns papers (option B).** Add a `"source"` variant
+  to `SearchResult` and index sources in `buildSearchIndex`; in
+  `NetworkSearch.tsx` render a "Paper" kind label and, on select, call
+  `wb.openSource(id)` (the annotation branch already does). The union change
+  makes `NetworkSearch`'s `kind` branches and any exhaustive switches fail the
+  typecheck: fix every one. Estimate 0.5 to 1 day; ~0.25 to 0.5 day for 5.1a
+  and 5.1b together. Note `buildSearchIndex` rebuilds the whole index (including
+  `pageBodyText`) on every keystroke; measure with ~500 papers and ~5000
+  annotations and cache the index keyed by a data revision if > ~50 ms.
 
 **RU-5.2 Sidebar order (F9).** `AnnotationSidebar.tsx` builds `views` by
 flat-mapping `annotationsForSource` over `openSourceIds` and renders them in
@@ -681,7 +812,11 @@ must be applied by limiting the fitted **scale** in the fit computation
 (`setFitScale` in `SourcePane.tsx`), not by CSS. Proposed: default on open =
 `min(fit-to-pane, comfortable width)` centred; the explicit **Fit width**
 button still fills the pane. This needs a notion of zoom mode (fit-comfortable
-vs fit-width vs manual). Do not implement until Q2 is answered.
+vs fit-width vs manual). Decided (D9, D14): cap = **960 CSS px** of page
+width, `reader.defaultPageWidth` setting (RU-3.5) switches the open-time
+default between "comfortable" and "fit". Re-verify 960 against a real
+Letter/A4 paper at 1440x900 and 1920x1080 before finalising; adjust and record
+in the deviation log if it reads badly.
 
 **RU-5.4 Empty states (F13).** One sentence plus one action each:
 Nodes (`NodesCanvas`, currently "No concept nodes yet"): "Create a Subject or
@@ -735,13 +870,17 @@ Update in the same commit as the work. Status: `todo` / `doing` / `done` /
 | RU-3.1 Reading position | F8 | todo | | |
 | RU-3.2 Sync badge | F6 | todo | | |
 | RU-3.3 No seed | F11 | todo | | run whole e2e |
-| RU-3.4 Library navigation | F15 | proposed | | needs Q5 |
+| RU-3.4 Library navigation + title switcher | F15 | todo | | depends on RU-5.1a, RU-3.1 |
+| RU-3.5 Settings store + dialog | | todo | | before RU-2.1 finishes (accent flag) or stub flag |
+| RU-3.6 Swap this paper (right-click) | F16 | todo | | update workspace.spec.ts |
 | RU-4.1 Repro | F4 | todo | | |
 | RU-4.2 Clamp drag | F4 | todo | | |
 | RU-4.3 Blank preview | F4 | todo | | |
-| RU-5.1 Library filter | F7 | todo | | needs Q1 |
+| RU-5.1a searchSources | F7 | todo | | pure fn; build before RU-3.4 |
+| RU-5.1b Library filter | F7 | todo | | |
+| RU-5.1c Global search incl. papers | F7 | todo | | |
 | RU-5.2 Sidebar order | F9 | todo | | |
-| RU-5.3 Page width | F12 | todo | | needs Q2 |
+| RU-5.3 Page width | F12 | todo | | cap 960, setting in RU-3.5 |
 | RU-5.4 Empty states | F13 | todo | | |
 | RU-5.5 Favicon | F14 | todo | | |
 | RU-6 Second audit | | todo | | after Phase 3 |
@@ -762,26 +901,33 @@ ___ in ___ s. Vitest at `9b91ce3`: 1024 passed in about 47 s.
 - **D5** Popover outside-click stays on `mouseup` (blur-autosave ordering).
 - **D6** Find indexes the whole document lazily on first use from pdf.js text
   content, not from `pageTexts` or `cachedPages`.
-- **D7** Diacritics are not folded in find v1.
+- **D7** (revised 2026-11-16, user) Diacritics ARE folded in find by default,
+  with an Advanced setting to disable (RU-3.5, `find.ignoreAccents`).
 - **D8** Fixture seeding becomes a build-time flag with dynamic imports.
 - **D9** (user, 2026-11-16) RU-5.3: yes, cap the default page width; the "Fit width" button still fills the pane. Cap value still to be chosen (proposed 900 to 1000 CSS px).
 
-### Open questions (answer before the dependent item)
-- **Q1 (RU-5.1)** Should the Files-view top search also filter the library, or
-  do we add a separate table filter? Recommended: separate filter.
-- **Q2 (RU-5.3)** Should the default open width be capped at a comfortable
-  width (proposed about 900 to 1000 CSS px) while the "Fit width" button still
-  fills the pane? Needs a zoom-mode concept. Confirm and pick the cap.
-- **Q3 (RU-2.1)** Fold diacritics in find (so the query "cafe" matches "café")? Default
-  no.
-- **Q4 (RU-3.1)** Proposed behaviour: reload reopens the last paper unless the
-  user deliberately left via `back-to-library` (then the Library shows).
-  Confirm this is wanted, or whether reload should always show the Library.
+- **D10** (user) Reload auto-resumes the last paper (position and zoom),
+  unless the user left via the Library; togglable via `reader.restoreLastSession`.
+- **D11** (user) The user's "menu" means the Library (Files view).
+- **D12** (user) "Open together" stays; it is for editing a link between
+  nodes. Swapping a pane's paper is rare and lives only in the right-click menu
+  as "Swap this paper..." (RU-3.6); no persistent control.
+- **D13** (user, "go with recommendations") Paper search: filter first
+  (RU-5.1b), global search including papers after (RU-5.1c), both on a shared
+  pure `searchSources` (RU-5.1a).
+- **D14** Default page-width cap 960 CSS px (recommendation accepted).
+- **D15** (recommendation accepted) Reader navigation: working Files tab,
+  labelled back control, and a title-click paper switcher (RU-3.4).
 
-- **Q5 (RU-3.4)** Navigation between papers and the Library: see the options
-  recorded in the conversation of 2026-11-16 (title-click switcher; labelled
-  breadcrumb; make the Files tab work). Pending the user's choice and a
-  decision on whether multi-paper "Open together" stays.
+### Open questions (answer before the dependent item)
+- **Q6 (RU-3.5)** The user said the settings need a revamp. RU-3.5 only adds
+  a store and a Settings dialog with General and Advanced sections. What
+  should the full revamp cover (move Sync/Backup/Restore/Mobile into the
+  dialog? a Sync status page? theme and motion options?). Needs a design pass;
+  do not expand RU-3.5 to include it.
+- **Q7 (RU-3.4)** In single-paper mode should "recent papers" also show
+  papers that were open in earlier sessions even if deleted from the library?
+  Proposed: no, only existing sources.
 
 ### Deviation log
 (Empty. Append `date, item, what changed, why` here when reality differs from

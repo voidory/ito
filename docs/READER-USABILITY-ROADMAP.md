@@ -183,3 +183,11 @@ shared button/menu styling; it can start earlier if needed.
 About 9-12 working days of focused work in total. The estimate is the main
 uncertainty: Phase 2 (find) depends on whether page text is already cached,
 and Phase 3's seed removal depends on how many e2e specs rely on the fixtures.
+
+## Update 2026-11-16
+
+Scope grew after the audit review; see the implementation plan for details:
+Phase 3 now also holds navigation (RU-3.4), a settings store and dialog
+(RU-3.5) and the multi-paper swap change (RU-3.6); paper search (RU-5.1a) is
+built early because RU-3.4 and RU-3.6 depend on it; find folds accents by
+default with an Advanced setting.
